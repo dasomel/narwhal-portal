@@ -33,6 +33,12 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# vault secrets (OpenBao agent injector)
+/vault/
+
+# superpowers brainstorm mockups
+/.superpowers/
+
 # vercel
 .vercel
 
