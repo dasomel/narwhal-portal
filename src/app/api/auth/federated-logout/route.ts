@@ -9,7 +9,13 @@ export async function GET() {
   const session = await auth()
   const issuer = process.env.KEYCLOAK_ISSUER
   const authUrl = process.env.AUTH_URL ?? ""
-  const postLogoutRedirect = `${authUrl}/login`
+  // Single Logout chain: after Keycloak ends the SSO session it redirects to the
+  // first gateway app's /apisix/logout, which clears that app's gateway session and
+  // chains to the next (configured per-route post_logout_redirect_uri), finally
+  // landing back on the portal /login. Falls back to /login if not configured.
+  const sloChainStart =
+    process.env.SLO_CHAIN_START ?? "https://gitea.local.narwhal.io/apisix/logout"
+  const postLogoutRedirect = sloChainStart || `${authUrl}/login`
 
   let target = postLogoutRedirect
   if (issuer) {
