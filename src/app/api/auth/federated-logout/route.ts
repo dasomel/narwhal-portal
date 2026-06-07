@@ -14,8 +14,13 @@ export async function GET() {
   let target = postLogoutRedirect
   if (issuer) {
     const url = new URL(`${issuer}/protocol/openid-connect/logout`)
-    if (session?.idToken) url.searchParams.set("id_token_hint", session.idToken)
     url.searchParams.set("post_logout_redirect_uri", postLogoutRedirect)
+    // Keycloak requires id_token_hint OR client_id to validate post_logout_redirect_uri.
+    // Sessions created before id_token was persisted won't have it — client_id keeps
+    // logout working as a fallback.
+    const clientId = process.env.KEYCLOAK_CLIENT_ID
+    if (clientId) url.searchParams.set("client_id", clientId)
+    if (session?.idToken) url.searchParams.set("id_token_hint", session.idToken)
     target = url.toString()
   }
 
