@@ -20,16 +20,18 @@ export async function GET() {
   }
 
   const res = NextResponse.redirect(target)
-  // Expire every NextAuth cookie variant (secure/non-secure + csrf + callback).
-  for (const name of [
-    "authjs.session-token",
-    "__Secure-authjs.session-token",
-    "authjs.csrf-token",
-    "__Host-authjs.csrf-token",
-    "authjs.callback-url",
-    "__Secure-authjs.callback-url",
-  ]) {
-    res.cookies.set(name, "", { path: "/", expires: new Date(0) })
+  const isHttps = (authUrl || "").startsWith("https")
+  // Expire every NextAuth cookie variant. __Secure-/__Host- prefixed cookies are
+  // only cleared by the browser if the clearing Set-Cookie also carries Secure.
+  const expire = (name: string, secure: boolean) =>
+    res.cookies.set(name, "", { path: "/", expires: new Date(0), secure, httpOnly: true, sameSite: "lax" })
+  expire("authjs.session-token", false)
+  expire("authjs.callback-url", false)
+  expire("authjs.csrf-token", false)
+  if (isHttps) {
+    expire("__Secure-authjs.session-token", true)
+    expire("__Secure-authjs.callback-url", true)
+    res.cookies.set("__Host-authjs.csrf-token", "", { path: "/", expires: new Date(0), secure: true, httpOnly: true, sameSite: "lax" })
   }
   return res
 }
