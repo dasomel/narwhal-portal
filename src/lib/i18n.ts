@@ -16,7 +16,7 @@ const ko = {
   "login.welcome": "Internal Developer Platform에 오신 것을 환영합니다",
   "login.mockMode": "로컬 개발 모드 — 역할을 선택해 로그인",
   "login.loginAs": "{label}으로 로그인",
-  "login.authentik": "Keycloak으로 로그인",
+  "login.keycloak": "Keycloak으로 로그인",
 
   // dashboard
   "dashboard.title": "대시보드",
@@ -224,7 +224,7 @@ const ko = {
   "setup.step3.macos": "위 버튼으로 다운로드 후:\nmv ~/Downloads/kubeconfig-*.yaml ~/.kube/config",
   "setup.step3.linux": "위 버튼으로 다운로드 후:\nmkdir -p ~/.kube\nmv ~/Downloads/kubeconfig-*.yaml ~/.kube/config",
   "setup.step4": "접속 테스트",
-  "setup.step4.cmd": "kubectl get nodes\n# 브라우저가 열리면 Authentik으로 로그인",
+  "setup.step4.cmd": "kubectl get nodes\n# 브라우저가 열리면 Keycloak으로 로그인",
 
   // architecture nav
   "nav.architecture": "아키텍처",
@@ -270,6 +270,10 @@ const ko = {
   "events.description": "설명",
   "events.viewInCatalog": "카탈로그에서 보기",
   "events.checkAlertmanager": "Alertmanager에서 확인하세요",
+  "events.relative.justNow": "방금 전",
+  "events.relative.minutesAgo": "{n}분 전",
+  "events.relative.hoursAgo": "{n}시간 전",
+  "events.relative.daysAgo": "{n}일 전",
 
   // search
   "search.label": "검색",
@@ -749,7 +753,7 @@ const en: Record<keyof typeof ko, string> = {
   "login.welcome": "Welcome to Internal Developer Platform",
   "login.mockMode": "Local dev mode — select a role to sign in",
   "login.loginAs": "Login as {label}",
-  "login.authentik": "Login with Keycloak",
+  "login.keycloak": "Login with Keycloak",
 
   // dashboard
   "dashboard.title": "Dashboard",
@@ -957,7 +961,7 @@ const en: Record<keyof typeof ko, string> = {
   "setup.step3.macos": "Download via button above, then:\nmv ~/Downloads/kubeconfig-*.yaml ~/.kube/config",
   "setup.step3.linux": "Download via button above, then:\nmkdir -p ~/.kube\nmv ~/Downloads/kubeconfig-*.yaml ~/.kube/config",
   "setup.step4": "Test connection",
-  "setup.step4.cmd": "kubectl get nodes\n# Browser opens — log in with Authentik",
+  "setup.step4.cmd": "kubectl get nodes\n# Browser opens — log in with Keycloak",
 
   // architecture nav
   "nav.architecture": "Architecture",
@@ -1003,6 +1007,10 @@ const en: Record<keyof typeof ko, string> = {
   "events.description": "Description",
   "events.viewInCatalog": "View in Catalog",
   "events.checkAlertmanager": "Check in Alertmanager",
+  "events.relative.justNow": "just now",
+  "events.relative.minutesAgo": "{n}m ago",
+  "events.relative.hoursAgo": "{n}h ago",
+  "events.relative.daysAgo": "{n}d ago",
 
   // search
   "search.label": "Search",
