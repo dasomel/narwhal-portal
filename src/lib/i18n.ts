@@ -17,6 +17,7 @@ const ko = {
   "login.mockMode": "로컬 개발 모드 — 역할을 선택해 로그인",
   "login.loginAs": "{label}으로 로그인",
   "login.keycloak": "Keycloak으로 로그인",
+  "login.redirecting": "로그인 페이지로 이동 중…",
 
   // dashboard
   "dashboard.title": "대시보드",
@@ -754,6 +755,7 @@ const en: Record<keyof typeof ko, string> = {
   "login.mockMode": "Local dev mode — select a role to sign in",
   "login.loginAs": "Login as {label}",
   "login.keycloak": "Login with Keycloak",
+  "login.redirecting": "Redirecting to sign-in…",
 
   // dashboard
   "dashboard.title": "Dashboard",
