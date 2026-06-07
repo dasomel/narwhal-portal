@@ -4,12 +4,57 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@theme {
+  /* Narwhal semantic tokens (themed — light default, .dark overrides below) */
+  --color-narwhal-accent: var(--narwhal-accent);
+  --color-narwhal-accent-soft: var(--narwhal-accent-soft);
+  --color-narwhal-wave: var(--narwhal-wave);
+  --color-narwhal-body: var(--narwhal-body);
+  --color-narwhal-belly: var(--narwhal-belly);
+  --color-narwhal-detail: var(--narwhal-detail);
+  --color-narwhal-horn: var(--narwhal-horn);
+  --color-narwhal-success: var(--narwhal-success);
+  --color-narwhal-warning: var(--narwhal-warning);
+  --color-narwhal-danger: var(--narwhal-danger);
+  --color-narwhal-text-mono: var(--narwhal-text-mono);
+
+  /* Back-compat aliases so pre-existing className="bg-surface" etc still compile while files are migrated. Remove after §12 migration completes. */
+  --color-surface: var(--card);
+  --color-surface-raised: var(--narwhal-hero-bg-solid);
+  --color-border-narwhal: var(--border);
+  --color-accent-narwhal: var(--narwhal-accent);
+  --color-accent-bright: var(--narwhal-accent);
+  --color-success: var(--narwhal-success);
+  --color-warning: var(--narwhal-warning);
+  --color-danger: var(--narwhal-danger);
+  --color-text-primary: var(--foreground);
+  --color-text-secondary: var(--muted-foreground);
+  --color-text-muted: var(--muted-foreground);
+
+  /* Narwhal animation keyframes */
+  --animate-narwhal-breath: narwhal-breath 3s ease-in-out infinite;
+  --animate-bubble: bubble-float 2s ease-in-out infinite;
+}
+
+@keyframes narwhal-breath {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+
+@keyframes bubble-float {
+  0%, 100% { opacity: 0.6; transform: translateY(0); }
+  50% { opacity: 0.2; transform: translateY(-4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .narwhal-idle { animation: none !important; }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: var(--font-pretendard), system-ui, sans-serif;
+  --font-heading: var(--font-pretendard), system-ui, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,6 +94,22 @@
 }
 
 :root {
+  /* Narwhal semantic tokens — LIGHT theme (default) */
+  --narwhal-accent: #0891b2;
+  --narwhal-accent-soft: rgba(8, 145, 178, 0.1);
+  --narwhal-wave: #06b6d4;
+  --narwhal-body: #0891b2;
+  --narwhal-belly: #67e8f9;
+  --narwhal-detail: #0e7490;
+  --narwhal-horn: #64748b;
+  --narwhal-success: #16a34a;
+  --narwhal-warning: #ca8a04;
+  --narwhal-danger: #dc2626;
+  --narwhal-text-mono: #475569;
+  --narwhal-hero-bg: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  --narwhal-hero-bg-solid: #e0f2fe;
+  --narwhal-hero-border: rgba(6, 182, 212, 0.25);
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -84,6 +145,18 @@
 }
 
 .dark {
+  /* Narwhal semantic tokens — DARK overrides */
+  --narwhal-accent: #22d3ee;
+  --narwhal-accent-soft: rgba(34, 211, 238, 0.15);
+  --narwhal-horn: #f1f5f9;
+  --narwhal-success: #4ade80;
+  --narwhal-warning: #facc15;
+  --narwhal-danger: #f87171;
+  --narwhal-text-mono: #cbd5e1;
+  --narwhal-hero-bg: linear-gradient(135deg, #0f172a 0%, #0e2738 100%);
+  --narwhal-hero-bg-solid: #0e2738;
+  --narwhal-hero-border: rgba(6, 182, 212, 0.15);
+
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
