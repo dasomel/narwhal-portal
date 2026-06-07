@@ -158,6 +158,8 @@ const ko = {
   "kubeconfig.installPlugin": "# kubectl oidc-login 플러그인 설치",
   "kubeconfig.applyConfig": "# kubeconfig 적용",
   "kubeconfig.testConnection": "# 접속 테스트",
+  "kubeconfig.osUnix": "macOS / Linux",
+  "kubeconfig.osWindows": "Windows (PowerShell)",
 
   // common
   "common.loading": "확인하는 중...",
@@ -224,6 +226,7 @@ const ko = {
   "setup.step3": "kubeconfig 다운로드",
   "setup.step3.macos": "위 버튼으로 다운로드 후:\nmv ~/Downloads/kubeconfig-*.yaml ~/.kube/config",
   "setup.step3.linux": "위 버튼으로 다운로드 후:\nmkdir -p ~/.kube\nmv ~/Downloads/kubeconfig-*.yaml ~/.kube/config",
+  "setup.step3.windows": "위 버튼으로 다운로드 후 (PowerShell):\nmkdir $HOME\\.kube -Force\nMove-Item $HOME\\Downloads\\kubeconfig-*.yaml $HOME\\.kube\\config",
   "setup.step4": "접속 테스트",
   "setup.step4.cmd": "kubectl get nodes\n# 브라우저가 열리면 Keycloak으로 로그인",
 
@@ -897,6 +900,8 @@ const en: Record<keyof typeof ko, string> = {
   "kubeconfig.installPlugin": "# Install kubectl oidc-login plugin",
   "kubeconfig.applyConfig": "# Apply kubeconfig",
   "kubeconfig.testConnection": "# Test connection",
+  "kubeconfig.osUnix": "macOS / Linux",
+  "kubeconfig.osWindows": "Windows (PowerShell)",
 
   // common
   "common.loading": "Loading...",
@@ -963,6 +968,7 @@ const en: Record<keyof typeof ko, string> = {
   "setup.step3": "Download kubeconfig",
   "setup.step3.macos": "Download via button above, then:\nmv ~/Downloads/kubeconfig-*.yaml ~/.kube/config",
   "setup.step3.linux": "Download via button above, then:\nmkdir -p ~/.kube\nmv ~/Downloads/kubeconfig-*.yaml ~/.kube/config",
+  "setup.step3.windows": "Download via button above, then (PowerShell):\nmkdir $HOME\\.kube -Force\nMove-Item $HOME\\Downloads\\kubeconfig-*.yaml $HOME\\.kube\\config",
   "setup.step4": "Test connection",
   "setup.step4.cmd": "kubectl get nodes\n# Browser opens — log in with Keycloak",
 
