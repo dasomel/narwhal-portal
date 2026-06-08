@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@10.27.0",
   "scripts": {
-    "dev": "NODE_EXTRA_CA_CERTS=./certs/narwhal-ca.crt next dev",
+    "dev": "next dev",
     "dev:skaffold": "skaffold dev",
     "debug:skaffold": "skaffold dev --profile=debug",
     "deploy:skaffold": "skaffold run",
