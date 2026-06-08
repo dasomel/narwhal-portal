@@ -1,8 +1,10 @@
 "use client"
 
+import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ClipboardCheck, ChevronsDownUp, ChevronsUpDown } from "lucide-react"
+import { ClipboardCheck, ChevronDown, CornerDownRight } from "lucide-react"
+import { AuditItemDetail } from "./audit-item-detail"
 import { t as translate } from "@/lib/i18n"
 import type { TranslationKey, Locale } from "@/lib/i18n"
 import type {
@@ -40,6 +42,26 @@ interface SystemStatusInput {
 interface Props {
   systemStatus: SystemStatusInput
   locale: Locale
+  nodeName?: string
+  userRole?: string
+}
+
+const ACTION_ITEM_LABELS: Record<string, { ko: string; en: string }> = {
+  "kernel-params":      { ko: "커널 파라미터",       en: "Kernel Parameters" },
+  "kernel-modules":     { ko: "커널 모듈",           en: "Kernel Modules" },
+  "resource-limits":    { ko: "리소스 제한",          en: "Resource Limits" },
+  "required-packages":  { ko: "필수 패키지",          en: "Required Packages" },
+  "disk-tuning":        { ko: "디스크 튜닝",          en: "Disk Tuning" },
+  "lvm-auto-extend":    { ko: "LVM 자동 확장",        en: "LVM Auto-Extend" },
+  "nic-tuning":         { ko: "NIC 튜닝",             en: "NIC Tuning" },
+  "runtime-status":     { ko: "런타임 상태",          en: "Runtime Status" },
+  "cgroup":             { ko: "cgroup",               en: "cgroup" },
+  "swap":               { ko: "스왑",                 en: "Swap" },
+  "security":           { ko: "패키지 업데이트",      en: "Package Updates" },
+  "kubelet-config":     { ko: "Kubelet 설정",         en: "Kubelet Config" },
+  "kubeproxy-config":   { ko: "kube-proxy 설정",     en: "kube-proxy Config" },
+  "containerd-config":  { ko: "containerd 설정",     en: "containerd Config" },
+  "cluster-version":    { ko: "클러스터 버전",        en: "Cluster Version" },
 }
 
 /** Returns the set of accordion item IDs that have at least one action-needed item. */
@@ -193,30 +215,34 @@ function computeCounts(s: SystemStatusInput): { ok: number; action: number; tota
   return { ok, action, total: ok + action }
 }
 
-export function SystemCheckSummary({ systemStatus, locale }: Props) {
+export function SystemCheckSummary({ systemStatus, locale, nodeName, userRole }: Props) {
   const t = (key: TranslationKey) => translate(locale, key)
   const { ok, action, total } = computeCounts(systemStatus)
   const isHealthy = action === 0
-  const { filterActive, activateFilter, resetFilter } = useAuditOpen()
+  const { toggleItem } = useAuditOpen()
 
-  function handleActionClick() {
-    if (action === 0) return
-    if (filterActive) {
-      // Second click: toggle off — restore defaults
-      resetFilter()
-    } else {
-      // First click: show ONLY action-needed items, close the rest
-      const ids = computeActionItems(systemStatus)
-      activateFilter(ids)
-      // Scroll to the first action item after state update settles
-      requestAnimationFrame(() => {
-        const firstId = ids.values().next().value
-        if (firstId) {
-          const el = document.getElementById(`audit-item-${firstId}`)
-          el?.scrollIntoView({ behavior: "smooth", block: "start" })
-        }
-      })
-    }
+  // Inline expansion is LOCAL to the summary card — it does NOT touch the
+  // accordion below (that is what the jump-to icon is for).
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  const actionIds = computeActionItems(systemStatus)
+  const actionIdList = Array.from(actionIds)
+
+  function toggleExpand(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Jump-to: open the matching accordion item below and scroll to it.
+  function handleJump(id: string) {
+    toggleItem(id, true)
+    requestAnimationFrame(() => {
+      document.getElementById(`audit-item-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+    })
   }
 
   return (
@@ -245,34 +271,14 @@ export function SystemCheckSummary({ systemStatus, locale }: Props) {
             <span className="text-3xl font-black text-narwhal-success leading-none">{ok}</span>
           </div>
 
-          {/* Action Needed — toggleable button when action > 0 */}
+          {/* Action Needed — plain red count */}
           <div className="flex flex-col gap-1.5">
             <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none">
               {t("nodes.audit.summary.action")}
             </span>
-            {action > 0 ? (
-              <button
-                type="button"
-                onClick={handleActionClick}
-                aria-pressed={filterActive}
-                aria-label={t("nodes.audit.summary.action")}
-                className={`group inline-flex items-center gap-2 w-fit rounded-lg px-3 py-1.5 -ml-3 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2 ${
-                  filterActive
-                    ? "bg-rose-500/10 border border-rose-500/40 text-rose-500"
-                    : "border border-transparent hover:border-rose-500/30 hover:bg-rose-500/5 text-rose-500"
-                }`}
-              >
-                <span className="text-3xl font-black leading-none">{action}</span>
-                {filterActive
-                  ? <ChevronsDownUp className="h-4 w-4 shrink-0 opacity-70" />
-                  : <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50 group-hover:opacity-80 transition-opacity" />
-                }
-              </button>
-            ) : (
-              <span className="text-3xl font-black leading-none text-narwhal-success">
-                {action}
-              </span>
-            )}
+            <span className={`text-3xl font-black leading-none ${action > 0 ? "text-rose-500" : "text-narwhal-success"}`}>
+              {action}
+            </span>
           </div>
 
           {/* Overall Health */}
@@ -299,6 +305,63 @@ export function SystemCheckSummary({ systemStatus, locale }: Props) {
             </div>
           </div>
         </div>
+
+        {actionIdList.length > 0 && (
+          <div className="mt-6 flex flex-col gap-2">
+            <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+              {locale === "ko" ? "조치 필요 항목" : "Action Items"}
+            </span>
+            <div className="flex flex-col gap-1">
+              {actionIdList.map(id => {
+                const label = ACTION_ITEM_LABELS[id]
+                const displayLabel = label ? (locale === "ko" ? label.ko : label.en) : id
+                const isOpen = expanded.has(id)
+                return (
+                  <div
+                    key={id}
+                    className="rounded-lg border border-rose-500/20 overflow-hidden"
+                  >
+                    <div className="flex items-center">
+                      {/* Label → inline-expand the same detail as the accordion below */}
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(id)}
+                        aria-expanded={isOpen}
+                        className="flex-1 text-left flex items-center gap-2 px-3 py-2 hover:bg-rose-500/5 text-sm text-foreground transition-colors"
+                      >
+                        <ChevronDown
+                          className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                        />
+                        <span>{displayLabel}</span>
+                      </button>
+                      {/* Jump-to → open + scroll to the matching accordion item below */}
+                      <button
+                        type="button"
+                        onClick={() => handleJump(id)}
+                        title={t("nodes.audit.summary.jumpTo")}
+                        aria-label={t("nodes.audit.summary.jumpTo")}
+                        className="shrink-0 px-3 py-2 self-stretch flex items-center border-l border-rose-500/20 text-muted-foreground hover:text-foreground hover:bg-rose-500/5 transition-colors"
+                      >
+                        <CornerDownRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {isOpen && (
+                      <div className="border-t border-rose-500/20 bg-muted/30">
+                        <AuditItemDetail
+                          id={id}
+                          systemStatus={systemStatus}
+                          locale={locale}
+                          nodeName={nodeName}
+                          userRole={userRole}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

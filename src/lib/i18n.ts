@@ -544,6 +544,7 @@ const ko = {
   "nodes.audit.summary.healthy": "정상",
   "nodes.audit.summary.needsAction": "조치 필요",
   "nodes.audit.summary.resetFilter": "필터 초기화",
+  "nodes.audit.summary.jumpTo": "아래 항목으로 이동",
 
   // nodes - config hint
   "nodes.audit.configHint": "설정 위치",
@@ -1286,6 +1287,7 @@ const en: Record<keyof typeof ko, string> = {
   "nodes.audit.summary.healthy": "Healthy",
   "nodes.audit.summary.needsAction": "Needs Action",
   "nodes.audit.summary.resetFilter": "Reset Filter",
+  "nodes.audit.summary.jumpTo": "Jump to item",
 
   // nodes - config hint
   "nodes.audit.configHint": "Config Hint",

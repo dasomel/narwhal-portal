@@ -57,7 +57,7 @@ export function AuditTabClient({
   return (
     <AuditOpenProvider>
       <div className="space-y-4">
-        <SystemCheckSummary systemStatus={systemStatus} locale={locale} />
+        <SystemCheckSummary systemStatus={systemStatus} locale={locale} nodeName={nodeName} userRole={userRole} />
         <div className="flex items-center justify-between px-1">
           <h2 className="text-[11px] font-bold flex items-center gap-2 text-foreground uppercase tracking-widest font-mono">
             <ShieldAlert className="h-4 w-4 text-rose-500" /> {auditTitleLabel}
@@ -70,19 +70,14 @@ export function AuditTabClient({
           locale={locale}
           nodeName={nodeName}
           userRole={userRole}
-          kernelParams={systemStatus.kernelParams}
-          kernelModules={systemStatus.kernelModules}
-          resourceLimits={systemStatus.resourceLimits}
-          requiredPackages={systemStatus.requiredPackages}
-          diskTuning={systemStatus.diskTuning}
-          lvmAutoExtend={systemStatus.lvmAutoExtend}
-          nicTuning={systemStatus.nicTuning}
-          runtimeStatus={systemStatus.runtimeStatus}
-          cgroup={systemStatus.cgroup}
-          swap={systemStatus.swap}
-          packageUpdates={systemStatus.packageUpdates}
+          systemStatus={systemStatus}
         />
-        <K8sTuningSection locale={locale} k8sTuning={systemStatus.k8sTuning} />
+        <K8sTuningSection
+          locale={locale}
+          systemStatus={systemStatus}
+          nodeName={nodeName}
+          userRole={userRole}
+        />
       </div>
     </AuditOpenProvider>
   )
