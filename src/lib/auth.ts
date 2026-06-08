@@ -31,6 +31,21 @@ function sanitizeGroups(input: unknown): UserRole[] {
   return out
 }
 
+// Custom team groups for my-apps/events VISIBILITY scoping — kept separate from RBAC roles.
+// Any non-role group claim matching a safe identifier is preserved; role-filter.json decides
+// which actually map to a scope (unmapped team groups are ignored downstream).
+const TEAM_GROUP_RE = /^[a-zA-Z0-9_-]{1,64}$/
+function sanitizeTeamGroups(input: unknown): string[] {
+  if (!Array.isArray(input)) return []
+  const out: string[] = []
+  for (const g of input) {
+    if (typeof g === "string" && TEAM_GROUP_RE.test(g) && !ALLOWED_GROUPS.has(g as UserRole)) {
+      out.push(g)
+    }
+  }
+  return out
+}
+
 function getRoleFromGroups(groups: UserRole[]): UserRole {
   if (groups.includes("cluster-admin")) return "cluster-admin"
   if (groups.includes("developer")) return "developer"
@@ -141,9 +156,13 @@ export const config: NextAuthConfig = {
 
       if (p?.groups !== undefined) {
         token.groups = sanitizeGroups(p.groups)
+        token.teams = sanitizeTeamGroups(p.groups)
       }
       if (u?.groups !== undefined) {
         token.groups = sanitizeGroups(u.groups)
+      }
+      if ((u as Record<string, unknown> | undefined)?.teams !== undefined) {
+        token.teams = sanitizeTeamGroups((u as Record<string, unknown>).teams)
       }
       // C-5: ensure token.groups is always a sanitized list; default to guest.
       if (!Array.isArray(token.groups) || token.groups.length === 0) {
@@ -155,6 +174,7 @@ export const config: NextAuthConfig = {
       const groups = sanitizeGroups(token.groups)
       const safeGroups: UserRole[] = groups.length > 0 ? groups : ["guest"]
       session.groups = safeGroups
+      session.teams = Array.isArray(token.teams) ? token.teams : []
       session.user.role = getRoleFromGroups(safeGroups)
       session.idToken = token.idToken
       return session

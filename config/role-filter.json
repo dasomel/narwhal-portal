@@ -1,0 +1,11 @@
+{
+  "roleDefaults": {
+    "cluster-admin": { "namespaces": ["*"], "argocdProjects": ["*"] },
+    "developer":     { "namespaces": ["*"], "argocdProjects": [] },
+    "viewer":        { "namespaces": ["*"], "argocdProjects": [] }
+  },
+  "teamMappings": [
+    { "group": "platform-team", "namespaces": ["platform-*", "monitoring", "storage"], "argocdProjects": ["platform"] },
+    { "group": "frontend-team", "namespaces": ["frontend-*"], "argocdProjects": ["apps"] }
+  ]
+}
