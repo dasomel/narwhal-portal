@@ -18,6 +18,7 @@
 | harbor cross-ns 라우팅 (ExternalName→ApisixUpstream) | narwhal **로컬 커밋만** (`123d1b8`) | 동 파일, gitea push 필요 | gitea 미반영 → ArgoCD 옛 소스 유지 |
 | apisix `client_max_body_size 0` (nginx_config) | 런타임 configmap patch + narwhal 로컬 커밋 (`131e723`) | `narwhal/gitops/apps/apisix.yaml` | 동일 |
 | `apisix-routes` ArgoCD App **selfHeal=off** | 런타임 patch | 영구화 완료 후 **on 복구** | 자동 동기화 중단 상태 |
+| `narwhal-portal` ArgoCD App **selfHeal=off** | 런타임 patch | 라이브 종료 후 **on 복구** + deploy 이미지 prod `:latest`로 환원 | selfHeal이 켜져 있으면 skaffold dev 이미지를 prod `:latest`로 즉시 원복 → 라이브 불가 |
 | portal 코드/빌드 변경 | portal repo **로컬 커밋** (`de566f7`, `29acc98`, `f70afe6`) | portal 배포 파이프라인 | 미배포 시 운영 미반영 |
 
 > ⚠️ **다른 세션이 동시에 harbor/포털/게이트웨이를 정리 중**이었다. gitea 반영 전 반드시
