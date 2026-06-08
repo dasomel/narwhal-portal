@@ -89,7 +89,7 @@ export function NodeTuningSection({ locale, nodeName, userRole, systemStatus }: 
                   </span>
                 </AccordionTrigger>
                 <AccordionContent className="border-t border-border bg-card">
-                  <AuditItemDetail id={id} systemStatus={systemStatus} locale={locale} nodeName={nodeName} userRole={userRole} />
+                  <AuditItemDetail id={id} systemStatus={systemStatus} locale={locale} nodeName={nodeName} userRole={userRole} showAll={showAll} />
                 </AccordionContent>
               </AccordionItem>
             ))}

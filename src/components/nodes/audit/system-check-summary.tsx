@@ -353,6 +353,7 @@ export function SystemCheckSummary({ systemStatus, locale, nodeName, userRole }:
                           locale={locale}
                           nodeName={nodeName}
                           userRole={userRole}
+                          showAll={false}
                         />
                       </div>
                     )}

@@ -90,11 +90,16 @@ export function formatParamValue(param: string, value: string) {
   )
 }
 
-export function ConfigTable({ rows, locale }: {
+export function ConfigTable({ rows, locale, showAll = true }: {
   rows: Array<{ key: string; currentValue: string; recommendedValue: string; description: MaybeLocalized; impact: MaybeLocalized; configHint?: ConfigHint }>
   locale: Locale
+  showAll?: boolean
 }) {
   const t = (key: TranslationKey) => translate(locale, key)
+  const visibleRows = showAll ? rows : rows.filter(r => r.currentValue !== r.recommendedValue)
+  if (visibleRows.length === 0) {
+    return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+  }
   return (
     <div className={TABLE_WRAP}>
       <table className="w-full text-left text-xs bg-card">
@@ -108,7 +113,7 @@ export function ConfigTable({ rows, locale }: {
           </tr>
         </thead>
         <tbody className="divide-y divide-border/50">
-          {rows.map((r, idx) => (
+          {visibleRows.map((r, idx) => (
             <tr key={idx} className={ROW}>
               <td className={TD}>
                 <p className="font-black font-mono text-foreground text-[12px]">{r.key}</p>
@@ -141,14 +146,19 @@ export interface AuditItemDetailProps {
   locale: Locale
   nodeName?: string
   userRole?: string
+  showAll?: boolean
 }
 
-function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: AuditItemDetailProps) {
+function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showAll = true }: AuditItemDetailProps) {
   const t = (key: TranslationKey) => translate(locale, key)
   const applyCommon = { nodeName, userRole }
 
   switch (id) {
-    case "kernel-params":
+    case "kernel-params": {
+      const visibleParams = showAll ? s.kernelParams : s.kernelParams.filter(p => p.currentValue !== p.recommendedValue)
+      if (visibleParams.length === 0) {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+      }
       return (
         <div className={TABLE_WRAP}>
           <table className="w-full text-left text-xs bg-card">
@@ -161,7 +171,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {s.kernelParams.map((item, idx) => (
+              {visibleParams.map((item, idx) => (
                 <tr key={idx} className={ROW}>
                   <td className={TD}>
                     <p className="font-black text-foreground font-mono text-[12px]">{item.param}</p>
@@ -192,8 +202,13 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
           </table>
         </div>
       )
+    }
 
-    case "kernel-modules":
+    case "kernel-modules": {
+      const visibleModules = showAll ? s.kernelModules : s.kernelModules.filter(m => m.required && !m.loaded)
+      if (visibleModules.length === 0) {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+      }
       return (
         <div className={TABLE_WRAP}>
           <table className="w-full text-left text-xs bg-card">
@@ -206,7 +221,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {s.kernelModules.map((m, idx) => (
+              {visibleModules.map((m, idx) => (
                 <tr key={idx} className={ROW}>
                   <td className={TD}>
                     <p className="font-black font-mono text-foreground text-[12px]">{m.name}</p>
@@ -232,8 +247,13 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
           </table>
         </div>
       )
+    }
 
-    case "resource-limits":
+    case "resource-limits": {
+      const visibleLimits = showAll ? s.resourceLimits : s.resourceLimits.filter(r => r.currentValue !== r.recommendedValue)
+      if (visibleLimits.length === 0) {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+      }
       return (
         <div className={TABLE_WRAP}>
           <table className="w-full text-left text-xs bg-card">
@@ -247,7 +267,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {s.resourceLimits.map((r, idx) => (
+              {visibleLimits.map((r, idx) => (
                 <tr key={idx} className={ROW}>
                   <td className={TD}>
                     <p className="font-black font-mono text-foreground text-[12px]">{r.name}</p>
@@ -276,8 +296,13 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
           </table>
         </div>
       )
+    }
 
-    case "required-packages":
+    case "required-packages": {
+      const visiblePackages = showAll ? s.requiredPackages : s.requiredPackages.filter(p => !p.installed)
+      if (visiblePackages.length === 0) {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+      }
       return (
         <div className={TABLE_WRAP}>
           <table className="w-full text-left text-xs bg-card">
@@ -289,7 +314,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {s.requiredPackages.map((p, idx) => (
+              {visiblePackages.map((p, idx) => (
                 <tr key={idx} className={ROW}>
                   <td className={TD}>
                     <p className="font-black font-mono text-foreground text-[12px]">{p.name}</p>
@@ -314,11 +339,20 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
           </table>
         </div>
       )
+    }
 
-    case "disk-tuning":
+    case "disk-tuning": {
+      const visibleDisks = showAll ? s.diskTuning : s.diskTuning.filter(d =>
+        d.ioScheduler.current !== d.ioScheduler.recommended ||
+        d.readAheadKb.current !== d.readAheadKb.recommended ||
+        !d.noatimeConfigured
+      )
+      if (visibleDisks.length === 0) {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+      }
       return (
         <div className="space-y-4 p-6">
-          {s.diskTuning.map((d, idx) => (
+          {visibleDisks.map((d, idx) => (
             <div key={idx} className="rounded-xl border border-border bg-muted/50/20 p-5">
               <p className="font-black text-foreground font-mono text-sm">{d.device}</p>
               {(d as DiskTuningInfo & { description?: string }).description && (
@@ -377,8 +411,12 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
           ))}
         </div>
       )
+    }
 
-    case "lvm-auto-extend":
+    case "lvm-auto-extend": {
+      if (!showAll && s.lvmAutoExtend && s.lvmAutoExtend.enabled) {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+      }
       return (
         <div className="p-6">
           {s.lvmAutoExtend ? (
@@ -403,11 +441,19 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
           )}
         </div>
       )
+    }
 
-    case "nic-tuning":
+    case "nic-tuning": {
+      const visibleNics = showAll ? s.nicTuning : s.nicTuning.filter(n =>
+        n.ringBufferRx.current !== n.ringBufferRx.recommended ||
+        n.ringBufferTx.current !== n.ringBufferTx.recommended
+      )
+      if (visibleNics.length === 0) {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+      }
       return (
         <div className="space-y-4 p-6">
-          {s.nicTuning.map((nic, idx) => (
+          {visibleNics.map((nic, idx) => (
             <div key={idx} className="rounded-xl border border-border bg-muted/50/20 p-5">
               <p className="font-black text-foreground font-mono text-sm">{nic.interface}</p>
               {(nic as NicTuningInfo & { description?: string }).description && (
@@ -471,8 +517,13 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
           ))}
         </div>
       )
+    }
 
-    case "runtime-status":
+    case "runtime-status": {
+      const visibleRuntimes = showAll ? s.runtimeStatus : s.runtimeStatus.filter(r => !r.active)
+      if (visibleRuntimes.length === 0) {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+      }
       return (
         <div className={TABLE_WRAP}>
           <table className="w-full text-left text-xs bg-card">
@@ -484,7 +535,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {s.runtimeStatus.map((r, idx) => (
+              {visibleRuntimes.map((r, idx) => (
                 <tr key={idx} className={ROW}>
                   <td className={TD}>
                     <p className="font-black font-mono text-foreground text-[12px]">{r.name}</p>
@@ -505,8 +556,12 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
           </table>
         </div>
       )
+    }
 
-    case "cgroup":
+    case "cgroup": {
+      if (!showAll && s.cgroup.version === "v2") {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+      }
       return (
         <div className="p-6">
           <div className="rounded-xl border border-border bg-muted/50/20 p-5">
@@ -532,8 +587,12 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
           </div>
         </div>
       )
+    }
 
-    case "swap":
+    case "swap": {
+      if (!showAll && !s.swap.enabled) {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+      }
       return (
         <div className="p-6">
           <div className="rounded-xl border border-border bg-muted/50/20 p-5">
@@ -564,6 +623,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
           </div>
         </div>
       )
+    }
 
     case "security":
       return (
@@ -597,7 +657,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole }: Aud
   }
 }
 
-function K8sItemDetail({ id, systemStatus: s, locale }: AuditItemDetailProps) {
+function K8sItemDetail({ id, systemStatus: s, locale, showAll = true }: AuditItemDetailProps) {
   const t = (key: TranslationKey, params?: Record<string, string | number>) => translate(locale, key, params)
   const { clusterVersion, kubeletConfig, kubeProxyConfig, containerdConfig, cniPlugin, controlPlaneFlags } = s.k8sTuning
 
@@ -674,7 +734,7 @@ function K8sItemDetail({ id, systemStatus: s, locale }: AuditItemDetailProps) {
       )
 
     case "kubelet-config":
-      return <ConfigTable rows={kubeletConfig} locale={locale} />
+      return <ConfigTable rows={kubeletConfig} locale={locale} showAll={showAll} />
 
     case "kubeproxy-config":
       return cniPlugin.kubeProxyReplacement ? (
@@ -688,17 +748,21 @@ function K8sItemDetail({ id, systemStatus: s, locale }: AuditItemDetailProps) {
           </p>
         </div>
       ) : (
-        <ConfigTable rows={kubeProxyConfig} locale={locale} />
+        <ConfigTable rows={kubeProxyConfig} locale={locale} showAll={showAll} />
       )
 
     case "containerd-config":
-      return <ConfigTable rows={containerdConfig} locale={locale} />
+      return <ConfigTable rows={containerdConfig} locale={locale} showAll={showAll} />
 
     case "cp-flags": {
+      const visibleFlags = showAll ? controlPlaneFlags : controlPlaneFlags.filter(f => f.currentValue !== f.recommendedValue)
       const cpFlagsByComponent: Record<string, typeof controlPlaneFlags> = {}
-      for (const f of controlPlaneFlags) {
+      for (const f of visibleFlags) {
         if (!cpFlagsByComponent[f.component]) cpFlagsByComponent[f.component] = []
         cpFlagsByComponent[f.component].push(f)
+      }
+      if (visibleFlags.length === 0) {
+        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className="space-y-6 p-6">

@@ -51,7 +51,7 @@ export function K8sTuningSection({ locale, systemStatus, nodeName, userRole }: K
     return actionIds.has(id)
   }
 
-  const detailProps = { systemStatus, locale, nodeName, userRole }
+  const detailProps = { systemStatus, locale, nodeName, userRole, showAll }
 
   // Count how many filterable items are hidden (action only mode, none triggered)
   const filterableActionCount = K8S_ITEMS_FILTERABLE.filter(id => actionIds.has(id)).length
