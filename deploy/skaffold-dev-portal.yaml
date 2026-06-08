@@ -1,0 +1,270 @@
+---
+# ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: narwhal-portal
+  namespace: devtools
+  # OpenBao Agent Injector는 Pod 어노테이션으로만 동작 (SA 어노테이션 불필요)
+---
+# ClusterRole: 읽기 전용 (cluster-wide read).
+# Vuln 1 fix (2026-05-11):
+# - Removed `namespaces: create` (privilege escalation vector — portal must not create namespaces).
+# - Removed cluster-wide `batch/jobs` create/delete and `pods/log` get; those moved to a
+#   namespaced Role in `devtools` (see narwhal-portal-jobs Role below).
+# - Kept cluster-wide read for nodes, services, events, cert-manager, kyverno, policy reports,
+#   Trivy/aquasecurity reports — all read-only and required by the portal UI (security page,
+#   nodes view, certificates view).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: narwhal-portal
+rules:
+  - apiGroups: [""]
+    resources: [nodes, pods, persistentvolumeclaims, namespaces, services, events, configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [cert-manager.io]
+    resources: [certificates, clusterissuers]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [kyverno.io]
+    resources: [clusterpolicies, policies]
+    verbs: [get, list, watch]
+  - apiGroups: [wgpolicyk8s.io]
+    resources: [policyreports, clusterpolicyreports]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [get, list, watch]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterrolebindings, rolebindings, clusterroles, roles]
+    verbs: [get, list, watch]
+  # Trivy Operator CVE/Secret 보고서 (Cluster Security 페이지)
+  - apiGroups: [aquasecurity.github.io]
+    resources:
+      - vulnerabilityreports
+      - clustervulnerabilityreports
+      - exposedsecretreports
+      - configauditreports
+      - clusterconfigauditreports
+      - rbacassessmentreports
+      - clusterrbacassessmentreports
+      - infraassessmentreports
+      - clustercompliancereports
+    verbs: [get, list, watch]
+  # Node/Pod CPU·Memory usage for Architecture page (metrics-server / metrics.k8s.io)
+  - apiGroups: [metrics.k8s.io]
+    resources: [nodes, pods]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: narwhal-portal
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: narwhal-portal
+subjects:
+  - kind: ServiceAccount
+    name: narwhal-portal
+    namespace: devtools
+---
+# Namespaced Role: Job 생성·삭제 + Pod 로그 조회는 devtools 네임스페이스로만 한정.
+# Vuln 1 fix: 이전엔 cluster-wide ClusterRole이었어서 portal SA가 임의 namespace에
+# privileged Job을 띄우고 호스트 secret을 수집할 수 있었음. 이제 Kyverno 정책
+# (narwhal-portal-job-restrictions) + PSA baseline 라벨과 결합해 권한 상승을 차단.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: narwhal-portal-jobs
+  namespace: devtools
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: narwhal-portal-jobs
+  namespace: devtools
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: narwhal-portal-jobs
+subjects:
+  - kind: ServiceAccount
+    name: narwhal-portal
+    namespace: devtools
+---
+# Valkey (포털 전용 캐시)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: narwhal-portal-valkey
+  namespace: devtools
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: narwhal-portal-valkey
+  template:
+    metadata:
+      labels:
+        app: narwhal-portal-valkey
+        istio.io/dataplane-mode: "none"
+    spec:
+      containers:
+        - name: valkey
+          # docker.io: Valkey 공식 이미지, ghcr.io 대안 없음
+          image: docker.io/valkey/valkey:8-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          command: [valkey-server, --save, "", --appendonly, "no"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: narwhal-portal-valkey
+  namespace: devtools
+spec:
+  selector:
+    app: narwhal-portal-valkey
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+# Narwhal Portal Deployment
+# replicas: 0 by default — image is built/pushed externally via 15-narwhal-portal.sh.
+# 15 scales to 1 after `docker push harbor.local.narwhal.io/library/narwhal-portal:latest`.
+# ArgoCD ignoreDifferences (in gitops/apps/narwhal-portal.yaml) suppresses replicas drift.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: narwhal-portal
+  namespace: devtools
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: narwhal-portal
+  template:
+    metadata:
+      labels:
+        app: narwhal-portal
+        istio.io/dataplane-mode: "none"
+    spec:
+      serviceAccountName: narwhal-portal
+      tolerations:
+        - key: node.kubernetes.io/disk-pressure
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: narwhal-portal
+          image: harbor.local.narwhal.io/library/narwhal-portal:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: narwhal-portal-secrets
+          # D04: mount the cluster CA bundle so Node trusts in-cluster TLS
+          # (Keycloak / ArgoCD / K8s API / OpenBao) via NODE_EXTRA_CA_CERTS instead of
+          # NODE_TLS_REJECT_UNAUTHORIZED=0. NODE_EXTRA_CA_CERTS=/etc/ssl/narwhal/ca.crt is
+          # injected into narwhal-portal-secrets by 13-2-narwhal-portal-bindings.sh.
+          volumeMounts:
+            - name: narwhal-ca
+              mountPath: /etc/ssl/narwhal
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /api/auth/session
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        # narwhal-ca-cert (key ca.crt) is distributed to devtools by 08-6-tls-routes.sh.
+        - name: narwhal-ca
+          secret:
+            secretName: narwhal-ca-cert
+            items:
+              - key: ca.crt
+                path: ca.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: narwhal-portal
+  namespace: devtools
+spec:
+  selector:
+    app: narwhal-portal
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: narwhal-scorecard-rules
+  namespace: devtools
+data:
+  rules.yaml: |
+    version: 1
+    tiers:
+      gold: 80
+      silver: 60
+      bronze: 40
+    rules:
+      - id: argocd-synced
+        name: "ArgoCD Synced & Healthy"
+        weight: 35
+        check:
+          type: argocd-status
+          requireSynced: true
+          requireHealthy: true
+      - id: trusted-images
+        name: "Images from Harbor registry"
+        weight: 25
+        check:
+          type: image-source
+          allowedPrefixes: ["harbor.local.narwhal.io/"]
+      - id: has-pdb
+        name: "PodDisruptionBudget defined"
+        weight: 20
+        check:
+          type: k8s-resource
+          kind: PodDisruptionBudget
+          minCount: 1
+      - id: has-networkpolicy
+        name: "NetworkPolicy defined"
+        weight: 20
+        check:
+          type: k8s-resource
+          kind: NetworkPolicy
+          minCount: 1

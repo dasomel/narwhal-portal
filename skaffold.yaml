@@ -73,6 +73,12 @@ profiles:
   - name: dev
     activation:
       - command: dev
+    # Dev-only manifest: same as gitops/resources/narwhal-portal-k8s.yaml minus the
+    # security-system Role/RoleBinding (cross-ns objects the kubectl deployer can't
+    # apply under a single defaultNamespace; they already exist via ArgoCD).
+    manifests:
+      rawYaml:
+        - deploy/skaffold-dev-portal.yaml
     build:
       # Local Docker build on the Mac (ample memory) — in-cluster kaniko OOMs on the
       # small VM nodes when snapshotting node_modules. Pushes to Harbor; dev pod pulls.
