@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import {
@@ -16,6 +17,7 @@ import {
   TRIGGER_LABEL,
   type SystemStatusInput,
 } from "./audit-item-detail"
+import { computeActionItems } from "./system-check-summary"
 
 interface NodeTuningSectionProps {
   locale: Locale
@@ -42,6 +44,10 @@ const NODE_ITEMS: Array<{ id: string; icon: LucideIcon; color: string; hover: st
 export function NodeTuningSection({ locale, nodeName, userRole, systemStatus }: NodeTuningSectionProps) {
   const t = (key: TranslationKey) => translate(locale, key)
   const { openItems, toggleItem } = useAuditOpen()
+  const [showAll, setShowAll] = useState(false)
+
+  const actionIds = computeActionItems(systemStatus)
+  const visibleItems = showAll ? NODE_ITEMS : NODE_ITEMS.filter(it => actionIds.has(it.id))
 
   function itemProps(value: string) {
     return {
@@ -58,24 +64,37 @@ export function NodeTuningSection({ locale, nodeName, userRole, systemStatus }: 
         <CardTitle className="text-[11px] font-black flex items-center gap-2 text-foreground uppercase tracking-widest">
           <Server className="h-4 w-4 text-narwhal-accent" />
           {t("nodes.audit.nodeTuning")}
+          <button
+            type="button"
+            onClick={() => setShowAll(v => !v)}
+            className="ml-auto text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showAll ? t("nodes.audit.actionOnly") : t("nodes.audit.showAll")}
+          </button>
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0 pt-4 pb-4">
-        <Accordion className="w-full space-y-3 px-4">
-          {NODE_ITEMS.map(({ id, icon: Icon, color, hover, labelKey }) => (
-            <AccordionItem key={id} {...itemProps(id)} className={ITEM_CLS}>
-              <AccordionTrigger className={TRIGGER_CLS}>
-                <span className={`${TRIGGER_LABEL} ${hover} transition-colors`}>
-                  <Icon className={`h-4 w-4 ${color}`} />
-                  {t(labelKey)}
-                </span>
-              </AccordionTrigger>
-              <AccordionContent className="border-t border-border bg-card">
-                <AuditItemDetail id={id} systemStatus={systemStatus} locale={locale} nodeName={nodeName} userRole={userRole} />
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+        {visibleItems.length === 0 ? (
+          <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">
+            {t("nodes.audit.allPassed")}
+          </p>
+        ) : (
+          <Accordion className="w-full space-y-3 px-4">
+            {visibleItems.map(({ id, icon: Icon, color, hover, labelKey }) => (
+              <AccordionItem key={id} {...itemProps(id)} className={ITEM_CLS}>
+                <AccordionTrigger className={TRIGGER_CLS}>
+                  <span className={`${TRIGGER_LABEL} ${hover} transition-colors`}>
+                    <Icon className={`h-4 w-4 ${color}`} />
+                    {t(labelKey)}
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="border-t border-border bg-card">
+                  <AuditItemDetail id={id} systemStatus={systemStatus} locale={locale} nodeName={nodeName} userRole={userRole} />
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        )}
       </CardContent>
     </Card>
   )

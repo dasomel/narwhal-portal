@@ -545,6 +545,9 @@ const ko = {
   "nodes.audit.summary.needsAction": "조치 필요",
   "nodes.audit.summary.resetFilter": "필터 초기화",
   "nodes.audit.summary.jumpTo": "아래 항목으로 이동",
+  "nodes.audit.showAll": "전체 보기",
+  "nodes.audit.actionOnly": "조치 필요만",
+  "nodes.audit.allPassed": "모든 검사 통과",
 
   // nodes - config hint
   "nodes.audit.configHint": "설정 위치",
@@ -1288,6 +1291,9 @@ const en: Record<keyof typeof ko, string> = {
   "nodes.audit.summary.needsAction": "Needs Action",
   "nodes.audit.summary.resetFilter": "Reset Filter",
   "nodes.audit.summary.jumpTo": "Jump to item",
+  "nodes.audit.showAll": "Show all",
+  "nodes.audit.actionOnly": "Action needed only",
+  "nodes.audit.allPassed": "All checks passed",
 
   // nodes - config hint
   "nodes.audit.configHint": "Config Hint",

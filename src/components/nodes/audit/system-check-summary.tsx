@@ -65,7 +65,7 @@ const ACTION_ITEM_LABELS: Record<string, { ko: string; en: string }> = {
 }
 
 /** Returns the set of accordion item IDs that have at least one action-needed item. */
-function computeActionItems(s: SystemStatusInput): Set<string> {
+export function computeActionItems(s: SystemStatusInput): Set<string> {
   const actionIds = new Set<string>()
 
   // kernelParams — action when current !== recommended
