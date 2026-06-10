@@ -17,6 +17,8 @@ export interface ServiceGraphResponse {
   edges: Array<{
     source: string
     destination: string
+    // 엣지별 단위: l7=req/s, l4=bytes/s. 없으면 metricKind를 따름.
+    kind?: "l7" | "l4"
     requestRate: number
     errorRate: number
     p95LatencyMs?: number | null

@@ -223,22 +223,28 @@ function ReactFlowMap({
   })
 
   // 트래픽 양 → 엣지 굵기 (√ 스케일, 1.5px ~ 6px)
-  const maxRate = Math.max(...data.edges.map((e) => e.requestRate), 0.000001)
+  // L7(req/s)과 L4(bytes/s)는 단위 스케일이 달라 종류별로 정규화
+  const maxRateByKind = { l7: 0.000001, l4: 0.000001 }
+  for (const e of data.edges) {
+    const k = edgeKind(e, data.metricKind)
+    if (e.requestRate > maxRateByKind[k]) maxRateByKind[k] = e.requestRate
+  }
   const rfEdges = data.edges.map((e, i) => {
     const connected = isConnectedEdge(e.source, e.destination)
+    const k = edgeKind(e, data.metricKind)
     return {
       id: `e-${i}`,
       source: e.source,
       target: e.destination,
       style: {
         stroke: edgeColor(e.errorRate),
-        strokeWidth: 1.5 + 4.5 * Math.sqrt(e.requestRate / maxRate),
+        strokeWidth: 1.5 + 4.5 * Math.sqrt(e.requestRate / maxRateByKind[k]),
         opacity: connected ? 0.9 : 0.07,
         transition: "opacity 0.2s",
       },
       // 흐려진 엣지는 라벨 숨김 (선택 노드 주변만 정보 표시)
       label: connected
-        ? formatTraffic(e.requestRate, data.metricKind) +
+        ? formatTraffic(e.requestRate, k) +
           (e.errorRate > 0.01 ? ` · ${(e.errorRate * 100).toFixed(1)}%` : "")
         : undefined,
       labelStyle: { fontSize: 10, fill: edgeColor(e.errorRate) },
@@ -299,6 +305,27 @@ function formatTraffic(v: number, kind?: string): string {
   return `${formatRate(v)} req/s`
 }
 
+type GraphEdge = ServiceGraphResponse["edges"][number]
+
+// 혼합(L7+L4) 그래프에서 엣지별 단위 결정
+function edgeKind(e: GraphEdge, metricKind?: string): "l7" | "l4" {
+  return (e.kind ?? (metricKind === "l4" ? "l4" : "l7")) as "l7" | "l4"
+}
+
+// kind가 섞인 엣지 합계를 "X req/s · Y KB/s" 형태로
+function sumTraffic(edges: GraphEdge[], metricKind?: string): string {
+  let l7 = 0
+  let l4 = 0
+  for (const e of edges) {
+    if (edgeKind(e, metricKind) === "l4") l4 += e.requestRate
+    else l7 += e.requestRate
+  }
+  const parts: string[] = []
+  if (l7 > 0) parts.push(formatTraffic(l7, "l7"))
+  if (l4 > 0) parts.push(formatTraffic(l4, "l4"))
+  return parts.length > 0 ? parts.join(" · ") : formatTraffic(0, metricKind)
+}
+
 function NodeDetailPanel({
   data,
   nodeId,
@@ -323,7 +350,7 @@ function NodeDetailPanel({
   const statusKey: TranslationKey =
     node?.status === "healthy" ? "arch.healthy" : node?.status === "degraded" ? "arch.degraded" : "arch.unknown"
 
-  function EdgeRow({ peer, rate, err, p95 }: { peer: string; rate: number; err: number; p95?: number | null }) {
+  function EdgeRow({ peer, rate, err, p95, kind }: { peer: string; rate: number; err: number; p95?: number | null; kind: "l7" | "l4" }) {
     return (
       <button
         type="button"
@@ -334,7 +361,7 @@ function NodeDetailPanel({
           {peer.startsWith("unmapped-pods:") ? peer.replace("unmapped-pods:", "") + " *" : peer}
         </span>
         <span className="flex items-center gap-2 shrink-0 text-xs text-muted-foreground font-mono">
-          <span>{formatTraffic(rate, data.metricKind)}</span>
+          <span>{formatTraffic(rate, kind)}</span>
           <span style={{ color: edgeColor(err) }}>{(err * 100).toFixed(1)}%</span>
           {p95 != null && <span>{p95}ms</span>}
         </span>
@@ -377,11 +404,11 @@ function NodeDetailPanel({
         )}
         <div className="flex justify-between">
           <span className="text-muted-foreground">{t("svcMap.detail.totalIn")}</span>
-          <span className="font-mono text-foreground">{formatTraffic(totalIn, data.metricKind)}</span>
+          <span className="font-mono text-foreground">{sumTraffic(inbound, data.metricKind)}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">{t("svcMap.detail.totalOut")}</span>
-          <span className="font-mono text-foreground">{formatTraffic(totalOut, data.metricKind)}</span>
+          <span className="font-mono text-foreground">{sumTraffic(outbound, data.metricKind)}</span>
         </div>
       </div>
 
@@ -394,7 +421,7 @@ function NodeDetailPanel({
         ) : (
           <div className="space-y-0.5">
             {inbound.map((e, i) => (
-              <EdgeRow key={i} peer={e.source} rate={e.requestRate} err={e.errorRate} p95={e.p95LatencyMs} />
+              <EdgeRow key={i} peer={e.source} rate={e.requestRate} err={e.errorRate} p95={e.p95LatencyMs} kind={edgeKind(e, data.metricKind)} />
             ))}
           </div>
         )}
@@ -409,7 +436,7 @@ function NodeDetailPanel({
         ) : (
           <div className="space-y-0.5">
             {outbound.map((e, i) => (
-              <EdgeRow key={i} peer={e.destination} rate={e.requestRate} err={e.errorRate} p95={e.p95LatencyMs} />
+              <EdgeRow key={i} peer={e.destination} rate={e.requestRate} err={e.errorRate} p95={e.p95LatencyMs} kind={edgeKind(e, data.metricKind)} />
             ))}
           </div>
         )}
@@ -602,10 +629,7 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
             <span>
               {t("svcMap.stats.traffic")}{" "}
               <strong className="text-foreground font-mono">
-                {formatTraffic(
-                  filteredData.edges.reduce((s, e) => s + e.requestRate, 0),
-                  filteredData.metricKind,
-                )}
+                {sumTraffic(filteredData.edges, filteredData.metricKind)}
               </strong>
             </span>
             {filteredData.nodes.some((n) => n.id.startsWith("unmapped-pods:")) && (

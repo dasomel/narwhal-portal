@@ -36,7 +36,9 @@ export interface ServiceNode {
 export interface ServiceEdge {
   source: string
   destination: string
-  requestRate: number // req/s avg over window
+  // 엣지별 단위: l7=req/s, l4=bytes/s. 없으면 응답의 metricKind를 따름.
+  kind?: "l7" | "l4"
+  requestRate: number // req/s (l7) 또는 bytes/s (l4), window 평균
   errorRate: number // 0..1
   p95LatencyMs?: number | null
 }
@@ -220,6 +222,8 @@ interface RawEdge {
   // istio 메트릭의 source/destination_workload_namespace 라벨 (hubble은 미제공)
   sourceNamespace?: string
   destinationNamespace?: string
+  // 엣지별 메트릭 종류 — l7=req/s, l4=bytes/s (waypoint 부분 적용 시 혼합 그래프)
+  kind?: "l7" | "l4"
   requestRate: number
   errorRate: number
   p95LatencyMs?: number | null
@@ -281,6 +285,7 @@ async function buildEdgesFromIstio(window: GraphWindow): Promise<RawEdge[] | nul
       destination: dst,
       sourceNamespace: r.metric["source_workload_namespace"] || undefined,
       destinationNamespace: r.metric["destination_workload_namespace"] || undefined,
+      kind: "l7",
       requestRate: r.value,
       errorRate,
       p95LatencyMs: latencyVal != null && isFinite(latencyVal) ? latencyVal : null,
@@ -311,6 +316,7 @@ async function buildEdgesFromIstioTcp(window: GraphWindow): Promise<RawEdge[] | 
       destination: dst,
       sourceNamespace: r.metric["source_workload_namespace"] || undefined,
       destinationNamespace: r.metric["destination_workload_namespace"] || undefined,
+      kind: "l4",
       requestRate: r.value, // bytes/sec (L4 edge weight, istio_tcp_sent_bytes_total)
       errorRate: 0, // TCP 텔레메트리는 response_code 미제공
       p95LatencyMs: null, // L4는 요청 지연 메트릭 없음
@@ -372,17 +378,18 @@ export async function getServiceGraph(
   let metricKind: "l7" | "l4" | "hubble" | "mixed" = "l7"
 
   if (source === "istio") {
-    // Ambient 모드: L7(istio_requests_total)은 waypoint가 있어야 생성됨.
-    // L7 시도 → 엣지 없으면 L4(istio_tcp_*)로 폴백.
-    // waypoint를 나중에 배포하면 자동으로 L7 그래프로 업그레이드됨.
-    const l7 = await buildEdgesFromIstio(window)
-    if (l7 && l7.length > 0) {
-      rawEdges = l7
+    // Ambient 모드: L7(istio_requests_total)은 waypoint가 있는 ns에서만 생성됨.
+    // waypoint 부분 적용 상태를 고려해 L7 + L4를 병합한다 —
+    // 같은 (src,dst) 쌍은 L7 우선(정확한 req/s + 에러율 + p95), 나머지는 L4 유지.
+    const [l7, l4] = await Promise.all([buildEdgesFromIstio(window), buildEdgesFromIstioTcp(window)])
+    if (l7 === null && l4 === null) {
+      rawEdges = null
     } else {
-      const l4 = await buildEdgesFromIstioTcp(window)
-      // L7/L4 둘 다 미응답(null)이면 null 유지, 하나라도 응답하면 그 결과 사용
-      rawEdges = l4 ?? l7
-      if (l4) metricKind = "l4"
+      const l7e = l7 ?? []
+      const l4e = l4 ?? []
+      const covered = new Set(l7e.map((e) => `${e.source}|${e.destination}`))
+      rawEdges = [...l7e, ...l4e.filter((e) => !covered.has(`${e.source}|${e.destination}`))]
+      metricKind = l7e.length === 0 ? "l4" : rawEdges.length > l7e.length ? "mixed" : "l7"
     }
   } else if (source === "istio-tcp") {
     rawEdges = await buildEdgesFromIstioTcp(window)
@@ -451,6 +458,7 @@ export async function getServiceGraph(
     edges.push({
       source: srcId,
       destination: dstId,
+      ...(e.kind ? { kind: e.kind } : {}),
       requestRate: Math.round(e.requestRate * 1000) / 1000,
       errorRate: Math.round(e.errorRate * 10000) / 10000,
       p95LatencyMs: e.p95LatencyMs != null ? Math.round(e.p95LatencyMs) : null,
