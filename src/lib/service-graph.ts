@@ -13,10 +13,10 @@ const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? "http://localhost:9090"
 // 노이즈 필터 — 제외할 시스템 워크로드
 const SYSTEM_WORKLOADS = new Set(["kubernetes", "coredns", "istiod", "unknown", ""])
 
-// 허용 윈도우 값
-export type GraphWindow = "1h" | "1d" | "7d" | "30d"
+// 허용 윈도우 값 — "1m"은 실시간(live) 모드 전용 순간 rate
+export type GraphWindow = "1m" | "1h" | "1d" | "7d" | "30d"
 
-export const ALLOWED_WINDOWS: readonly GraphWindow[] = ["1h", "1d", "7d", "30d"]
+export const ALLOWED_WINDOWS: readonly GraphWindow[] = ["1m", "1h", "1d", "7d", "30d"]
 
 export function isAllowedWindow(v: unknown): v is GraphWindow {
   return typeof v === "string" && (ALLOWED_WINDOWS as readonly string[]).includes(v)
@@ -481,8 +481,8 @@ export async function getServiceGraph(
     metricKind,
   }
 
-  // 1분 TTL (spec §4.5)
-  await cacheSet(cacheKey, result, 60)
+  // 1분 TTL (spec §4.5). 실시간(1m) 모드는 5초 — 폴링 주기와 맞춤.
+  await cacheSet(cacheKey, result, window === "1m" ? 5 : 60)
   return result
 }
 

@@ -15,7 +15,7 @@ import "reactflow/dist/style.css"
 // 타입
 // ---------------------------------------------------------------------------
 
-type GraphWindow = "1h" | "1d" | "7d" | "30d"
+type GraphWindow = "1m" | "1h" | "1d" | "7d" | "30d"
 
 interface Props {
   /** 외부에서 초기 네임스페이스 필터를 전달할 수 있음 */
@@ -485,17 +485,20 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
   const [namespace, setNamespace] = useState(initialNamespace ?? "")
   const [errorThreshold, setErrorThreshold] = useState(5) // % 단위
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // 실시간 모드: 최근 1분 순간 rate를 5초마다 폴링 (Prometheus 스크레이프 주기상 준실시간)
+  const [live, setLive] = useState(false)
+  const effWindow: GraphWindow = live ? "1m" : window
 
-  const queryKey = ["service-graph", window, namespace]
+  const queryKey = ["service-graph", effWindow, namespace]
   const { data, isLoading, error } = useQuery<ServiceGraphResponse>({
     queryKey,
     queryFn: () => {
-      const params = new URLSearchParams({ window })
+      const params = new URLSearchParams({ window: effWindow })
       if (namespace) params.set("namespace", namespace)
       return fetch(`/api/service-graph?${params}`).then((r) => r.json())
     },
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    refetchInterval: live ? 5_000 : 60_000,
+    staleTime: live ? 0 : 30_000,
   })
 
   // 에러율 임계 슬라이더 기반 엣지 필터
@@ -525,14 +528,14 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
     <div className="space-y-4">
       {/* 컨트롤 바 */}
       <div className="flex flex-wrap items-center gap-3">
-        {/* 윈도 셀렉터 */}
-        <div className="flex items-center gap-1 rounded-md border border-border p-1">
+        {/* 윈도 셀렉터 (실시간 모드 중에는 잠금) */}
+        <div className={`flex items-center gap-1 rounded-md border border-border p-1 ${live ? "opacity-40 pointer-events-none" : ""}`}>
           {WINDOW_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               onClick={() => setWindow(opt.value)}
               className={`px-3 py-1 text-xs rounded transition-colors ${
-                window === opt.value
+                !live && window === opt.value
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
@@ -541,6 +544,26 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
             </button>
           ))}
         </div>
+
+        {/* 실시간 토글 */}
+        <button
+          type="button"
+          onClick={() => setLive((v) => !v)}
+          title={t("svcMap.liveHint")}
+          className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors ${
+            live
+              ? "border-red-500/60 bg-red-500/10 text-red-500"
+              : "border-border text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <span className={`inline-block w-2 h-2 rounded-full ${live ? "bg-red-500 animate-pulse" : "bg-muted-foreground/50"}`} />
+          {t("svcMap.live")}
+          {live && data?.generatedAt && (
+            <span className="font-mono font-normal text-red-400/80">
+              {new Date(data.generatedAt).toLocaleTimeString("en-GB", { hour12: false })}
+            </span>
+          )}
+        </button>
 
         {/* 네임스페이스 필터 */}
         {namespaces.length > 0 && (
