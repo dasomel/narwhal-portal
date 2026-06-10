@@ -21,6 +21,7 @@
 | `narwhal-portal` ArgoCD App **selfHeal=off** | 런타임 patch | 라이브 종료 후 **on 복구** + deploy 이미지 prod `:latest`로 환원 | selfHeal이 켜져 있으면 skaffold dev 이미지를 prod `:latest`로 즉시 원복 → 라이브 불가 |
 | portal 코드/빌드 변경 | portal repo **로컬 커밋** (`de566f7`, `29acc98`, `f70afe6`) | portal 배포 파이프라인 | 미배포 시 운영 미반영 |
 | portal route `enable_websocket=true` (dev HMR 웹소켓: route id `narwhal-portal`, `698afbe4`) | **etcd 직접 patch** (admin API) + narwhal 로컬 커밋 (`313a832`, ApisixRoute `websocket: true`) | `narwhal/gitops/resources/apisix-routes.yaml` (gitea push) | route 재생성 시 ws 끊겨 라이브 모드 클라이언트(HMR) 불능. IC가 이 route를 sync 못 하므로(cross-ns) admin API 재적용 필요할 수 있음 |
+| Istio waypoint 3개 (platform-system/devtools/monitoring) + `istio-waypoints` PodMonitor — 서비스 맵 L7(req/s) 텔레메트리 | **런타임 kubectl apply** (2026-06-11) + narwhal 로컬 커밋 (`cb93217`, `scripts/cluster/09-istio-ambient.sh`) | 클러스터 재프로비저닝 시 09 스크립트가 자동 적용; gitea에는 스크립트 커밋 push만 필요 | waypoint/PodMonitor 소실 시 서비스 맵이 L4(B/s)로 강등(기능 동작은 유지 — 포털 코드가 L7+L4 병합). database/storage ns는 의도적으로 waypoint 제외 |
 | argocd-cm `ignoreDifferences` 5키 (kyverno ClusterPolicy 기본값 + Application pre-delete finalizer + skaffold dev Deployment image/resources/라벨 무시 + 키 self-ignore) | **런타임 patch** (kubectl patch cm argocd-cm) + narwhal 로컬 커밋 (`03eaa2a`, `ab51121`) | `narwhal/gitops/resources/argocd-config.yaml` (gitea push) | gitea 미반영 상태에서 argocd-cm이 통째로 재생성되면(예: 13-argocd.sh 재실행) ① narwhal-portal 영구 OutOfSync + narwhal-apps 플래핑 재발(Sync 버튼 무효 증상), ② 라이브 HMR(skaffold dev) 즉시 원복으로 다시 불능 |
 
 > ⚠️ **다른 세션이 동시에 harbor/포털/게이트웨이를 정리 중**이었다. gitea 반영 전 반드시
