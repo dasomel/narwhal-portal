@@ -44,3 +44,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -fsS http://localhost:3000/ >/dev/null || exit 1
 
 CMD ["sh", "-c", "pnpm dev"]
+# NOTE: dev pod memory raised to 3Gi (deploy/skaffold-dev-portal.yaml); next dev needs >2Gi under load

@@ -197,10 +197,11 @@ spec:
           resources:
             requests:
               cpu: 200m
-              memory: 768Mi
+              memory: 1Gi
             limits:
               cpu: "1"
-              memory: 2Gi
+              # next dev(Turbopack)가 다수 라우트 컴파일 시 2Gi 초과 → OOMKilled(137) → 502.
+              memory: 3Gi
           readinessProbe:
             httpGet:
               path: /api/auth/session

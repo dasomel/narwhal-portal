@@ -71,7 +71,9 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+      // `_next` 전체 제외: dev HMR 웹소켓(/_next/webpack-hmr)이 매처에 걸리면
+      // 로그인 307로 업그레이드가 깨져 라이브 모드 클라이언트가 동작하지 않는다.
+      source: "/((?!api|_next|favicon.ico).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },
