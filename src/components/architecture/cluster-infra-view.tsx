@@ -224,7 +224,23 @@ export function ClusterInfraView() {
 
       {/* 섹션 3: 네임스페이스 그리드 */}
       <div className="rounded-lg border bg-card p-4">
-        <h2 className="text-sm font-semibold text-foreground mb-3">{t("arch.namespaces")}</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-foreground">{t("arch.namespaces")}</h2>
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded border border-narwhal-accent/40 bg-narwhal-accent/10" />
+              {t("arch.legendSystem")}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded border border-border/50 bg-muted/30" />
+              {t("arch.legendUser")}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded border border-border/50 bg-muted/30 opacity-50" />
+              {t("arch.legendTerminating")}
+            </span>
+          </div>
+        </div>
         {isLoading ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
             {Array.from({ length: 12 }).map((_, i) => (
