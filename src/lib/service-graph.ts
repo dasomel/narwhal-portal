@@ -50,6 +50,8 @@ export interface ServiceGraphResult {
   // 드롭다운이 필터된 응답의 노드에서 목록을 뽑으면 선택할수록 목록이 줄어드는
   // 문제가 있어 서버가 항상 전체 목록을 내려준다.
   namespaces?: string[]
+  // requestRate의 단위 판별용: l7=req/s, l4=bytes/s (UI가 단위를 맞춰 표시)
+  metricKind?: "l7" | "l4" | "hubble" | "mixed"
   notice?: string
 }
 
@@ -367,6 +369,7 @@ export async function getServiceGraph(
   const [serviceMap, statusMap] = await Promise.all([buildWorkloadToServiceMap(), buildNodeStatusMap()])
 
   let rawEdges: RawEdge[] | null = null
+  let metricKind: "l7" | "l4" | "hubble" | "mixed" = "l7"
 
   if (source === "istio") {
     // Ambient 모드: L7(istio_requests_total)은 waypoint가 있어야 생성됨.
@@ -379,11 +382,14 @@ export async function getServiceGraph(
       const l4 = await buildEdgesFromIstioTcp(window)
       // L7/L4 둘 다 미응답(null)이면 null 유지, 하나라도 응답하면 그 결과 사용
       rawEdges = l4 ?? l7
+      if (l4) metricKind = "l4"
     }
   } else if (source === "istio-tcp") {
     rawEdges = await buildEdgesFromIstioTcp(window)
+    metricKind = "l4"
   } else if (source === "hubble") {
     rawEdges = await buildEdgesFromHubble(window)
+    metricKind = "hubble"
   } else if (source === "both") {
     const [istioEdges, hubbleEdges] = await Promise.all([
       buildEdgesFromIstio(window),
@@ -392,6 +398,7 @@ export async function getServiceGraph(
     // 둘 다 실패 시 null
     if (istioEdges || hubbleEdges) {
       rawEdges = [...(istioEdges ?? []), ...(hubbleEdges ?? [])]
+      metricKind = "mixed"
     }
   }
 
@@ -463,6 +470,7 @@ export async function getServiceGraph(
     nodes,
     edges,
     namespaces: allNamespaces,
+    metricKind,
   }
 
   // 1분 TTL (spec §4.5)

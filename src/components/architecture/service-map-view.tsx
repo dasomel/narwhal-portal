@@ -167,9 +167,13 @@ function SvgFallbackMap({ data }: { data: ServiceGraphResponse }) {
 function ReactFlowMap({
   data,
   focusService,
+  selectedId,
+  onSelect,
 }: {
   data: ServiceGraphResponse
   focusService?: string
+  selectedId: string | null
+  onSelect: (id: string | null) => void
 }) {
   const COLS = Math.ceil(Math.sqrt(data.nodes.length)) || 1
   const NODE_W = 160
@@ -177,10 +181,23 @@ function ReactFlowMap({
   const GAP_X = 80
   const GAP_Y = 80
 
+  // 선택 노드의 이웃 집합 — 선택 시 연결된 것만 선명하게, 나머지는 흐리게
+  const neighborIds = new Set<string>()
+  if (selectedId) {
+    neighborIds.add(selectedId)
+    for (const e of data.edges) {
+      if (e.source === selectedId) neighborIds.add(e.destination)
+      if (e.destination === selectedId) neighborIds.add(e.source)
+    }
+  }
+  const isDimmedNode = (id: string) => selectedId !== null && !neighborIds.has(id)
+  const isConnectedEdge = (s: string, d: string) =>
+    selectedId === null || s === selectedId || d === selectedId
+
   const rfNodes = data.nodes.map((n, i) => {
     const col = i % COLS
     const row = Math.floor(i / COLS)
-    const isFocused = focusService && n.id === focusService
+    const isFocused = (focusService && n.id === focusService) || n.id === selectedId
     const isUnmapped = n.id.startsWith("unmapped-pods:")
     return {
       id: n.id,
@@ -198,38 +215,211 @@ function ReactFlowMap({
         alignItems: "center",
         justifyContent: "center",
         boxShadow: isFocused ? "0 0 0 3px #3b82f6" : undefined,
+        cursor: "pointer",
+        opacity: isDimmedNode(n.id) ? 0.2 : 1,
+        transition: "opacity 0.2s",
       },
     }
   })
 
-  const rfEdges = data.edges.map((e, i) => ({
-    id: `e-${i}`,
-    source: e.source,
-    target: e.destination,
-    style: { stroke: edgeColor(e.errorRate), strokeWidth: 2 },
-    label:
-      e.errorRate > 0.01
-        ? `${(e.errorRate * 100).toFixed(1)}%`
+  // 트래픽 양 → 엣지 굵기 (√ 스케일, 1.5px ~ 6px)
+  const maxRate = Math.max(...data.edges.map((e) => e.requestRate), 0.000001)
+  const rfEdges = data.edges.map((e, i) => {
+    const connected = isConnectedEdge(e.source, e.destination)
+    return {
+      id: `e-${i}`,
+      source: e.source,
+      target: e.destination,
+      style: {
+        stroke: edgeColor(e.errorRate),
+        strokeWidth: 1.5 + 4.5 * Math.sqrt(e.requestRate / maxRate),
+        opacity: connected ? 0.9 : 0.07,
+        transition: "opacity 0.2s",
+      },
+      // 흐려진 엣지는 라벨 숨김 (선택 노드 주변만 정보 표시)
+      label: connected
+        ? formatTraffic(e.requestRate, data.metricKind) +
+          (e.errorRate > 0.01 ? ` · ${(e.errorRate * 100).toFixed(1)}%` : "")
         : undefined,
-    labelStyle: { fontSize: 10, fill: edgeColor(e.errorRate) },
-    animated: e.errorRate > 0.05,
-  }))
+      labelStyle: { fontSize: 10, fill: edgeColor(e.errorRate) },
+      animated: connected && e.errorRate > 0.05,
+    }
+  })
 
   return (
-    <div style={{ height: 500 }} className="rounded border border-border overflow-hidden">
+    <div style={{ height: 500 }} className="flex-1 min-w-0 rounded border border-border overflow-hidden">
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
         fitView
         attributionPosition="bottom-right"
+        onNodeClick={(_, node) => onSelect(node.id === selectedId ? null : node.id)}
+        onPaneClick={() => onSelect(null)}
       >
         <Background />
         <Controls />
-        <MiniMap nodeColor={(n) => {
-          const node = data.nodes.find((nd) => nd.id === n.id)
-          return statusColor(node?.status ?? "unknown")
-        }} />
+        <MiniMap
+          pannable
+          zoomable
+          nodeBorderRadius={8}
+          nodeStrokeWidth={3}
+          maskColor="rgba(15, 23, 42, 0.12)"
+          nodeColor={(n) => {
+            if (n.id === selectedId) return "#1d4ed8"
+            const node = data.nodes.find((nd) => nd.id === n.id)
+            return statusColor(node?.status ?? "unknown")
+          }}
+          nodeStrokeColor={(n) => {
+            const node = data.nodes.find((nd) => nd.id === n.id)
+            return scoreTierBorderColor(node?.scoreTier)
+          }}
+        />
       </ReactFlow>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 노드 상세 패널 (노드 클릭 시 우측 표시)
+// ---------------------------------------------------------------------------
+
+function formatRate(v: number): string {
+  if (v >= 100) return v.toFixed(0)
+  if (v >= 1) return v.toFixed(1)
+  return v.toFixed(2)
+}
+
+// requestRate 단위: L7=req/s, L4(istio_tcp_sent_bytes_total)=bytes/s
+function formatTraffic(v: number, kind?: string): string {
+  if (kind === "l4") {
+    if (v >= 1048576) return `${(v / 1048576).toFixed(1)} MB/s`
+    if (v >= 1024) return `${(v / 1024).toFixed(1)} KB/s`
+    return `${v.toFixed(0)} B/s`
+  }
+  return `${formatRate(v)} req/s`
+}
+
+function NodeDetailPanel({
+  data,
+  nodeId,
+  onClose,
+  onSelect,
+  t,
+}: {
+  data: ServiceGraphResponse
+  nodeId: string
+  onClose: () => void
+  onSelect: (id: string) => void
+  t: ReturnType<typeof useT>
+}) {
+  const node = data.nodes.find((n) => n.id === nodeId)
+  const inbound = data.edges.filter((e) => e.destination === nodeId)
+  const outbound = data.edges.filter((e) => e.source === nodeId)
+  const totalIn = inbound.reduce((s, e) => s + e.requestRate, 0)
+  const totalOut = outbound.reduce((s, e) => s + e.requestRate, 0)
+  const isUnmapped = nodeId.startsWith("unmapped-pods:")
+  const displayName = isUnmapped ? nodeId.replace("unmapped-pods:", "") : nodeId
+
+  const statusKey: TranslationKey =
+    node?.status === "healthy" ? "arch.healthy" : node?.status === "degraded" ? "arch.degraded" : "arch.unknown"
+
+  function EdgeRow({ peer, rate, err, p95 }: { peer: string; rate: number; err: number; p95?: number | null }) {
+    return (
+      <button
+        type="button"
+        onClick={() => onSelect(peer)}
+        className="w-full flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left hover:bg-muted/60 transition-colors"
+      >
+        <span className="font-mono text-xs truncate text-foreground" title={peer}>
+          {peer.startsWith("unmapped-pods:") ? peer.replace("unmapped-pods:", "") + " *" : peer}
+        </span>
+        <span className="flex items-center gap-2 shrink-0 text-xs text-muted-foreground font-mono">
+          <span>{formatTraffic(rate, data.metricKind)}</span>
+          <span style={{ color: edgeColor(err) }}>{(err * 100).toFixed(1)}%</span>
+          {p95 != null && <span>{p95}ms</span>}
+        </span>
+      </button>
+    )
+  }
+
+  return (
+    <div className="w-80 shrink-0 rounded border border-border bg-card p-4 space-y-4 overflow-y-auto" style={{ maxHeight: 500 }}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-mono text-sm font-semibold text-foreground break-all">{displayName}</p>
+        <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground text-sm leading-none px-1">
+          ✕
+        </button>
+      </div>
+
+      {isUnmapped && (
+        <p className="text-xs text-muted-foreground">{t("svcMap.detail.unmapped")}</p>
+      )}
+
+      <div className="space-y-1.5 text-xs">
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">{t("svcMap.detail.namespace")}</span>
+          <span className="font-mono text-foreground">{node?.namespace ?? "-"}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">{t("svcMap.detail.status")}</span>
+          <span className="flex items-center gap-1.5 text-foreground">
+            <span className="inline-block w-2 h-2 rounded-full" style={{ background: statusColor(node?.status ?? "unknown") }} />
+            {t(statusKey)}
+          </span>
+        </div>
+        {node?.scoreTier && node.scoreTier !== "none" && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">{t("svcMap.detail.tier")}</span>
+            <span className="capitalize" style={{ color: scoreTierBorderColor(node.scoreTier) }}>
+              {node.scoreTier === "gold" ? "🥇" : node.scoreTier === "silver" ? "🥈" : "🥉"} {node.scoreTier}
+            </span>
+          </div>
+        )}
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">{t("svcMap.detail.totalIn")}</span>
+          <span className="font-mono text-foreground">{formatTraffic(totalIn, data.metricKind)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">{t("svcMap.detail.totalOut")}</span>
+          <span className="font-mono text-foreground">{formatTraffic(totalOut, data.metricKind)}</span>
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+          {t("svcMap.detail.inbound")} ({inbound.length})
+        </p>
+        {inbound.length === 0 ? (
+          <p className="text-xs text-muted-foreground px-2">{t("svcMap.detail.noEdges")}</p>
+        ) : (
+          <div className="space-y-0.5">
+            {inbound.map((e, i) => (
+              <EdgeRow key={i} peer={e.source} rate={e.requestRate} err={e.errorRate} p95={e.p95LatencyMs} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+          {t("svcMap.detail.outbound")} ({outbound.length})
+        </p>
+        {outbound.length === 0 ? (
+          <p className="text-xs text-muted-foreground px-2">{t("svcMap.detail.noEdges")}</p>
+        ) : (
+          <div className="space-y-0.5">
+            {outbound.map((e, i) => (
+              <EdgeRow key={i} peer={e.destination} rate={e.requestRate} err={e.errorRate} p95={e.p95LatencyMs} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {!isUnmapped && (
+        <a href={`/catalog/${encodeURIComponent(nodeId)}`} className="inline-block text-xs text-blue-500 hover:underline">
+          {t("svcMap.detail.viewCatalog")}
+        </a>
+      )}
     </div>
   )
 }
@@ -267,6 +457,7 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
   const [window, setWindow] = useState<GraphWindow>("7d")
   const [namespace, setNamespace] = useState(initialNamespace ?? "")
   const [errorThreshold, setErrorThreshold] = useState(5) // % 단위
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const queryKey = ["service-graph", window, namespace]
   const { data, isLoading, error } = useQuery<ServiceGraphResponse>({
@@ -387,15 +578,43 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
         <EmptyState t={t} />
       ) : filteredData ? (
         <>
-          <ReactFlowMap data={filteredData} focusService={focusService} />
+          <div className="flex gap-4 items-stretch">
+            <ReactFlowMap
+              data={filteredData}
+              focusService={focusService}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
+            {selectedId && (
+              <NodeDetailPanel
+                data={filteredData}
+                nodeId={selectedId}
+                onClose={() => setSelectedId(null)}
+                onSelect={setSelectedId}
+                t={t}
+              />
+            )}
+          </div>
           {/* 통계 */}
           <div className="flex gap-4 text-xs text-muted-foreground">
             <span>{t("svcMap.stats.services")} <strong className="text-foreground">{filteredData.nodes.length}</strong></span>
             <span>{t("svcMap.stats.connections")} <strong className="text-foreground">{filteredData.edges.length}</strong></span>
+            <span>
+              {t("svcMap.stats.traffic")}{" "}
+              <strong className="text-foreground font-mono">
+                {formatTraffic(
+                  filteredData.edges.reduce((s, e) => s + e.requestRate, 0),
+                  filteredData.metricKind,
+                )}
+              </strong>
+            </span>
             {filteredData.nodes.some((n) => n.id.startsWith("unmapped-pods:")) && (
               <Badge variant="outline" className="text-xs">
                 {t("svcMap.stats.unmapped")}
               </Badge>
+            )}
+            {!selectedId && (
+              <span className="ml-auto">{t("svcMap.detail.clickHint")}</span>
             )}
           </div>
         </>

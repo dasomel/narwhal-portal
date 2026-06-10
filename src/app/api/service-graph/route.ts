@@ -23,6 +23,8 @@ export interface ServiceGraphResponse {
   }>
   // ns 필터 적용 전 전체 그래프에서 관측된 네임스페이스 목록 (드롭다운용)
   namespaces?: string[]
+  // requestRate 단위 판별: l7=req/s, l4=bytes/s
+  metricKind?: "l7" | "l4" | "hubble" | "mixed"
   notice?: string
 }
 
@@ -64,6 +66,7 @@ export async function GET(req: NextRequest) {
       nodes: result.nodes,
       edges: result.edges,
       ...(result.namespaces ? { namespaces: result.namespaces } : {}),
+      ...(result.metricKind ? { metricKind: result.metricKind } : {}),
       ...(result.notice ? { notice: result.notice } : {}),
     }
 
