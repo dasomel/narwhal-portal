@@ -12,10 +12,10 @@
 
 | 방식 | 속도 | 안정성 | 현재 상태 |
 |------|------|--------|-----------|
-| **A. prod 빌드+push** | 느림(~2-4분) | 높음 (ArgoCD와 `:latest`로 호환) | ✅ 기본 사용 |
-| **B. 라이브 HMR (skaffold dev)** | 즉시(파일 저장 시) | ArgoCD selfHeal이 dev 이미지를 prod로 원복 | ⚠️ selfHeal 체인 off 필요 |
+| **A. prod 빌드+push** | 느림(~2-4분) | 높음 (ArgoCD와 `:latest`로 호환) | ✅ 안정 경로 |
+| **B. 라이브 HMR (skaffold dev)** | 즉시(파일 저장 시) | ✅ argocd-cm ignoreDifferences로 selfHeal 원복 차단 (2026-06-10) | ✅ **사용 가능** |
 
-일상 작업은 **A**. 즉시 HMR이 필요하면 **B**(아래 전제조건 충족 필요).
+개발 중에는 **B**(즉시 HMR), 검증/마무리 시 **A**로 prod 이미지 확정.
 
 ---
 
@@ -74,36 +74,29 @@ skaffold dev -p dev --cleanup=false --status-check=true
 # harbor route client-control 0 (etcd, 100MB 해제) — docs/RELEASE-TODO-gitea-permanence.md 참고
 ```
 
-### ⚠️ B의 최종 차단 요인 — ArgoCD selfHeal (중요)
+### ✅ (해결됨 2026-06-10) ArgoCD selfHeal 원복 — argocd-cm ignoreDifferences
 
-라이브의 진짜 핵심 장애물. **ArgoCD가 `narwhal-portal` deployment를 prod `:latest`(standalone `server.js`)로
-강제 유지**하므로, skaffold dev가 배포한 dev 이미지(`dev-m-...`, `src/` + `next dev`)를 **수 초 내에
-원복**한다. 그러면 HMR/소스 변경이 전혀 반영되지 않는다(컨테이너에 `/app/src`가 없고 `server.js`만 존재).
+과거 차단 요인: **ArgoCD selfHeal이 skaffold dev의 dev 이미지(`dev-m-...`)를 수 초 내에 prod
+`:latest`로 원복**해 HMR이 무효였다. selfHeal off는 app-of-apps 체인(`argocd-config` →
+`narwhal-apps` → `narwhal-portal`)이 다시 켜버려 유지가 안 됐다.
 
-관리 체인 (2중):
-- `narwhal-portal` Application — `syncPolicy.automated.selfHeal: true`
-- 그 Application 자체를 `narwhal-apps`(app-of-apps, `src=apps`)가 관리 → `narwhal-portal` app을 patch해도
-  `narwhal-apps`가 다시 `selfHeal: true`로 되돌림
-- `narwhal-apps`는 다시 `argocd-config`(root, `src=resources`)가 관리
+**해결**: argocd-cm에 시스템 레벨 `ignoreDifferences`를 추가해 skaffold dev가 바꾸는 필드만
+ArgoCD diff에서 제외 — selfHeal은 켜진 채로 dev 배포가 유지되고 앱은 Synced로 남는다.
+- `apps_Deployment`: narwhal-portal 컨테이너의 `image`/`resources` (jq select로 스코프 한정)
+- `all`: `skaffold.dev/run-id`, `app.kubernetes.io/managed-by` 라벨
+- 런타임 patch 적용 + narwhal 로컬 커밋 `ab51121`(`gitops/resources/argocd-config.yaml`) —
+  gitea 반영 전 argocd-cm 재생성 시 재적용 필요 (`docs/RELEASE-TODO-gitea-permanence.md` 참고)
 
-라이브를 쓰려면 이 체인의 selfHeal을 꺼야 한다(임시, dev 클러스터 한정):
+검증(2026-06-10): dev 이미지 배포 후 90초+ 유지, `narwhal-portal` 앱 Synced, file-sync로
+`/app/src`에 즉시 반영, 포털 200 응답.
+
+### 라이브 종료 후 prod 환원
+ArgoCD가 image diff를 무시하므로 **자동 환원되지 않는다**. 둘 중 하나로 명시적 환원:
 ```bash
-# 아래는 상위(app-of-apps)가 다시 원복할 수 있음 → 위에서부터 꺼야 유지됨
-kubectl -n devtools patch app narwhal-apps    --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}'
-kubectl -n devtools patch app narwhal-portal  --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}'
-# 그 다음 skaffold dev 재시작 → dev 이미지(dev-m) 유지 확인:
-kubectl -n devtools get deploy narwhal-portal -o jsonpath='{.spec.template.spec.containers[0].image}'   # dev-m-... 이어야 함
-```
-> 근본 해결은 `narwhal/gitops`에서 `narwhal-portal` app에 deployment `image` 필드 `ignoreDifferences`를
-> 추가하거나, dev 동안 app을 app-of-apps에서 제외하는 것(gitea 반영, 다른 세션과 협업).
-> `docs/RELEASE-TODO-gitea-permanence.md`에 영구화 항목으로 기록.
-
-### 라이브 종료 후 원복
-```bash
-# Ctrl+C (skaffold dev) 후 prod로 환원
-kubectl -n devtools patch app narwhal-portal -n devtools --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}'
-kubectl -n devtools patch app narwhal-apps   --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}'
-# ArgoCD가 prod :latest로 자동 환원 (또는 위 A로 최신 prod 재배포)
+# 방법 1: 최신 prod 재배포 (권장 — 위 A 절차: build → push → rollout restart)
+# 방법 2: ArgoCD 수동 Sync (포털 incident Sync 버튼 또는 argocd CLI)
+#   — sync는 RespectIgnoreDifferences가 없어서 git 매니페스트(:latest)로 덮어쓴다
+kubectl -n devtools get deploy narwhal-portal -o jsonpath='{.spec.template.spec.containers[0].image}'  # :latest 확인
 ```
 
 ---

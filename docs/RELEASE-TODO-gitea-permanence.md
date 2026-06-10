@@ -20,7 +20,7 @@
 | `apisix-routes` ArgoCD App **selfHeal=off** | 런타임 patch | 영구화 완료 후 **on 복구** | 자동 동기화 중단 상태 |
 | `narwhal-portal` ArgoCD App **selfHeal=off** | 런타임 patch | 라이브 종료 후 **on 복구** + deploy 이미지 prod `:latest`로 환원 | selfHeal이 켜져 있으면 skaffold dev 이미지를 prod `:latest`로 즉시 원복 → 라이브 불가 |
 | portal 코드/빌드 변경 | portal repo **로컬 커밋** (`de566f7`, `29acc98`, `f70afe6`) | portal 배포 파이프라인 | 미배포 시 운영 미반영 |
-| argocd-cm `ignoreDifferences` 3키 (kyverno ClusterPolicy 기본값 + Application pre-delete finalizer 무시 + 해당 키 self-ignore) | **런타임 patch** (kubectl patch cm argocd-cm) + narwhal 로컬 커밋 (`03eaa2a`) | `narwhal/gitops/resources/argocd-config.yaml` (gitea push) | gitea 미반영 상태에서 argocd-cm이 통째로 재생성되면(예: 13-argocd.sh 재실행) narwhal-portal 영구 OutOfSync + narwhal-apps 플래핑 재발 — Sync 버튼이 "안 먹는" 증상 복귀 |
+| argocd-cm `ignoreDifferences` 5키 (kyverno ClusterPolicy 기본값 + Application pre-delete finalizer + skaffold dev Deployment image/resources/라벨 무시 + 키 self-ignore) | **런타임 patch** (kubectl patch cm argocd-cm) + narwhal 로컬 커밋 (`03eaa2a`, `ab51121`) | `narwhal/gitops/resources/argocd-config.yaml` (gitea push) | gitea 미반영 상태에서 argocd-cm이 통째로 재생성되면(예: 13-argocd.sh 재실행) ① narwhal-portal 영구 OutOfSync + narwhal-apps 플래핑 재발(Sync 버튼 무효 증상), ② 라이브 HMR(skaffold dev) 즉시 원복으로 다시 불능 |
 
 > ⚠️ **다른 세션이 동시에 harbor/포털/게이트웨이를 정리 중**이었다. gitea 반영 전 반드시
 > `git fetch` + rebase로 그 세션의 변경을 흡수하고, **force push 금지**. 충돌 시 멈추고 조율.
@@ -77,9 +77,14 @@ curl -s http://127.0.0.1:9180/apisix/admin/routes -H "X-API-KEY: $AK"   # route 
    → `narwhal-apps`(app-of-apps)가 `Application/kyverno`로 플래핑 OutOfSync.
 
 - 런타임: argocd-cm에 `resource.customizations.ignoreDifferences.{kyverno.io_ClusterPolicy, argoproj.io_Application}`
-  + 두 키 자체에 대한 ConfigMap self-ignore를 patch (2026-06-10, 적용·검증 완료 — 전 앱 Synced).
-- 영구화: narwhal 로컬 커밋 `03eaa2a` (`gitops/resources/argocd-config.yaml`)를 gitea에 push.
+  + 키 자체에 대한 ConfigMap self-ignore를 patch (2026-06-10, 적용·검증 완료 — 전 앱 Synced).
+- 추가(라이브 HMR, 같은 날): `ignoreDifferences.apps_Deployment`(narwhal-portal 컨테이너 image/resources)
+  + `ignoreDifferences.all`(skaffold 라벨) — skaffold dev의 dev 이미지를 selfHeal이 원복하지 않게 함.
+  검증: dev 이미지 90초+ 유지, 앱 Synced, file-sync 동작 (`docs/LIVE-DEV-container-reload.md`).
+- 영구화: narwhal 로컬 커밋 `03eaa2a` + `ab51121` (`gitops/resources/argocd-config.yaml`)를 gitea에 push.
 - 검증: push 후 `kubectl -n devtools get app narwhal-portal narwhal-apps argocd-config` 모두 Synced 유지.
+- ⚠️ release 시점 주의: `apps_Deployment`/`all` 무시 규칙은 **dev 편의 설정**이다. 운영 전환 시 유지 여부를
+  결정할 것 — 유지하면 prod 이미지 드리프트도 ArgoCD가 못 본다(수동 set image가 silent drift 됨).
 
 ### 1-4. selfHeal 복구
 ```bash
