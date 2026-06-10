@@ -20,6 +20,7 @@
 | `apisix-routes` ArgoCD App **selfHeal=off** | 런타임 patch | 영구화 완료 후 **on 복구** | 자동 동기화 중단 상태 |
 | `narwhal-portal` ArgoCD App **selfHeal=off** | 런타임 patch | 라이브 종료 후 **on 복구** + deploy 이미지 prod `:latest`로 환원 | selfHeal이 켜져 있으면 skaffold dev 이미지를 prod `:latest`로 즉시 원복 → 라이브 불가 |
 | portal 코드/빌드 변경 | portal repo **로컬 커밋** (`de566f7`, `29acc98`, `f70afe6`) | portal 배포 파이프라인 | 미배포 시 운영 미반영 |
+| argocd-cm `ignoreDifferences` 3키 (kyverno ClusterPolicy 기본값 + Application pre-delete finalizer 무시 + 해당 키 self-ignore) | **런타임 patch** (kubectl patch cm argocd-cm) + narwhal 로컬 커밋 (`03eaa2a`) | `narwhal/gitops/resources/argocd-config.yaml` (gitea push) | gitea 미반영 상태에서 argocd-cm이 통째로 재생성되면(예: 13-argocd.sh 재실행) narwhal-portal 영구 OutOfSync + narwhal-apps 플래핑 재발 — Sync 버튼이 "안 먹는" 증상 복귀 |
 
 > ⚠️ **다른 세션이 동시에 harbor/포털/게이트웨이를 정리 중**이었다. gitea 반영 전 반드시
 > `git fetch` + rebase로 그 세션의 변경을 흡수하고, **force push 금지**. 충돌 시 멈추고 조율.
@@ -66,6 +67,19 @@ curl -s http://127.0.0.1:9180/apisix/admin/routes -H "X-API-KEY: $AK"   # route 
 # curl -X DELETE http://127.0.0.1:9180/apisix/admin/routes/harbor -H "X-API-KEY: $AK"
 ```
 > 정식 route가 **upstream nodes를 제대로 가지는지**(harbor.devtools.svc:80) + cc=0 인지 먼저 확인 후 삭제.
+
+### 1-3b. ArgoCD 영구/플래핑 OutOfSync 수정 (argocd-cm ignoreDifferences)
+두 가지 라이브 전용 변형이 OutOfSync를 유발 → 포털 Sync 버튼이 무효처럼 보임:
+1. kyverno 웹훅이 라이브 ClusterPolicy에 기본값 필드(`spec.admission`, `spec.emitWarning`,
+   룰별 `skipBackgroundRequests`, `validate.allowExistingViolations`) 주입
+   → `narwhal-portal` 앱이 Sync 직후 다시 OutOfSync (영구).
+2. ArgoCD가 PreDelete hook 차트(kyverno)의 자식 Application에 `pre-delete-finalizer.argocd.argoproj.io(/cleanup)` 추가
+   → `narwhal-apps`(app-of-apps)가 `Application/kyverno`로 플래핑 OutOfSync.
+
+- 런타임: argocd-cm에 `resource.customizations.ignoreDifferences.{kyverno.io_ClusterPolicy, argoproj.io_Application}`
+  + 두 키 자체에 대한 ConfigMap self-ignore를 patch (2026-06-10, 적용·검증 완료 — 전 앱 Synced).
+- 영구화: narwhal 로컬 커밋 `03eaa2a` (`gitops/resources/argocd-config.yaml`)를 gitea에 push.
+- 검증: push 후 `kubectl -n devtools get app narwhal-portal narwhal-apps argocd-config` 모두 Synced 유지.
 
 ### 1-4. selfHeal 복구
 ```bash
