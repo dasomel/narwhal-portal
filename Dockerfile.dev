@@ -45,3 +45,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 CMD ["sh", "-c", "pnpm dev"]
 # NOTE: dev pod memory raised to 3Gi (deploy/skaffold-dev-portal.yaml); next dev needs >2Gi under load
+# protos/ + @grpc deps for hubble-relay streaming (rebuild trigger 2026-06-11)

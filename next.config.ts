@@ -56,7 +56,13 @@ const nextConfig: NextConfig = {
     "@opentelemetry/exporter-trace-otlp-http",
     "@opentelemetry/auto-instrumentations-node",
     "@opentelemetry/semantic-conventions",
+    "@grpc/grpc-js",
+    "@grpc/proto-loader",
   ],
+  // hubble-relay gRPC용 proto 파일 — standalone 빌드 추적에 포함 (런타임 loadSync)
+  outputFileTracingIncludes: {
+    "/api/service-graph/stream": ["./protos/**/*"],
+  },
   images: {
     remotePatterns: imageDomains.map(({ protocol, hostname, port }) => ({
       protocol: protocol.replace(":", "") as "http" | "https",
