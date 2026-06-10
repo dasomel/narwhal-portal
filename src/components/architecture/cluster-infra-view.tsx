@@ -232,11 +232,12 @@ export function ClusterInfraView() {
               {t("arch.legendSystem")}
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block w-3 h-3 rounded border border-border/50 bg-muted/30" />
+              {/* 실제 카드는 bg-muted/30이지만 3px 견본에서는 안 보여서 진하게 표시 */}
+              <span className="inline-block w-3 h-3 rounded border border-muted-foreground/40 bg-muted" />
               {t("arch.legendUser")}
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block w-3 h-3 rounded border border-border/50 bg-muted/30 opacity-50" />
+              <span className="inline-block w-3 h-3 rounded border border-dashed border-muted-foreground/60 bg-muted opacity-60" />
               {t("arch.legendTerminating")}
             </span>
           </div>
