@@ -91,11 +91,11 @@ function AlertDetail({
         </SheetHeader>
         <div className="mt-4 space-y-4 text-[13px]">
           <div>
-            <div className="text-muted-foreground text-[11px] mb-1">{t("alerts.detail.startsAt")}</div>
+            <div className="text-muted-foreground text-xs mb-1">{t("alerts.detail.startsAt")}</div>
             <div className="font-mono text-[12px] text-muted-foreground">{alert.startsAt}</div>
           </div>
           <div>
-            <div className="text-muted-foreground text-[11px] mb-1">{t("alerts.detail.labels")}</div>
+            <div className="text-muted-foreground text-xs mb-1">{t("alerts.detail.labels")}</div>
             <div className="space-y-1">
               {Object.entries(alert.labels).map(([k, v]) => (
                 <div key={k} className="flex gap-2">
@@ -107,7 +107,7 @@ function AlertDetail({
           </div>
           {Object.keys(alert.annotations).length > 0 && (
             <div>
-              <div className="text-muted-foreground text-[11px] mb-1">{t("alerts.detail.annotations")}</div>
+              <div className="text-muted-foreground text-xs mb-1">{t("alerts.detail.annotations")}</div>
               <div className="space-y-1">
                 {Object.entries(alert.annotations)
                   .filter(([k]) => k !== "runbook_url" && k !== "runbook")
@@ -122,7 +122,7 @@ function AlertDetail({
           )}
           {runbook && (
             <div>
-              <div className="text-muted-foreground text-[11px] mb-1">{t("alerts.detail.runbook")}</div>
+              <div className="text-muted-foreground text-xs mb-1">{t("alerts.detail.runbook")}</div>
               <a
                 href={runbook}
                 target="_blank"
@@ -238,8 +238,8 @@ export function ActivityFeed() {
                   <span className={`text-[12px] font-medium ${severityColor(item.severity).split(" ")[0]}`}>
                     {item.title}
                   </span>
-                  <div className="text-[11px] text-muted-foreground mt-0.5 truncate">{item.detail}</div>
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5">
+                  <div className="text-xs text-muted-foreground mt-0.5 truncate">{item.detail}</div>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
                     <span>{item.source}</span>
                     <span className="text-border">·</span>
                     <span className="tabular-nums">{formatOccurrenceTime(item.timestamp, locale)}</span>

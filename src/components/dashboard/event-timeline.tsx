@@ -104,8 +104,8 @@ export function EventTimeline() {
                         {typeLabel[evt.type] ?? evt.type}
                       </Badge>
                     </div>
-                    <p className="text-[11px] text-muted-foreground truncate mt-0.5">{evt.description}</p>
-                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-1">
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">{evt.description}</p>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
                       <span className="tabular-nums">{formatOccurrenceTime(evt.timestamp, locale)}</span>
                       <span className="text-border">·</span>
                       <span>{relativeTime(evt.timestamp, t)}</span>
@@ -140,12 +140,12 @@ export function EventTimeline() {
               </div>
 
               <div>
-                <p className="text-[11px] text-muted-foreground mb-0.5">{t("events.timestamp")}</p>
+                <p className="text-xs text-muted-foreground mb-0.5">{t("events.timestamp")}</p>
                 <p className="text-sm text-foreground">{formatFullTimestamp(selected.timestamp)}</p>
               </div>
 
               <div>
-                <p className="text-[11px] text-muted-foreground mb-0.5">{t("events.description")}</p>
+                <p className="text-xs text-muted-foreground mb-0.5">{t("events.description")}</p>
                 <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
                   {selected.description}
                 </p>

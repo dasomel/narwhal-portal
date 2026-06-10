@@ -46,22 +46,22 @@ interface Props {
   userRole?: string
 }
 
-const ACTION_ITEM_LABELS: Record<string, { ko: string; en: string }> = {
-  "kernel-params":      { ko: "커널 파라미터",       en: "Kernel Parameters" },
-  "kernel-modules":     { ko: "커널 모듈",           en: "Kernel Modules" },
-  "resource-limits":    { ko: "리소스 제한",          en: "Resource Limits" },
-  "required-packages":  { ko: "필수 패키지",          en: "Required Packages" },
-  "disk-tuning":        { ko: "디스크 튜닝",          en: "Disk Tuning" },
-  "lvm-auto-extend":    { ko: "LVM 자동 확장",        en: "LVM Auto-Extend" },
-  "nic-tuning":         { ko: "NIC 튜닝",             en: "NIC Tuning" },
-  "runtime-status":     { ko: "런타임 상태",          en: "Runtime Status" },
-  "cgroup":             { ko: "cgroup",               en: "cgroup" },
-  "swap":               { ko: "스왑",                 en: "Swap" },
-  "security":           { ko: "패키지 업데이트",      en: "Package Updates" },
-  "kubelet-config":     { ko: "Kubelet 설정",         en: "Kubelet Config" },
-  "kubeproxy-config":   { ko: "kube-proxy 설정",     en: "kube-proxy Config" },
-  "containerd-config":  { ko: "containerd 설정",     en: "containerd Config" },
-  "cluster-version":    { ko: "클러스터 버전",        en: "Cluster Version" },
+const ACTION_ITEM_KEYS: Record<string, TranslationKey> = {
+  "kernel-params":      "nodes.audit.action.kernelParams",
+  "kernel-modules":     "nodes.audit.action.kernelModules",
+  "resource-limits":    "nodes.audit.action.resourceLimits",
+  "required-packages":  "nodes.audit.action.requiredPackages",
+  "disk-tuning":        "nodes.audit.action.diskTuning",
+  "lvm-auto-extend":    "nodes.audit.action.lvmAutoExtend",
+  "nic-tuning":         "nodes.audit.action.nicTuning",
+  "runtime-status":     "nodes.audit.action.runtimeStatus",
+  "cgroup":             "nodes.audit.action.cgroup",
+  "swap":               "nodes.audit.action.swap",
+  "security":           "nodes.audit.action.security",
+  "kubelet-config":     "nodes.audit.action.kubeletConfig",
+  "kubeproxy-config":   "nodes.audit.action.kubeproxyConfig",
+  "containerd-config":  "nodes.audit.action.containerdConfig",
+  "cluster-version":    "nodes.audit.action.clusterVersion",
 }
 
 /** Returns the set of accordion item IDs that have at least one action-needed item. */
@@ -248,7 +248,7 @@ export function SystemCheckSummary({ systemStatus, locale, nodeName, userRole }:
   return (
     <Card className="border border-border shadow-sm bg-card rounded-2xl overflow-hidden">
       <CardHeader className="py-5 px-8 border-b bg-muted/50/30">
-        <CardTitle className="text-[11px] font-black flex items-center gap-2 text-foreground uppercase tracking-widest">
+        <CardTitle className="text-xs font-black flex items-center gap-2 text-foreground uppercase tracking-widest">
           <ClipboardCheck className="h-4 w-4 text-narwhal-accent" />
           {t("nodes.audit.summary.title")}
         </CardTitle>
@@ -257,7 +257,7 @@ export function SystemCheckSummary({ systemStatus, locale, nodeName, userRole }:
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {/* Total Checks */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none">
+            <span className="text-xs font-black text-muted-foreground uppercase tracking-widest leading-none">
               {t("nodes.audit.summary.total")}
             </span>
             <span className="text-3xl font-black text-foreground leading-none">{total}</span>
@@ -265,7 +265,7 @@ export function SystemCheckSummary({ systemStatus, locale, nodeName, userRole }:
 
           {/* OK */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none">
+            <span className="text-xs font-black text-muted-foreground uppercase tracking-widest leading-none">
               {t("nodes.audit.summary.ok")}
             </span>
             <span className="text-3xl font-black text-narwhal-success leading-none">{ok}</span>
@@ -273,7 +273,7 @@ export function SystemCheckSummary({ systemStatus, locale, nodeName, userRole }:
 
           {/* Action Needed — plain red count */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none">
+            <span className="text-xs font-black text-muted-foreground uppercase tracking-widest leading-none">
               {t("nodes.audit.summary.action")}
             </span>
             <span className={`text-3xl font-black leading-none ${action > 0 ? "text-rose-500" : "text-narwhal-success"}`}>
@@ -283,21 +283,21 @@ export function SystemCheckSummary({ systemStatus, locale, nodeName, userRole }:
 
           {/* Overall Health */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none">
+            <span className="text-xs font-black text-muted-foreground uppercase tracking-widest leading-none">
               {t("nodes.audit.summary.health")}
             </span>
             <div className="mt-1">
               {isHealthy ? (
                 <Badge
                   variant="outline"
-                  className="font-black text-[10px] h-6 px-3 leading-none uppercase tracking-widest text-narwhal-success border-narwhal-success/30"
+                  className="font-black text-xs h-6 px-3 leading-none uppercase tracking-widest text-narwhal-success border-narwhal-success/30"
                 >
                   {t("nodes.audit.summary.healthy")}
                 </Badge>
               ) : (
                 <Badge
                   variant="destructive"
-                  className="font-black text-[10px] h-6 px-3 leading-none uppercase tracking-widest"
+                  className="font-black text-xs h-6 px-3 leading-none uppercase tracking-widest"
                 >
                   {t("nodes.audit.summary.needsAction")}
                 </Badge>
@@ -308,13 +308,13 @@ export function SystemCheckSummary({ systemStatus, locale, nodeName, userRole }:
 
         {actionIdList.length > 0 && (
           <div className="mt-6 flex flex-col gap-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-              {locale === "ko" ? "조치 필요 항목" : "Action Items"}
+            <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">
+              {t("nodes.audit.actionItems")}
             </span>
             <div className="flex flex-col gap-1">
               {actionIdList.map(id => {
-                const label = ACTION_ITEM_LABELS[id]
-                const displayLabel = label ? (locale === "ko" ? label.ko : label.en) : id
+                const key = ACTION_ITEM_KEYS[id]
+                const displayLabel = key ? t(key) : id
                 const isOpen = expanded.has(id)
                 return (
                   <div

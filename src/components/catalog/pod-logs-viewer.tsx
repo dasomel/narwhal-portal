@@ -80,7 +80,7 @@ export function PodLogsViewer({ namespace, appName }: PodLogsViewerProps) {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <CardTitle className="text-sm">{t("logs.title")}</CardTitle>
           <div className="flex items-center gap-1 flex-wrap">
-            <Badge variant="outline" className="text-[10px]">
+            <Badge variant="outline" className="text-xs">
               {t("logs.autoRefresh")} 10s
             </Badge>
           </div>
@@ -98,7 +98,7 @@ export function PodLogsViewer({ namespace, appName }: PodLogsViewerProps) {
                 <SelectItem key={p.name} value={p.name} className="text-xs">
                   <span>{p.name}</span>
                   <Badge
-                    className={`ml-2 text-[10px] ${
+                    className={`ml-2 text-xs ${
                       p.status === "Running"
                         ? "bg-narwhal-success/15 text-narwhal-success"
                         : p.status === "Pending"
@@ -181,7 +181,7 @@ export function PodLogsViewer({ namespace, appName }: PodLogsViewerProps) {
           </div>
         ) : (
           <pre
-            className="bg-foreground/95 text-background rounded-md p-3 text-[11px] font-mono leading-relaxed overflow-auto max-h-[500px] whitespace-pre-wrap break-all"
+            className="bg-foreground/95 text-background rounded-md p-3 text-xs font-mono leading-relaxed overflow-auto max-h-[500px] whitespace-pre-wrap break-all"
           >
             {logsData?.logs || t("logs.noLogs")}
           </pre>

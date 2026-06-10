@@ -41,7 +41,7 @@ function SortHeader({
     >
       <span className="inline-flex items-center gap-0.5">
         {label}
-        <span className={`text-[10px] transition-colors ${active ? "text-blue-500" : "text-muted-foreground/40 group-hover:text-muted-foreground"}`}>
+        <span className={`text-xs transition-colors ${active ? "text-blue-500" : "text-muted-foreground/40 group-hover:text-muted-foreground"}`}>
           {indicator}
         </span>
       </span>

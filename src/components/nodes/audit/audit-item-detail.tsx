@@ -40,7 +40,7 @@ export interface SystemStatusInput {
 }
 
 // ---- Shared style tokens (single source of truth; sections import from here) ----
-export const TH = "px-6 py-4 text-[10px] font-black text-muted-foreground uppercase tracking-widest whitespace-nowrap"
+export const TH = "px-6 py-4 text-xs font-black text-muted-foreground uppercase tracking-widest whitespace-nowrap"
 export const TD = "px-6 py-4 text-sm"
 export const ROW = "hover:bg-muted/50/30 transition-all duration-200"
 export const TRIGGER_CLS = "hover:no-underline px-8 rounded-2xl transition-all py-6 group hover:bg-card shadow-sm"
@@ -98,7 +98,7 @@ export function ConfigTable({ rows, locale, showAll = true }: {
   const t = (key: TranslationKey) => translate(locale, key)
   const visibleRows = showAll ? rows : rows.filter(r => r.currentValue !== r.recommendedValue)
   if (visibleRows.length === 0) {
-    return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+    return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
   }
   return (
     <div className={TABLE_WRAP}>
@@ -123,7 +123,7 @@ export function ConfigTable({ rows, locale, showAll = true }: {
               <td className={`${TD} text-center font-black text-blue-600`}>{r.recommendedValue}</td>
               <td className={`${TD} text-muted-foreground max-w-xs`}>
                 <p>{pick(r.description, locale)}</p>
-                {r.impact && <p className="text-[10px] text-narwhal-accent mt-0.5">{pick(r.impact, locale)}</p>}
+                {r.impact && <p className="text-xs text-narwhal-accent mt-0.5">{pick(r.impact, locale)}</p>}
               </td>
               <td className={`${TD} text-right`}>
                 {healthBadge(
@@ -157,7 +157,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
     case "kernel-params": {
       const visibleParams = showAll ? s.kernelParams : s.kernelParams.filter(p => p.currentValue !== p.recommendedValue)
       if (visibleParams.length === 0) {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className={TABLE_WRAP}>
@@ -176,7 +176,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
                   <td className={TD}>
                     <p className="font-black text-foreground font-mono text-[12px]">{item.param}</p>
                     {item.description && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">{pick(item.description, locale)}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 max-w-xs">{pick(item.description, locale)}</p>
                     )}
                     {item.impact && (
                       <span className="text-[8px] font-black text-narwhal-accent uppercase tracking-widest bg-narwhal-accent-soft px-1.5 py-0.5 rounded border border-narwhal-accent/20 leading-none mt-1 inline-block">
@@ -207,7 +207,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
     case "kernel-modules": {
       const visibleModules = showAll ? s.kernelModules : s.kernelModules.filter(m => m.required && !m.loaded)
       if (visibleModules.length === 0) {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className={TABLE_WRAP}>
@@ -226,7 +226,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
                   <td className={TD}>
                     <p className="font-black font-mono text-foreground text-[12px]">{m.name}</p>
                     {(m as KernelModuleInfo & { description?: string }).description && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{pick(m.purpose, locale)}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{pick(m.purpose, locale)}</p>
                     )}
                     {(m as KernelModuleInfo & { configHint?: ConfigHint }).configHint && (
                       <ConfigHintRow
@@ -252,7 +252,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
     case "resource-limits": {
       const visibleLimits = showAll ? s.resourceLimits : s.resourceLimits.filter(r => r.currentValue !== r.recommendedValue)
       if (visibleLimits.length === 0) {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className={TABLE_WRAP}>
@@ -272,7 +272,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
                   <td className={TD}>
                     <p className="font-black font-mono text-foreground text-[12px]">{r.name}</p>
                     {r.description && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{pick(r.description, locale)}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{pick(r.description, locale)}</p>
                     )}
                     {(r as ResourceLimitInfo & { configHint?: ConfigHint }).configHint && (
                       <ConfigHintRow
@@ -301,7 +301,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
     case "required-packages": {
       const visiblePackages = showAll ? s.requiredPackages : s.requiredPackages.filter(p => !p.installed)
       if (visiblePackages.length === 0) {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className={TABLE_WRAP}>
@@ -319,7 +319,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
                   <td className={TD}>
                     <p className="font-black font-mono text-foreground text-[12px]">{p.name}</p>
                     {(p as RequiredPackageInfo & { description?: string }).description && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{pick(p.purpose, locale)}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{pick(p.purpose, locale)}</p>
                     )}
                     {(p as RequiredPackageInfo & { configHint?: ConfigHint }).configHint && (
                       <ConfigHintRow
@@ -348,7 +348,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
         !d.noatimeConfigured
       )
       if (visibleDisks.length === 0) {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className="space-y-4 p-6">
@@ -356,7 +356,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
             <div key={idx} className="rounded-xl border border-border bg-muted/50/20 p-5">
               <p className="font-black text-foreground font-mono text-sm">{d.device}</p>
               {(d as DiskTuningInfo & { description?: string }).description && (
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-1">{pick(d.description, locale)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5 mb-1">{pick(d.description, locale)}</p>
               )}
               {(d as DiskTuningInfo & { configHint?: ConfigHint }).configHint && (
                 <ConfigHintRow
@@ -400,7 +400,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
                   </div>
                 )}
                 <div className="flex flex-wrap gap-1 col-span-2 pt-1">
-                  <span className="text-muted-foreground font-bold text-[10px] self-center mr-1">Mount opts:</span>
+                  <span className="text-muted-foreground font-bold text-xs self-center mr-1">Mount opts:</span>
                   {d.mountOptions.map((opt) => (
                     <Badge key={opt} variant="outline" className="text-[9px] font-mono px-1.5 h-4 leading-none">{opt}</Badge>
                   ))}
@@ -415,7 +415,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
 
     case "lvm-auto-extend": {
       if (!showAll && s.lvmAutoExtend && s.lvmAutoExtend.enabled) {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className="p-6">
@@ -449,7 +449,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
         n.ringBufferTx.current !== n.ringBufferTx.recommended
       )
       if (visibleNics.length === 0) {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className="space-y-4 p-6">
@@ -457,7 +457,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
             <div key={idx} className="rounded-xl border border-border bg-muted/50/20 p-5">
               <p className="font-black text-foreground font-mono text-sm">{nic.interface}</p>
               {(nic as NicTuningInfo & { description?: string }).description && (
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-1">{pick(nic.description, locale)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5 mb-1">{pick(nic.description, locale)}</p>
               )}
               {(nic as NicTuningInfo & { configHint?: ConfigHint }).configHint && (
                 <ConfigHintRow
@@ -500,7 +500,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
                   <span className="font-bold text-foreground">{nic.coalescingUsec.tx} usec</span>
                 </div>
                 <div className="col-span-2 flex gap-2 pt-1">
-                  <span className="text-muted-foreground font-bold text-[10px] self-center mr-1">Offloading:</span>
+                  <span className="text-muted-foreground font-bold text-xs self-center mr-1">Offloading:</span>
                   {(["tso", "gso", "gro"] as const).map((key) => (
                     <Badge
                       key={key}
@@ -522,7 +522,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
     case "runtime-status": {
       const visibleRuntimes = showAll ? s.runtimeStatus : s.runtimeStatus.filter(r => !r.active)
       if (visibleRuntimes.length === 0) {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className={TABLE_WRAP}>
@@ -540,7 +540,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
                   <td className={TD}>
                     <p className="font-black font-mono text-foreground text-[12px]">{r.name}</p>
                     {(r as RuntimeStatusInfo & { description?: string }).description && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{pick(r.description, locale)}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{pick(r.description, locale)}</p>
                     )}
                     {(r as RuntimeStatusInfo & { configHint?: ConfigHint }).configHint && (
                       <ConfigHintRow hint={(r as RuntimeStatusInfo & { configHint: ConfigHint }).configHint} />
@@ -560,7 +560,7 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
 
     case "cgroup": {
       if (!showAll && s.cgroup.version === "v2") {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className="p-6">
@@ -574,12 +574,12 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
               </Badge>
               <div className="flex flex-wrap gap-1.5">
                 {s.cgroup.controllers.map((c) => (
-                  <Badge key={c} variant="outline" className="text-[10px] font-mono px-2 h-5 leading-none text-muted-foreground">{c}</Badge>
+                  <Badge key={c} variant="outline" className="text-xs font-mono px-2 h-5 leading-none text-muted-foreground">{c}</Badge>
                 ))}
               </div>
             </div>
             {(s.cgroup as CgroupInfo & { description?: string }).description && (
-              <p className="text-[11px] text-muted-foreground mt-2">{pick(s.cgroup.description, locale)}</p>
+              <p className="text-xs text-muted-foreground mt-2">{pick(s.cgroup.description, locale)}</p>
             )}
             {(s.cgroup as CgroupInfo & { configHint?: ConfigHint }).configHint && (
               <ConfigHintRow hint={(s.cgroup as CgroupInfo & { configHint: ConfigHint }).configHint} />
@@ -591,27 +591,27 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
 
     case "swap": {
       if (!showAll && !s.swap.enabled) {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className="p-6">
           <div className="rounded-xl border border-border bg-muted/50/20 p-5">
             <div className="grid grid-cols-3 gap-4 text-xs">
               <div className="flex flex-col gap-1.5">
-                <span className="text-muted-foreground font-bold uppercase tracking-widest text-[10px]">Enabled</span>
+                <span className="text-muted-foreground font-bold uppercase tracking-widest text-xs">Enabled</span>
                 {healthBadge(!s.swap.enabled, s.swap.enabled ? "On" : "Off", s.swap.enabled ? "On" : "Off")}
               </div>
               <div className="flex flex-col gap-1.5">
-                <span className="text-muted-foreground font-bold uppercase tracking-widest text-[10px]">fstab</span>
+                <span className="text-muted-foreground font-bold uppercase tracking-widest text-xs">fstab</span>
                 <Check ok={!s.swap.configuredInFstab} />
               </div>
               <div className="flex flex-col gap-1.5">
-                <span className="text-muted-foreground font-bold uppercase tracking-widest text-[10px]">Total</span>
+                <span className="text-muted-foreground font-bold uppercase tracking-widest text-xs">Total</span>
                 <span className="font-black text-foreground">{s.swap.totalMb} MB</span>
               </div>
             </div>
             {(s.swap as SwapStatusInfo & { description?: string }).description && (
-              <p className="text-[11px] text-muted-foreground mt-2">{pick(s.swap.description, locale)}</p>
+              <p className="text-xs text-muted-foreground mt-2">{pick(s.swap.description, locale)}</p>
             )}
             {(s.swap as SwapStatusInfo & { configHint?: ConfigHint }).configHint && (
               <ConfigHintRow
@@ -636,13 +636,13 @@ function NodeItemDetail({ id, systemStatus: s, locale, nodeName, userRole, showA
               <div className="flex-1 space-y-2">
                 <div className="flex justify-between items-start gap-2">
                   <h4 className="text-sm font-black text-foreground leading-tight">{pkg.name}
-                    <span className="text-[11px] text-muted-foreground font-bold ml-3 font-mono">{pkg.currentVersion} → {pkg.targetVersion}</span>
+                    <span className="text-xs text-muted-foreground font-bold ml-3 font-mono">{pkg.currentVersion} → {pkg.targetVersion}</span>
                   </h4>
                   <Badge variant="destructive" className="font-black text-[8px] px-2 h-5 leading-none uppercase shrink-0">{t("nodes.audit.badge.urgent")}</Badge>
                 </div>
                 <p className="text-xs font-bold text-muted-foreground leading-relaxed">{pick(pkg.reason, locale)}</p>
                 {pkg.link && (
-                  <a href={pkg.link} target="_blank" rel="noreferrer" className="text-[10px] font-black text-blue-600 inline-flex items-center gap-1.5 hover:underline underline-offset-4">
+                  <a href={pkg.link} target="_blank" rel="noreferrer" className="text-xs font-black text-blue-600 inline-flex items-center gap-1.5 hover:underline underline-offset-4">
                     {t("nodes.audit.cveReport")}
                   </a>
                 )}
@@ -668,20 +668,20 @@ function K8sItemDetail({ id, systemStatus: s, locale, showAll = true }: AuditIte
           <div className="rounded-xl border border-border bg-muted/50/20 p-5">
             <div className="flex flex-wrap items-center gap-6 text-sm">
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] text-muted-foreground font-black uppercase tracking-widest">Kubernetes</span>
+                <span className="text-xs text-muted-foreground font-black uppercase tracking-widest">Kubernetes</span>
                 <span className="font-black text-foreground font-mono">{clusterVersion.kubernetes}</span>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] text-muted-foreground font-black uppercase tracking-widest">Cluster Age</span>
+                <span className="text-xs text-muted-foreground font-black uppercase tracking-widest">Cluster Age</span>
                 <span className="font-black text-foreground font-mono">{clusterVersion.clusterAge}</span>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] text-muted-foreground font-black uppercase tracking-widest">Patch Current</span>
+                <span className="text-xs text-muted-foreground font-black uppercase tracking-widest">Patch Current</span>
                 {healthBadge(clusterVersion.isPatchCurrent, t("nodes.audit.badge.healthy"), t("nodes.audit.badge.tuneUp"))}
               </div>
             </div>
             {(clusterVersion as typeof clusterVersion & { description?: string }).description && (
-              <p className="text-[11px] text-muted-foreground mt-2">{pick(clusterVersion.description, locale)}</p>
+              <p className="text-xs text-muted-foreground mt-2">{pick(clusterVersion.description, locale)}</p>
             )}
             {(clusterVersion as typeof clusterVersion & { configHint?: ConfigHint }).configHint && (
               <ConfigHintRow hint={(clusterVersion as typeof clusterVersion & { configHint: ConfigHint }).configHint} />
@@ -696,8 +696,8 @@ function K8sItemDetail({ id, systemStatus: s, locale, showAll = true }: AuditIte
           <div className="rounded-xl border border-border bg-muted/50/20 p-5 space-y-4">
             <div className="flex items-center gap-4 flex-wrap">
               <span className="font-black text-foreground text-base">{cniPlugin.name}</span>
-              <Badge variant="outline" className="font-mono text-[10px]">{cniPlugin.version}</Badge>
-              <Badge variant="outline" className="text-[10px] font-bold uppercase">{cniPlugin.mode}</Badge>
+              <Badge variant="outline" className="font-mono text-xs">{cniPlugin.version}</Badge>
+              <Badge variant="outline" className="text-xs font-bold uppercase">{cniPlugin.mode}</Badge>
             </div>
             <div className="flex flex-wrap gap-2">
               <Badge
@@ -762,13 +762,13 @@ function K8sItemDetail({ id, systemStatus: s, locale, showAll = true }: AuditIte
         cpFlagsByComponent[f.component].push(f)
       }
       if (visibleFlags.length === 0) {
-        return <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
+        return <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">{t("nodes.audit.allPassed")}</p>
       }
       return (
         <div className="space-y-6 p-6">
           {Object.entries(cpFlagsByComponent).map(([component, flags]) => (
             <div key={component}>
-              <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-2 px-1">{component}</p>
+              <p className="text-xs font-black text-muted-foreground uppercase tracking-widest mb-2 px-1">{component}</p>
               <div className="overflow-x-auto rounded-xl border border-border">
                 <table className="w-full text-left text-xs bg-card">
                   <thead className="bg-muted/50 border-b border-border">
@@ -793,7 +793,7 @@ function K8sItemDetail({ id, systemStatus: s, locale, showAll = true }: AuditIte
                         <td className={`${TD} text-center font-black text-blue-600 font-mono`}>{f.recommendedValue}</td>
                         <td className={`${TD} text-muted-foreground max-w-xs`}>
                           <p>{pick(f.description, locale)}</p>
-                          {f.impact && <p className="text-[10px] text-narwhal-accent mt-0.5">{pick(f.impact, locale)}</p>}
+                          {f.impact && <p className="text-xs text-narwhal-accent mt-0.5">{pick(f.impact, locale)}</p>}
                         </td>
                         <td className={`${TD} text-right`}>
                           {healthBadge(f.currentValue === f.recommendedValue, t("nodes.audit.badge.healthy"), t("nodes.audit.badge.tuneUp"))}

@@ -61,13 +61,13 @@ export function NodeTuningSection({ locale, nodeName, userRole, systemStatus }: 
   return (
     <Card className="border border-border shadow-sm bg-card rounded-2xl overflow-hidden">
       <CardHeader className="py-5 px-8 border-b bg-muted/50/30">
-        <CardTitle className="text-[11px] font-black flex items-center gap-2 text-foreground uppercase tracking-widest">
+        <CardTitle className="text-xs font-black flex items-center gap-2 text-foreground uppercase tracking-widest">
           <Server className="h-4 w-4 text-narwhal-accent" />
           {t("nodes.audit.nodeTuning")}
           <button
             type="button"
             onClick={() => setShowAll(v => !v)}
-            className="ml-auto text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+            className="ml-auto text-xs font-black uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
           >
             {showAll ? t("nodes.audit.actionOnly") : t("nodes.audit.showAll")}
           </button>
@@ -75,7 +75,7 @@ export function NodeTuningSection({ locale, nodeName, userRole, systemStatus }: 
       </CardHeader>
       <CardContent className="p-0 pt-4 pb-4">
         {visibleItems.length === 0 ? (
-          <p className="px-8 py-4 text-[11px] font-black uppercase tracking-widest text-narwhal-success">
+          <p className="px-8 py-4 text-xs font-black uppercase tracking-widest text-narwhal-success">
             {t("nodes.audit.allPassed")}
           </p>
         ) : (

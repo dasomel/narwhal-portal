@@ -59,7 +59,7 @@ export function AuditTabClient({
       <div className="space-y-4">
         <SystemCheckSummary systemStatus={systemStatus} locale={locale} nodeName={nodeName} userRole={userRole} />
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-[11px] font-bold flex items-center gap-2 text-foreground uppercase tracking-widest font-mono">
+          <h2 className="text-xs font-bold flex items-center gap-2 text-foreground uppercase tracking-widest font-mono">
             <ShieldAlert className="h-4 w-4 text-rose-500" /> {auditTitleLabel}
           </h2>
           <Badge variant="outline" className="bg-muted/50/50 font-bold text-muted-foreground border-border uppercase text-[9px] tracking-[0.2em] px-3 py-1">

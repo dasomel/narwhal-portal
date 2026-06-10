@@ -129,7 +129,7 @@ export function RuntimeEventsFeed() {
             />
           </button>
           {autoRefresh && (
-            <span className="text-[10px] text-green-600 font-medium animate-pulse">●</span>
+            <span className="text-xs text-green-600 font-medium animate-pulse">●</span>
           )}
         </label>
 

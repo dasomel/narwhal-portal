@@ -255,12 +255,12 @@ export function ClusterInfraView() {
                   <div className="flex items-center gap-1">
                     <Badge
                       variant="outline"
-                      className="text-[10px] px-1 py-0 h-4 border-border text-muted-foreground"
+                      className="text-xs px-1 py-0 h-4 border-border text-muted-foreground"
                     >
                       {ns.podCount} {t("arch.pods")}
                     </Badge>
                     {ns.status === "Terminating" && (
-                      <Badge variant="destructive" className="text-[10px] px-1 py-0 h-4">
+                      <Badge variant="destructive" className="text-xs px-1 py-0 h-4">
                         Terminating
                       </Badge>
                     )}
