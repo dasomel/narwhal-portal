@@ -290,9 +290,12 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
     }
   }, [data, errorThreshold])
 
-  // 네임스페이스 목록 (노드에서 추출 — 메트릭 라벨 기반 실제 ns)
+  // 네임스페이스 목록 — 서버가 내려주는 "필터 전 전체" 목록 사용.
+  // (필터된 노드에서 추출하면 ns 선택 후 드롭다운이 이웃 ns만 남는 문제)
   const namespaces = useMemo(() => {
     if (!data) return []
+    if (data.namespaces && data.namespaces.length > 0) return data.namespaces
+    // 구버전 캐시 응답(namespaces 없음) 폴백
     return Array.from(new Set(data.nodes.map((n) => n.namespace)))
       .filter((ns) => ns && ns !== "unknown")
       .sort()

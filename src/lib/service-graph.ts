@@ -46,6 +46,10 @@ export interface ServiceGraphResult {
   generatedAt: string
   nodes: ServiceNode[]
   edges: ServiceEdge[]
+  // ns 필터 적용 "이전" 전체 그래프에서 관측된 네임스페이스 목록 —
+  // 드롭다운이 필터된 응답의 노드에서 목록을 뽑으면 선택할수록 목록이 줄어드는
+  // 문제가 있어 서버가 항상 전체 목록을 내려준다.
+  namespaces?: string[]
   notice?: string
 }
 
@@ -406,6 +410,13 @@ export async function getServiceGraph(
   // minRate 필터 추가 적용
   const filtered = rawEdges.filter((e) => e.requestRate >= minRate)
 
+  // 전체 네임스페이스 목록 (ns 필터 적용 전 기준 — 드롭다운용)
+  const allNamespaces = Array.from(
+    new Set(
+      filtered.flatMap((e) => [e.sourceNamespace, e.destinationNamespace]).filter((ns): ns is string => !!ns),
+    ),
+  ).sort()
+
   // namespace 필터: 메트릭 라벨(source/destination_workload_namespace) 기준.
   // 해당 ns가 출발 또는 도착에 걸치는 엣지를 포함해 경계 트래픽도 보이게 한다.
   // (hubble 등 ns 라벨이 없는 소스는 필터를 통과시키지 않음)
@@ -451,6 +462,7 @@ export async function getServiceGraph(
     generatedAt,
     nodes,
     edges,
+    namespaces: allNamespaces,
   }
 
   // 1분 TTL (spec §4.5)
