@@ -154,6 +154,7 @@ const icons = {
 // 자동 로그인되도록 각 도구의 OIDC 시작 엔드포인트를 직접 링크한다.
 // - argocd: /auth/login (303 -> keycloak), gitea: /user/oauth2/keycloak,
 //   grafana: /login/generic_oauth, harbor: /c/oidc/login (primary_auth_mode),
+//   headlamp: /oidc?cluster=main (302 -> keycloak),
 //   openbao: ?with=oidc 탭 프리셀렉트
 // - prometheus/alertmanager/hubble/velero-ui는 APISIX openid-connect 게이트가
 //   루트에서 자동 SSO 처리하므로 기본 URL 유지.
@@ -164,7 +165,7 @@ export const PLATFORM_TOOLS: PlatformTool[] = [
   { id: "grafana", name: "Grafana", description: "Metrics dashboard", url: "https://grafana.local.narwhal.io/login/generic_oauth", category: "monitoring", icon: icons.grafana, roles: ["cluster-admin", "developer", "viewer"] },
   { id: "prometheus", name: "Prometheus", description: "Metrics collection", url: "https://prometheus.local.narwhal.io", category: "monitoring", icon: icons.prometheus, roles: ["cluster-admin"] },
   { id: "alertmanager", name: "Alertmanager", description: "Alert management", url: "https://alertmanager.local.narwhal.io", category: "monitoring", icon: icons.alertmanager, roles: ["cluster-admin"] },
-  { id: "headlamp", name: "Headlamp", description: "Kubernetes dashboard", url: "https://headlamp.local.narwhal.io", category: "infra", icon: icons.headlamp, roles: ["cluster-admin", "developer"] },
+  { id: "headlamp", name: "Headlamp", description: "Kubernetes dashboard", url: "https://headlamp.local.narwhal.io/oidc?cluster=main", category: "infra", icon: icons.headlamp, roles: ["cluster-admin", "developer"] },
   { id: "hubble", name: "Hubble UI", description: "Cilium network visualization", url: "https://hubble.local.narwhal.io", category: "infra", icon: icons.hubble, roles: ["cluster-admin"] },
   { id: "openbao", name: "OpenBao", description: "Secret management", url: "https://openbao.local.narwhal.io/ui/vault/auth?with=oidc", category: "security", icon: icons.openbao, roles: ["cluster-admin"] },
   { id: "velero-ui", name: "Velero UI", description: "Backup/restore management", url: "https://velero-ui.local.narwhal.io", category: "backup", icon: icons.velero, roles: ["cluster-admin"] },
