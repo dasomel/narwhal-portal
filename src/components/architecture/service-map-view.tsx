@@ -3,7 +3,7 @@
 // TODO(wrap-up): i18n — 현재 한국어 하드코딩, i18n.ts에 키 추가 필요
 
 import { useQuery } from "@tanstack/react-query"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { ServiceGraphResponse } from "@/app/api/service-graph/route"
 import type { TranslationKey } from "@/lib/i18n"
 import { useT } from "@/lib/i18n-client"
@@ -169,11 +169,14 @@ function ReactFlowMap({
   focusService,
   selectedId,
   onSelect,
+  liveFlows,
 }: {
   data: ServiceGraphResponse
   focusService?: string
   selectedId: string | null
   onSelect: (id: string | null) => void
+  /** "src|dst" → flows/s (hubble 실시간 오버레이, live 모드에서만 채워짐) */
+  liveFlows?: Map<string, number>
 }) {
   const COLS = Math.ceil(Math.sqrt(data.nodes.length)) || 1
   const NODE_W = 160
@@ -232,6 +235,7 @@ function ReactFlowMap({
   const rfEdges = data.edges.map((e, i) => {
     const connected = isConnectedEdge(e.source, e.destination)
     const k = edgeKind(e, data.metricKind)
+    const fps = liveFlows?.get(`${e.source}|${e.destination}`) ?? 0
     return {
       id: `e-${i}`,
       source: e.source,
@@ -245,18 +249,43 @@ function ReactFlowMap({
       // 흐려진 엣지는 라벨 숨김 (선택 노드 주변만 정보 표시)
       label: connected
         ? formatTraffic(e.requestRate, k) +
-          (e.errorRate > 0.01 ? ` · ${(e.errorRate * 100).toFixed(1)}%` : "")
+          (e.errorRate > 0.01 ? ` · ${(e.errorRate * 100).toFixed(1)}%` : "") +
+          (fps > 0 ? ` ⚡${fps}/s` : "")
         : undefined,
-      labelStyle: { fontSize: 10, fill: edgeColor(e.errorRate) },
-      animated: connected && e.errorRate > 0.05,
+      labelStyle: { fontSize: 10, fill: fps > 0 ? "#f59e0b" : edgeColor(e.errorRate) },
+      // 실시간 흐름이 지나가는 엣지는 즉시 애니메이션
+      animated: connected && (fps > 0 || e.errorRate > 0.05),
     }
   })
+
+  // hubble 스트림에만 보이는 연결(그래프 메트릭 미반영 신규 트래픽) → 점선 고스트 엣지
+  const knownPairs = new Set(data.edges.map((e) => `${e.source}|${e.destination}`))
+  const nodeIdSet = new Set(data.nodes.map((n) => n.id))
+  const ghostEdges = Array.from(liveFlows?.entries() ?? [])
+    .filter(([key, fps]) => fps > 0 && !knownPairs.has(key))
+    .flatMap(([key, fps], gi) => {
+      const [src, dst] = key.split("|")
+      if (!nodeIdSet.has(src) || !nodeIdSet.has(dst)) return []
+      if (!isConnectedEdge(src, dst)) return []
+      return [
+        {
+          id: `ghost-${gi}`,
+          source: src,
+          target: dst,
+          style: { stroke: "#f59e0b", strokeWidth: 1.5, strokeDasharray: "6 4", opacity: 0.8 },
+          label: `⚡${fps}/s`,
+          labelStyle: { fontSize: 10, fill: "#f59e0b" },
+          animated: true,
+        },
+      ]
+    })
+  const allEdges = [...rfEdges, ...ghostEdges]
 
   return (
     <div style={{ height: 500 }} className="flex-1 min-w-0 rounded border border-border overflow-hidden">
       <ReactFlow
         nodes={rfNodes}
-        edges={rfEdges}
+        edges={allEdges}
         fitView
         attributionPosition="bottom-right"
         onNodeClick={(_, node) => onSelect(node.id === selectedId ? null : node.id)}
@@ -489,6 +518,27 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
   const [live, setLive] = useState(false)
   const effWindow: GraphWindow = live ? "1m" : window
 
+  // hubble-relay 흐름 스트림 (SSE) — 실시간 모드에서 엣지 활동 오버레이 (⚡ flows/s)
+  const [liveFlows, setLiveFlows] = useState<Map<string, number>>(new Map())
+  useEffect(() => {
+    if (!live) {
+      setLiveFlows(new Map())
+      return
+    }
+    const es = new EventSource("/api/service-graph/stream")
+    es.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data) as { edges: Array<{ source: string; destination: string; flowsPerSec: number }> }
+        setLiveFlows(new Map(d.edges.map((e) => [`${e.source}|${e.destination}`, e.flowsPerSec])))
+      } catch {
+        // 잘못된 이벤트는 무시
+      }
+    }
+    // 오류 시 EventSource가 자동 재연결 — 그동안 오버레이만 비움
+    es.onerror = () => setLiveFlows(new Map())
+    return () => es.close()
+  }, [live])
+
   const queryKey = ["service-graph", effWindow, namespace]
   const { data, isLoading, error } = useQuery<ServiceGraphResponse>({
     queryKey,
@@ -521,6 +571,13 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
       .filter((ns) => ns && ns !== "unknown")
       .sort()
   }, [data])
+
+  // sticky: Prometheus 타임아웃 등으로 빈 응답이 와도 드롭다운이 사라지지 않게
+  // 마지막 정상 목록을 유지한다 (선택 ns가 목록에 없어도 표시 유지).
+  const [nsOptions, setNsOptions] = useState<string[]>([])
+  useEffect(() => {
+    if (namespaces.length > 0) setNsOptions(namespaces)
+  }, [namespaces])
 
   const isEmpty = !isLoading && !error && filteredData && filteredData.nodes.length === 0
 
@@ -565,19 +622,22 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
           )}
         </button>
 
-        {/* 네임스페이스 필터 */}
-        {namespaces.length > 0 && (
+        {/* 네임스페이스 필터 (sticky 목록 — 빈 응답에도 유지) */}
+        {nsOptions.length > 0 && (
           <select
             value={namespace}
             onChange={(e) => setNamespace(e.target.value)}
             className="text-xs rounded border border-border bg-background px-2 py-1.5 text-foreground"
           >
             <option value="">{t("svcMap.allNamespaces")}</option>
-            {namespaces.map((ns) => (
+            {nsOptions.map((ns) => (
               <option key={ns} value={ns}>
                 {ns}
               </option>
             ))}
+            {namespace && !nsOptions.includes(namespace) && (
+              <option value={namespace}>{namespace}</option>
+            )}
           </select>
         )}
 
@@ -634,6 +694,7 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
               focusService={focusService}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              liveFlows={live ? liveFlows : undefined}
             />
             {selectedId && (
               <NodeDetailPanel

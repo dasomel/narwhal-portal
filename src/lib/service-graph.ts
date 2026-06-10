@@ -78,7 +78,9 @@ interface HistogramResult {
   value: number
 }
 
-async function queryPrometheus(promql: string, timeoutMs = 5000): Promise<VectorResult[] | null> {
+// 7d/30d 윈도의 4중 병렬 쿼리가 5초를 넘기는 경우가 있어 10초로 상향 —
+// 타임아웃 시 rawEdges=null → namespaces 없는 빈 응답이 내려가 UI가 깨졌었다.
+async function queryPrometheus(promql: string, timeoutMs = 10000): Promise<VectorResult[] | null> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -110,7 +112,7 @@ async function queryPrometheus(promql: string, timeoutMs = 5000): Promise<Vector
  * - fallback: app.kubernetes.io/name
  * - 매핑 실패 시 "unmapped-pods" 그룹
  */
-async function buildWorkloadToServiceMap(): Promise<Map<string, string>> {
+export async function buildWorkloadToServiceMap(): Promise<Map<string, string>> {
   const apps = await getArgoApps()
   const appNames = new Set(apps.map((a) => a.metadata.name))
   // 워크로드 이름이 ArgoCD app name과 직접 일치하는 경우를 맵으로 구성
@@ -121,7 +123,7 @@ async function buildWorkloadToServiceMap(): Promise<Map<string, string>> {
   return map
 }
 
-function resolveWorkload(workload: string, serviceMap: Map<string, string>): string {
+export function resolveWorkload(workload: string, serviceMap: Map<string, string>): string {
   if (SYSTEM_WORKLOADS.has(workload)) return ""
   // ArgoCD app 이름과 직접 매핑 시도
   if (serviceMap.has(workload)) return serviceMap.get(workload)!
