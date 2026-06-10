@@ -3,7 +3,7 @@
 // TODO(wrap-up): i18n — 현재 한국어 하드코딩, i18n.ts에 키 추가 필요
 
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { ServiceGraphResponse } from "@/app/api/service-graph/route"
 import type { TranslationKey } from "@/lib/i18n"
 import { useT } from "@/lib/i18n-client"
@@ -164,6 +164,19 @@ function SvgFallbackMap({ data }: { data: ServiceGraphResponse }) {
 // ReactFlow 기반 맵
 // ---------------------------------------------------------------------------
 
+// 노드 위치 저장 (드래그 배치 유지 — 새로고침에도 보존)
+const POS_STORAGE_KEY = "narwhal-svcmap-positions-v1"
+
+function loadSavedPositions(): Map<string, { x: number; y: number }> {
+  try {
+    const raw = globalThis.localStorage?.getItem(POS_STORAGE_KEY)
+    if (!raw) return new Map()
+    return new Map(JSON.parse(raw) as Array<[string, { x: number; y: number }]>)
+  } catch {
+    return new Map()
+  }
+}
+
 function ReactFlowMap({
   data,
   focusService,
@@ -184,6 +197,14 @@ function ReactFlowMap({
   const GAP_X = 80
   const GAP_Y = 80
 
+  // 위치 안정화:
+  // 1) id 정렬 → 데이터 순서(엣지 등장 순서)가 바뀌어도 그리드 슬롯이 결정적
+  // 2) 드래그한 위치는 localStorage에 저장 → 폴링/새로고침에도 유지
+  const posRef = useRef<Map<string, { x: number; y: number }> | null>(null)
+  if (posRef.current === null) posRef.current = loadSavedPositions()
+  const savedPos = posRef.current
+  const sortedNodes = [...data.nodes].sort((a, b) => a.id.localeCompare(b.id))
+
   // 선택 노드의 이웃 집합 — 선택 시 연결된 것만 선명하게, 나머지는 흐리게
   const neighborIds = new Set<string>()
   if (selectedId) {
@@ -197,14 +218,14 @@ function ReactFlowMap({
   const isConnectedEdge = (s: string, d: string) =>
     selectedId === null || s === selectedId || d === selectedId
 
-  const rfNodes = data.nodes.map((n, i) => {
+  const rfNodes = sortedNodes.map((n, i) => {
     const col = i % COLS
     const row = Math.floor(i / COLS)
     const isFocused = (focusService && n.id === focusService) || n.id === selectedId
     const isUnmapped = n.id.startsWith("unmapped-pods:")
     return {
       id: n.id,
-      position: { x: col * (NODE_W + GAP_X), y: row * (NODE_H + GAP_Y) },
+      position: savedPos.get(n.id) ?? { x: col * (NODE_W + GAP_X), y: row * (NODE_H + GAP_Y) },
       data: { label: isUnmapped ? n.id.replace("unmapped-pods:", "") + " *" : n.id },
       style: {
         background: isFocused ? "#1d4ed8" : "#1e293b",
@@ -290,6 +311,14 @@ function ReactFlowMap({
         attributionPosition="bottom-right"
         onNodeClick={(_, node) => onSelect(node.id === selectedId ? null : node.id)}
         onPaneClick={() => onSelect(null)}
+        onNodeDragStop={(_, node) => {
+          savedPos.set(node.id, node.position)
+          try {
+            globalThis.localStorage?.setItem(POS_STORAGE_KEY, JSON.stringify(Array.from(savedPos.entries())))
+          } catch {
+            // 저장 실패는 무시 (세션 내 ref는 유지됨)
+          }
+        }}
       >
         <Background />
         <Controls />
