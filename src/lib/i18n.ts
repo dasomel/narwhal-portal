@@ -488,7 +488,8 @@ const ko = {
   "governance.detail.events.message": "메시지",
   "governance.detail.events.count": "횟수",
   "governance.detail.events.lastSeen": "마지막 발생",
-  "governance.detail.events.empty": "이벤트가 없습니다.",
+  "governance.detail.events.empty": "최근 이벤트가 없습니다.",
+  "governance.detail.events.retentionHint": "Kubernetes는 이벤트를 약 1시간만 보존합니다. 안정적으로 실행 중인 파드는 표시할 이벤트가 없을 수 있습니다.",
 
   // traces
   "traces.title": "분산 트레이스",
@@ -980,6 +981,12 @@ const ko = {
   "resources.table.namespace": "네임스페이스",
   "resources.table.pod": "파드",
   "resources.table.usage": "사용량",
+  "resources.noRequestDialog.title": "requests 미설정 파드",
+  "resources.noRequestDialog.action": "목록 보기 →",
+  "resources.noRequestDialog.empty": "requests가 누락된 파드가 없습니다.",
+  "resources.noRequestDialog.missingContainers": "누락 컨테이너",
+  "resources.noRequestDialog.all": "전체",
+  "resources.noRequestDialog.summary": "총 {count}개의 파드가 requests를 설정하지 않았습니다.",
 } as const
 
 const en: Record<keyof typeof ko, string> = {
@@ -1468,7 +1475,8 @@ const en: Record<keyof typeof ko, string> = {
   "governance.detail.events.message": "Message",
   "governance.detail.events.count": "Count",
   "governance.detail.events.lastSeen": "Last Seen",
-  "governance.detail.events.empty": "No events found.",
+  "governance.detail.events.empty": "No recent events.",
+  "governance.detail.events.retentionHint": "Kubernetes retains events for only ~1 hour. A pod running stably may have no events to show.",
 
   // traces
   "traces.title": "Distributed Traces",
@@ -1960,6 +1968,12 @@ const en: Record<keyof typeof ko, string> = {
   "resources.table.namespace": "Namespace",
   "resources.table.pod": "Pod",
   "resources.table.usage": "Usage",
+  "resources.noRequestDialog.title": "Pods Lacking Requests",
+  "resources.noRequestDialog.action": "View List →",
+  "resources.noRequestDialog.empty": "No pods are missing resource requests.",
+  "resources.noRequestDialog.missingContainers": "Missing Containers",
+  "resources.noRequestDialog.all": "All",
+  "resources.noRequestDialog.summary": "A total of {count} pods lack resource requests.",
 }
 
 export type TranslationKey = keyof typeof ko

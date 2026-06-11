@@ -25,18 +25,25 @@ export interface TopPod {
   memBytes: number
 }
 
+export interface NoRequestPod {
+  namespace: string
+  pod: string
+  containers: string[]
+}
+
 export interface ResourcesResponseV2 {
   namespaces: NamespaceUsageV2[]
   topCpuPods: TopPod[]        // top 10 by cpu usage, cluster-wide (exclude kube-*)
   topMemPods: TopPod[]        // top 10 by memory
   cluster: { cpuPercent: number; memPercent: number; totalPods: number; noRequestPods: number }
+  noRequestPodsList: NoRequestPod[]
 }
 
 export async function GET() {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const cacheKey = "governance:resources:v2"
+  const cacheKey = "governance:resources:v3"
   try {
     const cached = await cacheGet<ResourcesResponseV2>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -84,19 +91,37 @@ export async function GET() {
     // Count pods missing cpu or memory requests
     const noRequestPodsByNs: Record<string, number> = {}
     let clusterNoRequestPods = 0
+    const noRequestPodsList: NoRequestPod[] = []
 
     for (const pod of allK8sPods) {
-      const ns = pod.metadata.namespace
+      const ns = pod.metadata.namespace || ""
+      const podName = pod.metadata.name || ""
       const containers = pod.spec?.containers || []
-      const lacksRequests = containers.some((c) => {
+      
+      const missingContainers: string[] = []
+      for (const c of containers) {
         const req = c.resources?.requests
-        return !req || !req.cpu || !req.memory
-      })
-      if (lacksRequests) {
+        if (!req || !req.cpu || !req.memory) {
+          missingContainers.push(c.name || "")
+        }
+      }
+
+      if (missingContainers.length > 0) {
         noRequestPodsByNs[ns] = (noRequestPodsByNs[ns] || 0) + 1
         clusterNoRequestPods++
+        noRequestPodsList.push({
+          namespace: ns,
+          pod: podName,
+          containers: missingContainers,
+        })
       }
     }
+
+    noRequestPodsList.sort((a, b) => {
+      const nsCompare = a.namespace.localeCompare(b.namespace)
+      if (nsCompare !== 0) return nsCompare
+      return a.pod.localeCompare(b.pod)
+    })
 
     const resultNamespaces: NamespaceUsageV2[] = userNs.slice(0, 30).map((ns) => {
       const name = ns.name
@@ -171,6 +196,7 @@ export async function GET() {
         totalPods: clusterMetrics.pods?.total ?? 0,
         noRequestPods: clusterNoRequestPods,
       },
+      noRequestPodsList: noRequestPodsList.slice(0, 300),
     }
 
     try {

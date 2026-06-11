@@ -122,9 +122,15 @@ export interface TopPod {
   cpuCores: number            // current usage
   memBytes: number
 }
+export interface NoRequestPod {
+  namespace: string
+  pod: string
+  containers: string[]
+}
 export interface ResourcesResponseV2 {
   namespaces: NamespaceUsageV2[]
   topCpuPods: TopPod[]        // top 10 by cpu usage, cluster-wide (exclude kube-*)
   topMemPods: TopPod[]        // top 10 by memory
   cluster: { cpuPercent: number; memPercent: number; totalPods: number; noRequestPods: number }
+  noRequestPodsList: NoRequestPod[]
 }

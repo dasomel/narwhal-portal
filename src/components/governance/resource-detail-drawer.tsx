@@ -465,8 +465,9 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange, initi
                         <span className="text-xs text-muted-foreground animate-pulse">{t("common.loading")}</span>
                       </div>
                     ) : events.length === 0 ? (
-                      <div className="h-32 bg-muted/20 border border-dashed rounded-lg flex items-center justify-center">
+                      <div className="h-32 bg-muted/20 border border-dashed rounded-lg flex flex-col items-center justify-center gap-1 px-4 text-center">
                         <span className="text-sm text-muted-foreground">{t("governance.detail.events.empty")}</span>
+                        <span className="text-xs text-muted-foreground/70">{t("governance.detail.events.retentionHint")}</span>
                       </div>
                     ) : (
                       <div className="border rounded-lg overflow-hidden bg-card">

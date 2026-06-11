@@ -6,6 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useT } from "@/lib/i18n-client"
 import { ResourceDetailDrawer } from "./resource-detail-drawer"
 import type { ResourcesResponseV2, NamespaceUsageV2 } from "./types"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog"
 
 const toGiB = (bytes: number) => (bytes / (1024 * 1024 * 1024)).toFixed(2)
 
@@ -21,6 +28,8 @@ export function ResourceChart() {
   const t = useT()
   const [selectedNamespace, setSelectedNamespace] = useState<string | null>(null)
   const [selectedPodName, setSelectedPodName] = useState<string | undefined>(undefined)
+  const [noRequestDialogOpen, setNoRequestDialogOpen] = useState(false)
+  const [filterNamespace, setFilterNamespace] = useState<string>("all")
 
   const { data, isLoading } = useQuery<ResourcesResponseV2>({
     queryKey: ["governance-resources"],
@@ -32,6 +41,12 @@ export function ResourceChart() {
   const topCpuPods = data?.topCpuPods ?? []
   const topMemPods = data?.topMemPods ?? []
   const cluster = data?.cluster ?? { cpuPercent: 0, memPercent: 0, totalPods: 0, noRequestPods: 0 }
+
+  const noRequestPodsList = data?.noRequestPodsList ?? []
+  const uniqueNamespaces = Array.from(new Set(noRequestPodsList.map((p) => p.namespace))).sort()
+  const filteredNoRequestPods = filterNamespace === "all"
+    ? noRequestPodsList
+    : noRequestPodsList.filter((p) => p.namespace === filterNamespace)
 
   const handleChartClick = (state: any) => {
     if (state && state.activeLabel && state.activePayload && state.activePayload.length > 0) {
@@ -85,19 +100,41 @@ export function ResourceChart() {
     <div className="space-y-4">
       {/* 4 Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {statCards.map((card, idx) => (
-          <div key={idx} className={`rounded-lg border p-4 flex flex-col justify-between ${card.bg}`}>
-            <div>
-              <div className="text-xs font-medium text-muted-foreground">{card.label}</div>
-              <div className={`text-2xl font-bold mt-1.5 ${card.color}`}>{card.value}</div>
-            </div>
-            {card.caption && (
-              <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-2 font-medium">
-                {card.caption}
+        {statCards.map((card, idx) => {
+          const isClickable = idx === 3
+          return (
+            <div
+              key={idx}
+              className={`rounded-lg border p-4 flex flex-col justify-between transition-all ${card.bg} ${
+                isClickable
+                  ? "cursor-pointer hover:ring-2 hover:ring-ring focus:outline-none"
+                  : ""
+              }`}
+              onClick={isClickable ? () => setNoRequestDialogOpen(true) : undefined}
+            >
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">{card.label}</div>
+                <div className={`text-2xl font-bold mt-1.5 ${card.color}`}>{card.value}</div>
               </div>
-            )}
-          </div>
-        ))}
+              {isClickable ? (
+                <div className="text-[10px] mt-2 font-medium flex items-center justify-between gap-2">
+                  <span className="text-amber-600 dark:text-amber-400 truncate">
+                    {card.caption || ""}
+                  </span>
+                  <span className="text-muted-foreground hover:text-foreground shrink-0 font-semibold transition-colors">
+                    {t("resources.noRequestDialog.action")}
+                  </span>
+                </div>
+              ) : (
+                card.caption && (
+                  <div className="text-[10px] text-muted-foreground mt-2 font-medium">
+                    {card.caption}
+                  </div>
+                )
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {/* Namespace Bar Chart Card */}
@@ -305,6 +342,84 @@ export function ResourceChart() {
         }}
         initialPodName={selectedPodName}
       />
+
+      <Dialog open={noRequestDialogOpen} onOpenChange={setNoRequestDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-6">
+          <DialogHeader className="pb-2">
+            <DialogTitle className="text-lg font-semibold flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+              {t("resources.noRequestDialog.title")}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("resources.noRequestDialog.summary", { count: filteredNoRequestPods.length })}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Filter Dropdown */}
+          <div className="flex justify-end items-center gap-2 mb-3">
+            <span className="text-xs text-muted-foreground">{t("resources.table.namespace")}:</span>
+            <select
+              value={filterNamespace}
+              onChange={(e) => setFilterNamespace(e.target.value)}
+              className="text-xs bg-background border border-input rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            >
+              <option value="all">{t("resources.noRequestDialog.all")}</option>
+              {uniqueNamespaces.map((ns) => (
+                <option key={ns} value={ns}>
+                  {ns}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Table Container */}
+          <div className="flex-1 min-h-0 overflow-y-auto border border-border rounded-lg max-h-[50vh]">
+            {filteredNoRequestPods.length === 0 ? (
+              <div className="py-12 text-center text-xs text-muted-foreground italic">
+                {t("resources.noRequestDialog.empty")}
+              </div>
+            ) : (
+              <table className="w-full text-xs text-left border-collapse">
+                <thead className="bg-muted/50 sticky top-0 border-b z-10">
+                  <tr>
+                    <th className="p-3 font-semibold text-muted-foreground">
+                      {t("resources.table.namespace")}
+                    </th>
+                    <th className="p-3 font-semibold text-muted-foreground">
+                      {t("resources.table.pod")}
+                    </th>
+                    <th className="p-3 font-semibold text-muted-foreground">
+                      {t("resources.noRequestDialog.missingContainers")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filteredNoRequestPods.map((pod, idx) => (
+                    <tr
+                      key={idx}
+                      className="hover:bg-muted/40 cursor-pointer transition-colors"
+                      onClick={() => {
+                        setNoRequestDialogOpen(false)
+                        handlePodClick(pod.namespace, pod.pod)
+                      }}
+                    >
+                      <td className="p-3 font-medium text-foreground">
+                        {pod.namespace}
+                      </td>
+                      <td className="p-3 font-mono text-[11px] text-foreground">
+                        {pod.pod}
+                      </td>
+                      <td className="p-3 text-muted-foreground font-mono text-[10px]">
+                        {pod.containers.join(", ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
