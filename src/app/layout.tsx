@@ -20,7 +20,14 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const [locale, theme] = await Promise.all([getLocale(), getTheme()])
   return (
-    <html lang={locale} className={`${pretendard.variable} ${theme === "dark" ? "dark" : ""}`.trim()}>
+    // suppressHydrationWarning: browser extensions (e.g. Immersive Translate adds
+    // data-immersive-translate-page-theme) and theme attrs mutate <html> before React
+    // hydrates. Scoped to this element's own attributes only — child mismatches still warn.
+    <html
+      lang={locale}
+      className={`${pretendard.variable} ${theme === "dark" ? "dark" : ""}`.trim()}
+      suppressHydrationWarning
+    >
       <body>
         <Providers locale={locale}>{children}</Providers>
       </body>
