@@ -134,3 +134,48 @@ export interface ResourcesResponseV2 {
   cluster: { cpuPercent: number; memPercent: number; totalPods: number; noRequestPods: number }
   noRequestPodsList: NoRequestPod[]
 }
+
+export interface NodeLoad {
+  node: string
+  role: "control-plane" | "worker"
+  podCount: number
+  cpuPercent: number | null   // from prometheus node metrics if available, else null
+  memPercent: number | null
+}
+
+export interface WorkloadSpread {
+  namespace: string
+  kind: string                // Deployment | StatefulSet | DaemonSet | ...
+  name: string                // workload name (ReplicaSet collapsed to its Deployment)
+  replicas: number            // running pod count for this workload
+  nodes: { node: string; count: number }[]   // sorted desc by count
+  distinctNodes: number
+  concentrated: boolean       // replicas>=2 && distinctNodes===1
+  hasAntiAffinity: boolean    // any pod has spec.affinity.podAntiAffinity
+  hasTopologySpread: boolean  // any pod has spec.topologySpreadConstraints
+  risk: "high" | "medium" | "low"
+  // high: concentrated (multi-replica on single node)
+  // medium: replicas>=2 && !hasAntiAffinity && !hasTopologySpread (spread by luck, no guarantee)
+  // low: otherwise
+}
+
+export interface DistributionSummary {
+  nodeCount: number
+  workerCount: number
+  totalPods: number
+  // node balance: max-min pod count across WORKER nodes (control-plane excluded)
+  podImbalance: number               // maxWorkerPods - minWorkerPods
+  maxNode: { node: string; podCount: number } | null
+  minNode: { node: string; podCount: number } | null
+  concentratedWorkloads: number      // count risk==="high"
+  unguardedWorkloads: number         // count risk==="medium"
+  multiReplicaWorkloads: number      // replicas>=2 total
+  controlPlaneWorkloadPods: number   // non-DaemonSet, non-static app pods running on control-plane nodes (leak indicator)
+}
+
+export interface DistributionResponse {
+  summary: DistributionSummary
+  nodes: NodeLoad[]            // sorted: workers first by podCount desc, then control-plane
+  workloads: WorkloadSpread[]  // sorted by risk (high>medium>low) then replicas desc, cap 200
+}
+

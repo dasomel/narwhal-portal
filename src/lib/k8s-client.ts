@@ -1610,5 +1610,161 @@ export async function getAllPodsMinimal(): Promise<K8sRawPodMinimal[]> {
   }
 }
 
+export interface K8sPodForDistribution {
+  metadata: {
+    name: string
+    namespace: string
+    ownerReferences?: Array<{
+      apiVersion: string
+      kind: string
+      name: string
+      uid: string
+    }>
+  }
+  spec?: {
+    nodeName?: string
+    affinity?: {
+      podAntiAffinity?: any
+    }
+    topologySpreadConstraints?: any[]
+  }
+}
+
+export interface K8sNodeForDistribution {
+  metadata: {
+    name: string
+    labels?: Record<string, string>
+  }
+}
+
+export async function getAllNodesForDistribution(): Promise<K8sNodeForDistribution[]> {
+  try {
+    const data = await k8sFetch<{ items: K8sNodeForDistribution[] }>("/api/v1/nodes")
+    return data.items ?? []
+  } catch (err) {
+    console.warn("[k8s] Failed to fetch all nodes for distribution:", (err as Error).message)
+    if (process.env.NODE_ENV === "development") {
+      return [
+        { metadata: { name: "node-master-1", labels: { "node-role.kubernetes.io/control-plane": "true" } } },
+        { metadata: { name: "node-worker-1", labels: { "kubernetes.io/hostname": "node-worker-1" } } },
+        { metadata: { name: "node-worker-2", labels: { "kubernetes.io/hostname": "node-worker-2" } } },
+        { metadata: { name: "node-worker-3", labels: { "kubernetes.io/hostname": "node-worker-3" } } },
+      ]
+    }
+    return []
+  }
+}
+
+export async function getAllPodsForDistribution(): Promise<K8sPodForDistribution[]> {
+  try {
+    const data = await k8sFetch<{ items: K8sPodForDistribution[] }>("/api/v1/pods")
+    return data.items ?? []
+  } catch (err) {
+    console.warn("[k8s] Failed to fetch all pods for distribution:", (err as Error).message)
+    if (process.env.NODE_ENV === "development") {
+      return [
+        {
+          metadata: {
+            name: "app-auth-1",
+            namespace: "auth",
+            ownerReferences: [{ apiVersion: "apps/v1", kind: "ReplicaSet", name: "app-auth-12345678", uid: "uid1" }]
+          },
+          spec: { nodeName: "node-worker-1" }
+        },
+        {
+          metadata: {
+            name: "app-auth-2",
+            namespace: "auth",
+            ownerReferences: [{ apiVersion: "apps/v1", kind: "ReplicaSet", name: "app-auth-12345678", uid: "uid1" }]
+          },
+          spec: { nodeName: "node-worker-1" }
+        },
+        {
+          metadata: {
+            name: "app-auth-3",
+            namespace: "auth",
+            ownerReferences: [{ apiVersion: "apps/v1", kind: "ReplicaSet", name: "app-auth-12345678", uid: "uid1" }]
+          },
+          spec: { nodeName: "node-worker-1" }
+        },
+        {
+          metadata: {
+            name: "app-payment-1",
+            namespace: "finance",
+            ownerReferences: [{ apiVersion: "apps/v1", kind: "ReplicaSet", name: "app-payment-87654321", uid: "uid2" }]
+          },
+          spec: { nodeName: "node-worker-1" }
+        },
+        {
+          metadata: {
+            name: "app-payment-2",
+            namespace: "finance",
+            ownerReferences: [{ apiVersion: "apps/v1", kind: "ReplicaSet", name: "app-payment-87654321", uid: "uid2" }]
+          },
+          spec: { nodeName: "node-worker-2" }
+        },
+        {
+          metadata: {
+            name: "app-frontend-1",
+            namespace: "default",
+            ownerReferences: [{ apiVersion: "apps/v1", kind: "ReplicaSet", name: "app-frontend-77777777", uid: "uid3" }]
+          },
+          spec: {
+            nodeName: "node-worker-1",
+            affinity: { podAntiAffinity: {} }
+          }
+        },
+        {
+          metadata: {
+            name: "app-frontend-2",
+            namespace: "default",
+            ownerReferences: [{ apiVersion: "apps/v1", kind: "ReplicaSet", name: "app-frontend-77777777", uid: "uid3" }]
+          },
+          spec: {
+            nodeName: "node-worker-2",
+            affinity: { podAntiAffinity: {} }
+          }
+        },
+        {
+          metadata: {
+            name: "app-frontend-3",
+            namespace: "default",
+            ownerReferences: [{ apiVersion: "apps/v1", kind: "ReplicaSet", name: "app-frontend-77777777", uid: "uid3" }]
+          },
+          spec: {
+            nodeName: "node-worker-3",
+            affinity: { podAntiAffinity: {} }
+          }
+        },
+        {
+          metadata: {
+            name: "leaked-app-1",
+            namespace: "default",
+            ownerReferences: [{ apiVersion: "apps/v1", kind: "ReplicaSet", name: "leaked-app-66666666", uid: "uid4" }]
+          },
+          spec: { nodeName: "node-master-1" }
+        },
+        {
+          metadata: {
+            name: "kube-apiserver-node-master-1",
+            namespace: "kube-system",
+            ownerReferences: []
+          },
+          spec: { nodeName: "node-master-1" }
+        },
+        {
+          metadata: {
+            name: "aws-node-master-1",
+            namespace: "kube-system",
+            ownerReferences: [{ apiVersion: "apps/v1", kind: "DaemonSet", name: "aws-node", uid: "uid5" }]
+          },
+          spec: { nodeName: "node-master-1" }
+        }
+      ]
+    }
+    return []
+  }
+}
+
 
 
