@@ -155,9 +155,14 @@ const icons = {
 // - argocd: /auth/login (303 -> keycloak), gitea: /user/oauth2/keycloak,
 //   grafana: /login/generic_oauth, harbor: /c/oidc/login (primary_auth_mode),
 //   headlamp: /oidc?cluster=main (302 -> keycloak),
-//   openbao: ?with=oidc 탭 프리셀렉트
-// - prometheus/alertmanager/hubble/velero-ui는 APISIX openid-connect 게이트가
+//   openbao: ?with=oidc 탭 프리셀렉트 + "Sign in with OIDC Provider" 1클릭
+//   (OpenBao UI는 페이지 로드시 자동 OIDC 시작을 지원하지 않음 — 1클릭이 상한)
+// - prometheus/alertmanager/hubble은 APISIX openid-connect 게이트가
 //   루트에서 자동 SSO 처리하므로 기본 URL 유지.
+// - velero-ui는 앱 네이티브 Keycloak OAuth (게이트웨이 OIDC 없음, apisix-routes.yaml 참고).
+//   SPA가 자신이 생성한 state로만 코드 교환을 수행하므로 Keycloak authorize URL
+//   직링크(딥링크) 불가 — 루트 -> /login에서 "Sign in with Keycloak" 1클릭이 상한.
+//   (백엔드 토큰 교환은 narwhal velero-ui.yaml의 NODE_EXTRA_CA_CERTS로 사설 CA 신뢰)
 export const PLATFORM_TOOLS: PlatformTool[] = [
   { id: "argocd", name: "ArgoCD", description: "GitOps deployment management", url: "https://argocd.local.narwhal.io/auth/login", category: "gitops", icon: icons.argocd, roles: ["cluster-admin", "developer"] },
   { id: "gitea", name: "Gitea", description: "Git source code repository", url: "https://gitea.local.narwhal.io/user/oauth2/keycloak", category: "source", icon: icons.gitea, roles: ["cluster-admin", "developer"] },
