@@ -76,3 +76,55 @@ export interface DoraMetrics {
   perApp: DoraPerApp[]           // sorted by deploys desc, max 15
   recent: DoraDeployment[]       // newest first, max 20
 }
+
+export type RbacRisk = "critical" | "high" | "medium" | "low"
+export interface RbacRuleSummary {
+  ruleCount: number
+  wildcardVerbs: boolean      // any rule verbs includes "*"
+  wildcardResources: boolean  // any rule resources includes "*"
+  secretsAccess: boolean      // resources includes "secrets" (any verb)
+  writeAccess: boolean        // verbs intersect create|update|patch|delete|deletecollection
+  escalation: boolean         // verbs/resources include bind|escalate|impersonate
+}
+export interface RbacBindingV2 {
+  name: string
+  namespace: string | null
+  scope: "cluster" | "namespace"
+  roleRef: { kind: string; name: string }
+  subjects: { kind: string; name: string; namespace?: string }[]
+  risk: RbacRisk
+  riskReasons: string[]       // i18n-free English tokens
+  ruleSummary: RbacRuleSummary | null   // null when referenced role not found
+}
+export interface RbacSummary {
+  total: number
+  clusterScope: number
+  namespaceScope: number
+  bySubjectKind: { user: number; group: number; serviceAccount: number }
+  byRisk: { critical: number; high: number; medium: number; low: number }
+}
+export interface RbacResponseV2 { bindings: RbacBindingV2[]; summary: RbacSummary }
+
+export interface NamespaceUsageV2 {
+  namespace: string
+  cpuPercent: number          // usage / requests * 100 (as today)
+  memoryPercent: number
+  podCount: number
+  cpuUsedCores: number        // absolute, 3 decimals
+  cpuRequestedCores: number
+  memUsedBytes: number
+  memRequestedBytes: number
+  noRequestPods: number       // pods in ns with ANY container missing cpu+memory requests
+}
+export interface TopPod {
+  namespace: string
+  pod: string
+  cpuCores: number            // current usage
+  memBytes: number
+}
+export interface ResourcesResponseV2 {
+  namespaces: NamespaceUsageV2[]
+  topCpuPods: TopPod[]        // top 10 by cpu usage, cluster-wide (exclude kube-*)
+  topMemPods: TopPod[]        // top 10 by memory
+  cluster: { cpuPercent: number; memPercent: number; totalPods: number; noRequestPods: number }
+}

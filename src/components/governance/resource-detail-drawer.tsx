@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useT, useLocale } from "@/lib/i18n-client"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
@@ -17,6 +17,7 @@ interface ResourceDetailDrawerProps {
   app?: string
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialPodName?: string
 }
 
 function relativeTime(ts: string, tFn: any): string {
@@ -104,7 +105,7 @@ function ContainerVulnSummary({ image }: { image: string }) {
   )
 }
 
-export function ResourceDetailDrawer({ namespace, app, open, onOpenChange }: ResourceDetailDrawerProps) {
+export function ResourceDetailDrawer({ namespace, app, open, onOpenChange, initialPodName }: ResourceDetailDrawerProps) {
   const t = useT()
   const locale = useLocale()
   const [selectedPodName, setSelectedPodName] = useState<string | null>(null)
@@ -149,6 +150,15 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange }: Res
   const pods = podListData?.pods ?? []
   const events = eventsData?.events ?? []
 
+  useEffect(() => {
+    if (open && initialPodName) {
+      const podExists = pods.some((p) => p.name === initialPodName)
+      if (podExists) {
+        setSelectedPodName(initialPodName)
+      }
+    }
+  }, [open, initialPodName, pods])
+
   function handleOpenChange(newOpen: boolean) {
     onOpenChange(newOpen)
     if (!newOpen) {
@@ -160,7 +170,8 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange }: Res
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent className="w-full sm:max-w-2xl overflow-y-auto overflow-x-hidden flex flex-col h-full p-6">
+      {/* sheet.tsx 기본의 data-[side=right]:sm:max-w-sm 상한을 !important로 무력화 — 내용 잘림 방지 */}
+      <SheetContent className="w-full sm:!w-[56rem] sm:!max-w-[92vw] overflow-y-auto overflow-x-hidden flex flex-col h-full p-6">
         <SheetHeader className="border-b pb-4 mb-4 shrink-0">
           <div className="flex items-center gap-2">
             <SheetTitle className="text-lg font-bold text-foreground">
@@ -217,7 +228,7 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange }: Res
                           onClick={() => setSelectedPodName(pod.name)}
                           className="cursor-pointer hover:bg-muted/40 transition-colors"
                         >
-                          <TableCell className="py-2.5 font-medium max-w-[180px] truncate" title={pod.name}>
+                          <TableCell className="py-2.5 font-medium" title={pod.name}>
                             <div className="flex flex-col gap-0.5">
                               <span className="text-xs text-foreground font-semibold break-all">{pod.name}</span>
                               <div className="flex items-center gap-1.5 mt-0.5">
@@ -235,7 +246,7 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange }: Res
                           <TableCell className="py-2.5 text-center text-xs text-muted-foreground tabular-nums">
                             {pod.restarts}
                           </TableCell>
-                          <TableCell className="py-2.5 text-xs text-muted-foreground font-mono truncate max-w-[100px]" title={pod.node}>
+                          <TableCell className="py-2.5 text-xs text-muted-foreground font-mono whitespace-nowrap" title={pod.node}>
                             {pod.node || "—"}
                           </TableCell>
                           <TableCell className="py-2.5 text-right text-xs text-muted-foreground whitespace-nowrap">
@@ -357,7 +368,7 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange }: Res
                             {podDetail.containers.map((c) => (
                               <TableRow key={c.name} className="hover:bg-muted/10">
                                 <TableCell className="py-2 text-xs font-medium font-mono">{c.name}</TableCell>
-                                <TableCell className="py-2 text-xs font-mono max-w-[140px] truncate" title={c.image}>
+                                <TableCell className="py-2 text-xs font-mono break-all" title={c.image}>
                                   {c.image}
                                 </TableCell>
                                 <TableCell className="py-2 text-center text-xs">

@@ -1455,3 +1455,160 @@ export async function getResourceEvents(namespace: string, name: string): Promis
   }
 }
 
+export interface K8sPolicyRule {
+  verbs: string[]
+  apiGroups?: string[]
+  resources?: string[]
+  resourceNames?: string[]
+  nonResourceURLs?: string[]
+}
+
+export interface K8sClusterRole {
+  name: string
+  rules?: K8sPolicyRule[]
+}
+
+export interface K8sRole {
+  name: string
+  namespace: string
+  rules?: K8sPolicyRule[]
+}
+
+export async function getClusterRoles(): Promise<K8sClusterRole[]> {
+  try {
+    const data = await k8sFetch<{ items: Array<{ metadata: { name: string }; rules?: K8sPolicyRule[] }> }>(
+      "/apis/rbac.authorization.k8s.io/v1/clusterroles"
+    )
+    return (data.items ?? []).map((i) => ({
+      name: i.metadata.name,
+      rules: i.rules,
+    }))
+  } catch (err) {
+    console.warn("[k8s] ClusterRoles fetch failed:", (err as Error).message)
+    if (process.env.NODE_ENV === "development") {
+      return [
+        {
+          name: "cluster-admin",
+          rules: [
+            {
+              apiGroups: ["*"],
+              resources: ["*"],
+              verbs: ["*"],
+            },
+          ],
+        },
+        {
+          name: "admin",
+          rules: [
+            {
+              apiGroups: ["*"],
+              resources: ["*"],
+              verbs: ["*"],
+            },
+          ],
+        },
+        {
+          name: "view",
+          rules: [
+            {
+              apiGroups: ["*"],
+              resources: ["*"],
+              verbs: ["get", "list", "watch"],
+            },
+          ],
+        },
+      ]
+    }
+    return []
+  }
+}
+
+export async function getRoles(): Promise<K8sRole[]> {
+  try {
+    const data = await k8sFetch<{ items: Array<{ metadata: { name: string; namespace: string }; rules?: K8sPolicyRule[] }> }>(
+      "/apis/rbac.authorization.k8s.io/v1/roles"
+    )
+    return (data.items ?? []).map((i) => ({
+      name: i.metadata.name,
+      namespace: i.metadata.namespace,
+      rules: i.rules,
+    }))
+  } catch (err) {
+    console.warn("[k8s] Roles fetch failed:", (err as Error).message)
+    if (process.env.NODE_ENV === "development") {
+      return [
+        {
+          name: "namespace-editor",
+          namespace: "default",
+          rules: [
+            {
+              apiGroups: ["*"],
+              resources: ["*"],
+              verbs: ["create", "update", "patch", "delete"],
+            },
+          ],
+        },
+      ]
+    }
+    return []
+  }
+}
+
+export interface K8sRawPodMinimal {
+  metadata: {
+    name: string
+    namespace: string
+  }
+  spec?: {
+    containers?: Array<{
+      name: string
+      resources?: {
+        requests?: {
+          cpu?: string
+          memory?: string
+        }
+      }
+    }>
+  }
+}
+
+export async function getAllPodsMinimal(): Promise<K8sRawPodMinimal[]> {
+  try {
+    const data = await k8sFetch<{ items: K8sRawPodMinimal[] }>("/api/v1/pods")
+    return data.items ?? []
+  } catch (err) {
+    console.warn("[k8s] Failed to fetch all pods:", (err as Error).message)
+    if (process.env.NODE_ENV === "development") {
+      return [
+        {
+          metadata: { name: "frontend-pod-1", namespace: "default" },
+          spec: {
+            containers: [
+              { name: "web", resources: { requests: { cpu: "100m", memory: "128Mi" } } },
+            ],
+          },
+        },
+        {
+          metadata: { name: "frontend-pod-2", namespace: "default" },
+          spec: {
+            containers: [
+              { name: "web", resources: { requests: { cpu: "100m" } } },
+            ],
+          },
+        },
+        {
+          metadata: { name: "backend-pod-1", namespace: "default" },
+          spec: {
+            containers: [
+              { name: "api", resources: {} },
+            ],
+          },
+        },
+      ]
+    }
+    return []
+  }
+}
+
+
+
