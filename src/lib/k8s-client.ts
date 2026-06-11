@@ -1081,3 +1081,377 @@ export async function getPodsByNode(nodeName: string): Promise<PodInfo[]> {
     return []
   }
 }
+
+// --- Governance / detail drawer interfaces & helpers ---
+
+export interface PodSummary {
+  name: string
+  namespace: string
+  phase: string
+  ready: string
+  restarts: number
+  node: string
+  age: string
+  images: string[]
+}
+
+export interface PodDetail {
+  name: string
+  namespace: string
+  phase: string
+  podIP: string
+  node: string
+  qosClass: string
+  serviceAccount: string
+  createdAt: string
+  labels: Record<string, string>
+  owner: { kind: string; name: string } | null
+  containers: {
+    name: string
+    image: string
+    ready: boolean
+    restarts: number
+    state: string
+    requests: { cpu?: string; memory?: string }
+    limits: { cpu?: string; memory?: string }
+  }[]
+  conditions: { type: string; status: string; reason?: string; message?: string }[]
+}
+
+export interface ResourceEvent {
+  type: string
+  reason: string
+  message: string
+  count: number
+  firstSeen: string
+  lastSeen: string
+}
+
+interface RawPod {
+  metadata: {
+    name: string
+    namespace: string
+    creationTimestamp: string
+    labels?: Record<string, string>
+    ownerReferences?: Array<{
+      kind: string
+      name: string
+      uid: string
+      apiVersion: string
+      controller?: boolean
+    }>
+  }
+  spec: {
+    nodeName?: string
+    serviceAccountName?: string
+    qosClass?: string
+    containers?: Array<{
+      name: string
+      image: string
+      resources?: {
+        requests?: { cpu?: string; memory?: string }
+        limits?: { cpu?: string; memory?: string }
+      }
+    }>
+    initContainers?: Array<{
+      name: string
+      image: string
+      resources?: {
+        requests?: { cpu?: string; memory?: string }
+        limits?: { cpu?: string; memory?: string }
+      }
+    }>
+  }
+  status: {
+    phase?: string
+    podIP?: string
+    qosClass?: string
+    containerStatuses?: Array<{
+      name: string
+      image: string
+      ready: boolean
+      restartCount: number
+      state?: {
+        running?: { startedAt?: string }
+        waiting?: { reason?: string; message?: string }
+        terminated?: { reason?: string; message?: string }
+      }
+    }>
+    initContainerStatuses?: Array<{
+      name: string
+      image: string
+      ready: boolean
+      restartCount: number
+      state?: {
+        running?: { startedAt?: string }
+        waiting?: { reason?: string; message?: string }
+        terminated?: { reason?: string; message?: string }
+      }
+    }>
+    conditions?: Array<{
+      type: string
+      status: string
+      reason?: string
+      message?: string
+    }>
+  }
+}
+
+export async function getPodsList(namespace: string, app?: string): Promise<PodSummary[]> {
+  assertK8sNamespace(namespace)
+  
+  try {
+    let pods: RawPod[] = []
+    if (app) {
+      const selector = `app.kubernetes.io/instance=${encodeURIComponent(app)}`
+      try {
+        const data = await k8sFetch<{ items?: RawPod[] }>(
+          `/api/v1/namespaces/${safeK8sSegment(namespace)}/pods?labelSelector=${selector}`
+        )
+        pods = data.items ?? []
+      } catch (err) {
+        console.warn(`[getPodsList] Failed to fetch pods with label selector for app ${app}:`, err)
+      }
+    }
+
+    if (!app || pods.length === 0) {
+      const data = await k8sFetch<{ items?: RawPod[] }>(
+        `/api/v1/namespaces/${safeK8sSegment(namespace)}/pods`
+      )
+      pods = data.items ?? []
+    }
+
+    return pods.map((p) => {
+      const totalContainers = p.spec.containers?.length ?? 0
+      const readyContainers = p.status.containerStatuses?.filter((c) => c.ready).length ?? 0
+      
+      let restarts = 0
+      if (p.status.containerStatuses) {
+        for (const c of p.status.containerStatuses) {
+          restarts += c.restartCount ?? 0
+        }
+      }
+      if (p.status.initContainerStatuses) {
+        for (const c of p.status.initContainerStatuses) {
+          restarts += c.restartCount ?? 0
+        }
+      }
+
+      const images = Array.from(
+        new Set([
+          ...(p.spec.containers?.map((c) => c.image) ?? []),
+          ...(p.spec.initContainers?.map((c) => c.image) ?? []),
+        ])
+      )
+
+      return {
+        name: p.metadata.name,
+        namespace: p.metadata.namespace,
+        phase: p.status.phase ?? "Unknown",
+        ready: `${readyContainers}/${totalContainers}`,
+        restarts,
+        node: p.spec.nodeName ?? "",
+        age: p.metadata.creationTimestamp,
+        images,
+      }
+    })
+  } catch (err) {
+    console.warn(`[getPodsList] Failed to fetch pods list in ${namespace}:`, err)
+    if (process.env.NODE_ENV === "development") {
+      return [
+        {
+          name: app ? `${app}-pod-1` : "mock-pod-1",
+          namespace,
+          phase: "Running",
+          ready: "1/1",
+          restarts: 0,
+          node: "mock-node-1",
+          age: new Date().toISOString(),
+          images: ["nginx:latest"],
+        },
+        {
+          name: app ? `${app}-pod-2` : "mock-pod-2",
+          namespace,
+          phase: "Running",
+          ready: "2/2",
+          restarts: 1,
+          node: "mock-node-2",
+          age: new Date().toISOString(),
+          images: ["redis:alpine", "postgres:15"],
+        },
+      ]
+    }
+    throw err
+  }
+}
+
+export async function getPodDetail(namespace: string, name: string): Promise<PodDetail> {
+  assertK8sNamespace(namespace)
+  assertK8sName(name, "pod")
+
+  try {
+    const p = await k8sFetch<RawPod>(
+      `/api/v1/namespaces/${safeK8sSegment(namespace)}/pods/${safeK8sSegment(name)}`
+    )
+
+    const ownerRef = p.metadata.ownerReferences?.[0]
+    const owner = ownerRef ? { kind: ownerRef.kind, name: ownerRef.name } : null
+
+    const containers = (p.spec.containers ?? []).map((c) => {
+      const status = p.status.containerStatuses?.find((cs) => cs.name === c.name)
+      
+      let stateStr = "waiting"
+      if (status?.state) {
+        if (status.state.running) {
+          stateStr = "running"
+        } else if (status.state.waiting) {
+          stateStr = status.state.waiting.reason ? `waiting:${status.state.waiting.reason}` : "waiting"
+        } else if (status.state.terminated) {
+          stateStr = status.state.terminated.reason ? `terminated:${status.state.terminated.reason}` : "terminated"
+        }
+      }
+
+      return {
+        name: c.name,
+        image: c.image,
+        ready: status?.ready ?? false,
+        restarts: status?.restartCount ?? 0,
+        state: stateStr,
+        requests: {
+          cpu: c.resources?.requests?.cpu,
+          memory: c.resources?.requests?.memory,
+        },
+        limits: {
+          cpu: c.resources?.limits?.cpu,
+          memory: c.resources?.limits?.memory,
+        },
+      }
+    })
+
+    const conditions = (p.status.conditions ?? []).map((cond) => ({
+      type: cond.type,
+      status: cond.status,
+      reason: cond.reason,
+      message: cond.message,
+    }))
+
+    return {
+      name: p.metadata.name,
+      namespace: p.metadata.namespace,
+      phase: p.status.phase ?? "Unknown",
+      podIP: p.status.podIP ?? "",
+      node: p.spec.nodeName ?? "",
+      qosClass: p.status.qosClass ?? (p as any).spec.qosClass ?? "",
+      serviceAccount: p.spec.serviceAccountName ?? "",
+      createdAt: p.metadata.creationTimestamp,
+      labels: p.metadata.labels ?? {},
+      owner,
+      containers,
+      conditions,
+    }
+  } catch (err) {
+    console.warn(`[getPodDetail] Failed to fetch pod detail for ${namespace}/${name}:`, err)
+    if (process.env.NODE_ENV === "development") {
+      return {
+        name,
+        namespace,
+        phase: "Running",
+        podIP: "10.244.1.23",
+        node: "mock-node-1",
+        qosClass: "Burstable",
+        serviceAccount: "default",
+        createdAt: new Date().toISOString(),
+        labels: { app: name, tier: "frontend" },
+        owner: { kind: "ReplicaSet", name: `${name}-abcde` },
+        containers: [
+          {
+            name: "main",
+            image: "nginx:latest",
+            ready: true,
+            restarts: 0,
+            state: "running",
+            requests: { cpu: "100m", memory: "128Mi" },
+            limits: { cpu: "500m", memory: "512Mi" },
+          },
+        ],
+        conditions: [
+          { type: "Initialized", status: "True" },
+          { type: "Ready", status: "True" },
+          { type: "ContainersReady", status: "True" },
+          { type: "PodScheduled", status: "True" },
+        ],
+      }
+    }
+    throw err
+  }
+}
+
+export async function getResourceEvents(namespace: string, name: string): Promise<ResourceEvent[]> {
+  assertK8sNamespace(namespace)
+  assertK8sName(name, "resource")
+
+  try {
+    const selector = `involvedObject.name=${encodeURIComponent(name)}`
+    const data = await k8sFetch<{
+      items?: Array<{
+        type: string
+        reason: string
+        message: string
+        count?: number
+        firstTimestamp?: string | null
+        lastTimestamp?: string | null
+        eventTime?: string | null
+        metadata: {
+          creationTimestamp: string
+        }
+      }>
+    }>(
+      `/api/v1/namespaces/${safeK8sSegment(namespace)}/events?fieldSelector=${selector}`
+    )
+
+    const mapped: ResourceEvent[] = (data.items ?? []).map((i) => {
+      const firstSeen = i.firstTimestamp || i.metadata.creationTimestamp || i.eventTime || ""
+      const lastSeen = i.lastTimestamp || i.metadata.creationTimestamp || i.eventTime || ""
+      return {
+        type: i.type ?? "Normal",
+        reason: i.reason ?? "",
+        message: i.message ?? "",
+        count: i.count ?? 1,
+        firstSeen,
+        lastSeen,
+      }
+    })
+
+    const sorted = mapped.sort((a, b) => {
+      const aTime = a.lastSeen ? new Date(a.lastSeen).getTime() : 0
+      const bTime = b.lastSeen ? new Date(b.lastSeen).getTime() : 0
+      return bTime - aTime
+    })
+
+    return sorted.slice(0, 50)
+  } catch (err) {
+    console.warn(`[getResourceEvents] Failed to fetch events for ${namespace}/${name}:`, err)
+    if (process.env.NODE_ENV === "development") {
+      return [
+        {
+          type: "Normal",
+          reason: "Scheduled",
+          message: `Successfully assigned ${namespace}/${name} to mock-node-1`,
+          count: 1,
+          firstSeen: new Date().toISOString(),
+          lastSeen: new Date().toISOString(),
+        },
+        {
+          type: "Normal",
+          reason: "Pulled",
+          message: "Container image already present on machine",
+          count: 1,
+          firstSeen: new Date().toISOString(),
+          lastSeen: new Date().toISOString(),
+        },
+      ]
+    }
+    throw err
+  }
+}
+
