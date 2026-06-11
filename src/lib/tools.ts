@@ -154,15 +154,13 @@ const icons = {
 // 자동 로그인되도록 각 도구의 OIDC 시작 엔드포인트를 직접 링크한다.
 // - argocd: /auth/login (303 -> keycloak), gitea: /user/oauth2/keycloak,
 //   grafana: /login/generic_oauth, harbor: /c/oidc/login (primary_auth_mode),
-//   headlamp: /oidc?cluster=main (302 -> keycloak),
-//   openbao: ?with=oidc 탭 프리셀렉트 + "Sign in with OIDC Provider" 1클릭
-//   (OpenBao UI는 페이지 로드시 자동 OIDC 시작을 지원하지 않음 — 1클릭이 상한)
+//   headlamp: /oidc?cluster=main (302 -> keycloak)
 // - prometheus/alertmanager/hubble은 APISIX openid-connect 게이트가
 //   루트에서 자동 SSO 처리하므로 기본 URL 유지.
-// - velero-ui는 앱 네이티브 Keycloak OAuth (게이트웨이 OIDC 없음, apisix-routes.yaml 참고).
-//   SPA가 자신이 생성한 state로만 코드 교환을 수행하므로 Keycloak authorize URL
-//   직링크(딥링크) 불가 — 루트 -> /login에서 "Sign in with Keycloak" 1클릭이 상한.
-//   (백엔드 토큰 교환은 narwhal velero-ui.yaml의 NODE_EXTRA_CA_CERTS로 사설 CA 신뢰)
+// - openbao/velero-ui: 두 UI 모두 페이지 로드시 OIDC 자동 시작을 지원하지 않아
+//   APISIX가 같은 오리진에 서빙하는 /sso 부트스트랩 페이지로 제로클릭 처리
+//   (narwhal gitops/resources/apisix-routes.yaml openbao-sso / velero-ui-sso 참고).
+//   velero-ui 백엔드 토큰 교환은 velero-ui.yaml의 NODE_EXTRA_CA_CERTS로 사설 CA 신뢰.
 export const PLATFORM_TOOLS: PlatformTool[] = [
   { id: "argocd", name: "ArgoCD", description: "GitOps deployment management", url: "https://argocd.local.narwhal.io/auth/login", category: "gitops", icon: icons.argocd, roles: ["cluster-admin", "developer"] },
   { id: "gitea", name: "Gitea", description: "Git source code repository", url: "https://gitea.local.narwhal.io/user/oauth2/keycloak", category: "source", icon: icons.gitea, roles: ["cluster-admin", "developer"] },
@@ -172,8 +170,8 @@ export const PLATFORM_TOOLS: PlatformTool[] = [
   { id: "alertmanager", name: "Alertmanager", description: "Alert management", url: "https://alertmanager.local.narwhal.io", category: "monitoring", icon: icons.alertmanager, roles: ["cluster-admin"] },
   { id: "headlamp", name: "Headlamp", description: "Kubernetes dashboard", url: "https://headlamp.local.narwhal.io/oidc?cluster=main", category: "infra", icon: icons.headlamp, roles: ["cluster-admin", "developer"] },
   { id: "hubble", name: "Hubble UI", description: "Cilium network visualization", url: "https://hubble.local.narwhal.io", category: "infra", icon: icons.hubble, roles: ["cluster-admin"] },
-  { id: "openbao", name: "OpenBao", description: "Secret management", url: "https://openbao.local.narwhal.io/ui/vault/auth?with=oidc", category: "security", icon: icons.openbao, roles: ["cluster-admin"] },
-  { id: "velero-ui", name: "Velero UI", description: "Backup/restore management", url: "https://velero-ui.local.narwhal.io", category: "backup", icon: icons.velero, roles: ["cluster-admin"] },
+  { id: "openbao", name: "OpenBao", description: "Secret management", url: "https://openbao.local.narwhal.io/sso", category: "security", icon: icons.openbao, roles: ["cluster-admin"] },
+  { id: "velero-ui", name: "Velero UI", description: "Backup/restore management", url: "https://velero-ui.local.narwhal.io/sso", category: "backup", icon: icons.velero, roles: ["cluster-admin"] },
 ]
 
 export function getToolsForRole(role: UserRole): PlatformTool[] {
