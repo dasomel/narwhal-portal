@@ -8,18 +8,9 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import type { WorkloadVulnRow, ImageVulnReport, Severity } from "@/types/security"
+import { SEVERITIES, severityBadgeClass } from "@/components/security/severity"
 
 const PAGE_SIZE = 20
-
-const severityBadgeClass: Record<Severity, string> = {
-  Critical: "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400",
-  High: "bg-orange-100 text-orange-700 dark:bg-orange-950/50 dark:text-orange-400",
-  Medium: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400",
-  Low: "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400",
-  Unknown: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
-}
-
-const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "Unknown"]
 
 type SortKey = "namespace" | "name" | "image" | "Critical" | "High"
 type SortDir = "asc" | "desc"
@@ -73,15 +64,15 @@ function ExpandedVulnPanel({ image }: { image: string }) {
     staleTime: 60_000,
   })
 
-  const imageB64 = typeof window !== "undefined"
-    ? btoa(unescape(encodeURIComponent(image))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
-    : ""
+  const imageB64 = useMemo(
+    () => btoa(unescape(encodeURIComponent(image))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, ""),
+    [image]
+  )
 
   const top5 = useMemo(() => {
     if (!detail?.vulnerabilities) return []
-    const order: Severity[] = ["Critical", "High", "Medium", "Low", "Unknown"]
     return [...detail.vulnerabilities]
-      .sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity))
+      .sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity))
       .slice(0, 5)
   }, [detail])
 
@@ -175,14 +166,17 @@ export function VulnerabilitiesTable({ initialData }: Props) {
   const [page, setPage] = useState(1)
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
 
-  const queryParams = new URLSearchParams()
-  if (severity !== "all") queryParams.set("severity", severity)
-  if (namespace !== "all") queryParams.set("namespace", namespace)
+  const queryParamStr = useMemo(() => {
+    const params = new URLSearchParams()
+    if (severity !== "all") params.set("severity", severity)
+    if (namespace !== "all") params.set("namespace", namespace)
+    return params.toString()
+  }, [severity, namespace])
 
   const { data: rows = [], isLoading } = useQuery<WorkloadVulnRow[]>({
     queryKey: ["security-vulnerabilities", severity, namespace],
     queryFn: () =>
-      fetch(`/api/security/vulnerabilities?${queryParams}`).then((r) => r.json()),
+      fetch(`/api/security/vulnerabilities?${queryParamStr}`).then((r) => r.json()),
     initialData: severity === "all" && namespace === "all" ? initialData : undefined,
     staleTime: 60_000,
   })
