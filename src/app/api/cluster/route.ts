@@ -13,6 +13,7 @@ export interface ClusterInfra {
     memory: { usedGi: number | null; totalGi: number; percent: number | null }
     pods: { running: number; total: number }
     kubeletVersion: string
+    osImage: string
   }>
   controlPlane: Array<{
     name: string
@@ -82,7 +83,7 @@ export async function GET() {
         status: {
           conditions: Array<{ type: string; status: string }>
           allocatable: Record<string, string>
-          nodeInfo: { kubeletVersion: string }
+          nodeInfo: { kubeletVersion: string; osImage: string }
         }
       }>
     }
@@ -168,6 +169,7 @@ export async function GET() {
         },
         pods: podCountByNode.get(n.metadata.name) ?? { running: 0, total: 0 },
         kubeletVersion: n.status.nodeInfo.kubeletVersion,
+        osImage: n.status.nodeInfo.osImage,
       }
     })
 
