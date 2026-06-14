@@ -13,10 +13,15 @@
 
 ### ⚠️ 클린설치 후 첫 빌드: kaniko OOM 회피 (자주 발생)
 
-> **🚧 초안 (DRAFT) — 테스트 검증 전**: 아래 drain 기반 첫 빌드 절차는 아직 실제 클린설치
-> 테스트로 검증되지 않은 초안입니다. drain → pin-kaniko → skaffold run 빌드가 끝까지
-> 성공하는지(특히 skaffold `build.cluster.tolerations` 동작 여부)를 확인한 뒤 이 섹션을
-> 재검토·확정합니다.
+> **✅ 검증됨 (2026-06-14)**: 아래 절차로 클린설치 직후 첫 빌드를 실제로 통과시켰습니다.
+> skaffold `build.cluster`의 `nodeSelector`(narwhal-worker-2) + `tolerations`
+> (`node.kubernetes.io/unschedulable:NoSchedule`) 조합을 skaffold가 정상 수락했고, kaniko Pod이
+> cordon된 worker-2에 스케줄돼(`Successfully assigned ... to narwhal-worker-2`) `skaffold run`이
+> 빌드+push를 완료했습니다(이미지 `dev-m-20260614-231209`).
+>
+> **선행 조건**: harbor pull이 되려면 worker 노드가 `*.local.narwhal.io`를 master dnsmasq로
+> resolve해야 합니다(`tls: unrecognized name` 방지). 클린설치는 `10-worker-dns.sh`가 자동
+> 처리하지만, 수동 첫 빌드 전이라면 worker DNS가 설정돼 있는지 먼저 확인하세요.
 
 클린설치(클러스터 재생성) 직후에는 Harbor의 kaniko 레이어 캐시(`library/narwhal-portal-cache`)가
 비어 있어, 첫 `skaffold run` / `dev:skaffold`가 node_modules 전체를 스냅샷합니다
