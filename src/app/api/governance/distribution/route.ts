@@ -6,6 +6,9 @@ import {
   getAllNodesForDistribution,
   getAllPodsForDistribution,
 } from "@/lib/k8s-client"
+import type { DistributionRecommendation, ControlPlanePod } from "@/components/governance/types"
+export type { DistributionRecommendation, ControlPlanePod } from "@/components/governance/types"
+import { buildDistributionRecommendations, CONTROL_PLANE_POD_LIST_CAP } from "@/lib/governance/distribution"
 
 export const dynamic = "force-dynamic"
 
@@ -43,10 +46,13 @@ export interface DistributionSummary {
   controlPlaneWorkloadPods: number
 }
 
+
 export interface DistributionResponse {
   summary: DistributionSummary
   nodes: NodeLoad[]
   workloads: WorkloadSpread[]
+  recommendations: DistributionRecommendation[]
+  controlPlanePods: ControlPlanePod[]
 }
 
 export async function GET() {
@@ -55,7 +61,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const cacheKey = "governance:distribution:v1"
+  const cacheKey = "governance:distribution:v2"
   try {
     const cached = await cacheGet<DistributionResponse>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -103,6 +109,7 @@ export async function GET() {
 
     let controlPlaneWorkloadPods = 0
     let totalPodsCount = 0
+    const controlPlanePods: ControlPlanePod[] = []
 
     for (const pod of pods) {
       const nodeName = pod.spec?.nodeName
@@ -134,6 +141,15 @@ export async function GET() {
         const ownerKind = owner?.kind
         if (ownerKind === "Deployment" || ownerKind === "StatefulSet" || ownerKind === "ReplicaSet") {
           controlPlaneWorkloadPods++
+          if (controlPlanePods.length < CONTROL_PLANE_POD_LIST_CAP) {
+            controlPlanePods.push({
+              namespace: pod.metadata.namespace,
+              pod: pod.metadata.name,
+              workload: name,
+              kind,
+              node: nodeName,
+            })
+          }
         }
       }
 
@@ -259,10 +275,14 @@ export async function GET() {
       controlPlaneWorkloadPods,
     }
 
+    const recommendations = buildDistributionRecommendations(summary)
+
     const response: DistributionResponse = {
       summary,
       nodes: sortedNodes,
       workloads: finalWorkloads,
+      recommendations,
+      controlPlanePods,
     }
 
     try {

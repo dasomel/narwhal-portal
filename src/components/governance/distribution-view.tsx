@@ -1,10 +1,13 @@
 "use client"
 
+import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useT } from "@/lib/i18n-client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ResourceDetailDrawer } from "./resource-detail-drawer"
 import type { DistributionResponse } from "./types"
 
 const severityBadgeClass = {
@@ -13,8 +16,31 @@ const severityBadgeClass = {
   low: "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400",
 }
 
+const severityStyles = {
+  high: {
+    border: "border-rose-200 dark:border-rose-900/40",
+    bg: "bg-rose-50/50 dark:bg-rose-950/20",
+    text: "text-rose-800 dark:text-rose-300",
+    badge: "bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300",
+  },
+  medium: {
+    border: "border-amber-200 dark:border-amber-900/40",
+    bg: "bg-amber-50/50 dark:bg-amber-950/20",
+    text: "text-amber-800 dark:text-amber-300",
+    badge: "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300",
+  },
+  low: {
+    border: "border-border dark:border-border/40",
+    bg: "bg-muted/30 dark:bg-muted/10",
+    text: "text-muted-foreground",
+    badge: "bg-muted text-muted-foreground",
+  },
+}
+
 export function DistributionView() {
   const t = useT()
+  const [isDrilldownOpen, setIsDrilldownOpen] = useState(false)
+  const [selectedPodForDrawer, setSelectedPodForDrawer] = useState<{ namespace: string; pod: string } | null>(null)
 
   const { data, isLoading, error } = useQuery<DistributionResponse>({
     queryKey: ["governance-distribution"],
@@ -44,8 +70,10 @@ export function DistributionView() {
   const { summary, nodes, workloads } = data
 
   // 1. Stat cards configs
+  const hasLeak = summary.controlPlaneWorkloadPods > 0
   const statCards = [
     {
+      id: "podImbalance",
       label: t("distribution.stat.podImbalance"),
       value: summary.podImbalance,
       color: summary.podImbalance >= 15 ? "text-amber-600 dark:text-amber-400" : "text-foreground",
@@ -55,6 +83,7 @@ export function DistributionView() {
       caption: t("distribution.stat.podImbalanceCaption"),
     },
     {
+      id: "concentratedWorkloads",
       label: t("distribution.stat.concentratedWorkloads"),
       value: summary.concentratedWorkloads,
       color: summary.concentratedWorkloads > 0 ? "text-red-600 dark:text-red-400" : "text-foreground",
@@ -64,6 +93,7 @@ export function DistributionView() {
       caption: t("distribution.stat.concentratedWorkloadsCaption"),
     },
     {
+      id: "unguardedWorkloads",
       label: t("distribution.stat.unguardedWorkloads"),
       value: summary.unguardedWorkloads,
       color: summary.unguardedWorkloads > 0 ? "text-amber-600 dark:text-amber-400" : "text-foreground",
@@ -73,13 +103,16 @@ export function DistributionView() {
       caption: t("distribution.stat.unguardedWorkloadsCaption"),
     },
     {
+      id: "controlPlaneLeak",
       label: t("distribution.stat.controlPlaneWorkloadPods"),
       value: summary.controlPlaneWorkloadPods,
       color: summary.controlPlaneWorkloadPods > 0 ? "text-amber-600 dark:text-amber-400" : "text-foreground",
-      bg: summary.controlPlaneWorkloadPods > 0
+      bg: hasLeak
         ? "bg-amber-50/50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-900/40"
         : "bg-card border-border",
       caption: t("distribution.stat.controlPlaneWorkloadPodsCaption"),
+      onClick: hasLeak ? () => setIsDrilldownOpen(true) : undefined,
+      hint: hasLeak ? t("distribution.drilldown.action.viewList") : undefined,
     },
   ]
 
@@ -96,23 +129,81 @@ export function DistributionView() {
     <div className="space-y-6">
       {/* 4 Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {statCards.map((card, idx) => (
+        {statCards.map((card) => (
           <div
-            key={idx}
-            className={`rounded-lg border p-4 flex flex-col justify-between transition-all ${card.bg}`}
+            key={card.id}
+            {...(card.onClick ? { onClick: card.onClick } : {})}
+            className={`rounded-lg border p-4 flex flex-col justify-between transition-all ${card.bg} ${
+              card.onClick ? "cursor-pointer hover:ring-2 hover:ring-primary/50" : ""
+            }`}
           >
             <div>
               <div className="text-xs font-medium text-muted-foreground">{card.label}</div>
               <div className={`text-2xl font-bold mt-1.5 ${card.color}`}>{card.value}</div>
             </div>
-            {card.caption && (
-              <div className="text-[10px] text-muted-foreground mt-2 font-medium">
-                {card.caption}
-              </div>
-            )}
+            <div>
+              {card.caption && (
+                <div className="text-[10px] text-muted-foreground mt-2 font-medium">
+                  {card.caption}
+                </div>
+              )}
+              {card.hint && (
+                <div className="text-[10px] text-primary font-semibold mt-1">
+                  {card.hint}
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>
+
+      {/* Recommendations Section */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold text-foreground">
+            {t("distribution.recommendations.title")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {data.recommendations && data.recommendations.length > 0 ? (
+            data.recommendations.map((rec, idx) => {
+              const styles = severityStyles[rec.severity] || severityStyles.low
+              return (
+                <div
+                  key={idx}
+                  className={`border ${styles.border} ${styles.bg} p-4 rounded-lg flex items-start gap-3 transition-all`}
+                >
+                  <Badge className={`${styles.badge} shrink-0 text-[10px] px-1.5 py-0 h-4 uppercase`}>
+                    {rec.severity}
+                  </Badge>
+                  <div>
+                    <h4 className={`text-xs font-semibold ${styles.text}`}>
+                      {t(rec.title as any, rec.params)}
+                    </h4>
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+                      {t(rec.detail as any, rec.params)}
+                    </p>
+                  </div>
+                </div>
+              )
+            })
+          ) : (
+            <div className="border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-950/20 p-4 rounded-lg flex items-start gap-3 transition-all">
+              <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 shrink-0 text-[10px] px-1.5 py-0 h-4 uppercase">
+                OK
+              </Badge>
+              <div>
+                <h4 className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                  {t("distribution.rec.ok.title")}
+                </h4>
+                <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80 mt-1 leading-relaxed">
+                  {t("distribution.rec.ok.detail")}
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Node Load Bars */}
       <Card>
@@ -357,6 +448,86 @@ export function DistributionView() {
           )}
         </CardContent>
       </Card>
+      {/* Control Plane Leak Drilldown Dialog */}
+      <Dialog open={isDrilldownOpen} onOpenChange={setIsDrilldownOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-foreground">
+              {t("distribution.drilldown.title")}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground mt-1 leading-relaxed">
+              {t("distribution.drilldown.description")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4">
+            {data.controlPlanePods && data.controlPlanePods.length > 0 ? (
+              <div className="overflow-hidden border rounded-lg">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="bg-muted/50 border-b border-border">
+                      <th className="p-3 font-semibold text-muted-foreground">
+                        {t("distribution.drilldown.col.namespace")}
+                      </th>
+                      <th className="p-3 font-semibold text-muted-foreground">
+                        {t("distribution.drilldown.col.pod")}
+                      </th>
+                      <th className="p-3 font-semibold text-muted-foreground">
+                        {t("distribution.drilldown.col.workload")}
+                      </th>
+                      <th className="p-3 font-semibold text-muted-foreground">
+                        {t("distribution.drilldown.col.node")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {data.controlPlanePods.map((pod, idx) => (
+                      <tr
+                        key={idx}
+                        onClick={() => {
+                          setIsDrilldownOpen(false)
+                          setSelectedPodForDrawer({ namespace: pod.namespace, pod: pod.pod })
+                        }}
+                        className="cursor-pointer hover:bg-muted/30 transition-colors"
+                      >
+                        <td className="p-3 font-medium text-foreground whitespace-nowrap">
+                          {pod.namespace}
+                        </td>
+                        <td className="p-3 font-mono text-primary hover:underline font-medium break-all">
+                          {pod.pod}
+                        </td>
+                        <td className="p-3 text-muted-foreground">
+                          <span className="font-semibold text-foreground">{pod.workload}</span>
+                          <span className="text-[10px] text-muted-foreground ml-1.5 font-mono">
+                            ({pod.kind})
+                          </span>
+                        </td>
+                        <td className="p-3 font-mono text-muted-foreground whitespace-nowrap">
+                          {pod.node}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-xs text-muted-foreground italic">
+                {t("distribution.drilldown.empty" as any)}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Resource Detail Drawer */}
+      <ResourceDetailDrawer
+        namespace={selectedPodForDrawer?.namespace ?? ""}
+        open={!!selectedPodForDrawer}
+        onOpenChange={(open) => {
+          if (!open) setSelectedPodForDrawer(null)
+        }}
+        initialPodName={selectedPodForDrawer?.pod}
+      />
     </div>
   )
 }

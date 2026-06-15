@@ -173,9 +173,27 @@ export interface DistributionSummary {
   controlPlaneWorkloadPods: number   // non-DaemonSet, non-static app pods running on control-plane nodes (leak indicator)
 }
 
+export interface DistributionRecommendation {
+  severity: "high" | "medium" | "low"
+  kind: "imbalance" | "control-plane-leak" | "concentrated" | "unguarded"
+  title: string
+  detail: string
+  params?: Record<string, string | number>
+}
+
+export interface ControlPlanePod {
+  namespace: string
+  pod: string
+  workload: string
+  kind: string
+  node: string
+}
+
 export interface DistributionResponse {
   summary: DistributionSummary
   nodes: NodeLoad[]            // sorted: workers first by podCount desc, then control-plane
   workloads: WorkloadSpread[]  // sorted by risk (high>medium>low) then replicas desc, cap 200
+  recommendations: DistributionRecommendation[]
+  controlPlanePods: ControlPlanePod[]
 }
 
