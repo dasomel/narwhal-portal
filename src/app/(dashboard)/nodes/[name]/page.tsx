@@ -8,7 +8,7 @@ import { AuditTabClient } from "@/components/nodes/audit/audit-tab-client"
 import { Info, LayoutGrid, BarChart3, Database, Activity, Cpu, Clock, Globe } from "lucide-react"
 import { getLocale } from "@/lib/i18n-server"
 import { t as translate } from "@/lib/i18n"
-import type { TranslationKey } from "@/lib/i18n"
+import type { TranslationKey, Locale } from "@/lib/i18n"
 import { auth } from "@/lib/auth"
 
 async function getNodeData(name: string) {
@@ -42,7 +42,7 @@ function formatGi(bytes: string): string {
   return (val / (1024 ** 3)).toFixed(1) + "G"
 }
 
-function formatUptime(createdAt: string, locale: string): string {
+function formatUptime(createdAt: string, locale: Locale): string {
   const created = new Date(createdAt).getTime()
   const now = Date.now()
   const diff = now - created
@@ -60,13 +60,12 @@ function formatUptime(createdAt: string, locale: string): string {
   const mins = Math.floor((diff % hourEn) / minuteEn)
   
   const parts = []
-  const isKo = locale === "ko"
 
-  if (years > 0) parts.push(isKo ? `${years}년` : `${years}y`)
-  if (months > 0) parts.push(isKo ? `${months}달` : `${months}mo`)
-  if (days > 0) parts.push(isKo ? `${days}일` : `${days}d`)
-  if (hours > 0) parts.push(isKo ? `${hours}시간` : `${hours}h`)
-  if (mins > 0 || parts.length === 0) parts.push(isKo ? `${mins}분` : `${mins}m`)
+  if (years > 0) parts.push(translate(locale, "time.years", { count: years }))
+  if (months > 0) parts.push(translate(locale, "time.months", { count: months }))
+  if (days > 0) parts.push(translate(locale, "time.days", { count: days }))
+  if (hours > 0) parts.push(translate(locale, "time.hours", { count: hours }))
+  if (mins > 0 || parts.length === 0) parts.push(translate(locale, "time.minutes", { count: mins }))
   
   // Show only top 2 units for better readability (e.g., 2년 3달 or 10일 5시간)
   return parts.slice(0, 2).join(" ")
@@ -80,8 +79,18 @@ function formatDate(iso: string, locale: string): string {
   } catch { return iso }
 }
 
-export default async function NodeDetailPage({ params }: { params: Promise<{ name: string }> }) {
-  const { name } = await params
+const VALID_TABS = ["overview", "telemetry", "audit"] as const
+type TabValue = (typeof VALID_TABS)[number]
+
+export default async function NodeDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ name: string }>
+  searchParams: Promise<{ tab?: string }>
+}) {
+  const [{ name }, sp] = await Promise.all([params, searchParams])
+  const initialTab: TabValue = VALID_TABS.includes(sp.tab as TabValue) ? (sp.tab as TabValue) : "overview"
   const [data, locale, session] = await Promise.all([getNodeData(name), getLocale(), auth()])
   const t = (key: TranslationKey) => translate(locale, key)
   const userRole = session?.user?.role
@@ -100,13 +109,13 @@ export default async function NodeDetailPage({ params }: { params: Promise<{ nam
         <div className="flex items-center gap-3 text-foreground font-bold">
            <h1 className="text-2xl font-bold tracking-tight">{detail.name}</h1>
            <Badge variant="outline" className="px-2 font-medium border-border bg-muted/50">{detail.operatingSystem}</Badge>
-           <div className="flex items-center gap-1.5 ml-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest bg-card border border-border px-3 py-1.5 rounded-md shadow-sm">
+           <div className="flex items-center gap-1.5 ml-4 text-xs font-bold text-muted-foreground uppercase tracking-widest bg-card border border-border px-3 py-1.5 rounded-md shadow-sm">
              <Clock className="h-3 w-3 text-blue-500" /> {t("nodes.info.uptime")}: <span className="text-foreground">{uptime}</span>
            </div>
         </div>
         <div className="flex gap-2">
-           {detail.systemStatus.rebootRequired && <Badge variant="destructive" className="font-bold px-3 py-1 h-7 text-[10px] uppercase">{t("nodes.status.reboot")}</Badge>}
-           <Badge className={`${isReady ? 'bg-emerald-600' : 'bg-rose-600'} text-white font-bold px-3 py-1 h-7 text-[10px] leading-none uppercase tracking-wide`}>
+           {detail.systemStatus.rebootRequired && <Badge variant="destructive" className="font-bold px-3 py-1 h-7 text-xs uppercase">{t("nodes.status.reboot")}</Badge>}
+           <Badge className={`${isReady ? 'bg-emerald-600' : 'bg-rose-600'} text-white font-bold px-3 py-1 h-7 text-xs leading-none uppercase tracking-wide`}>
              {isReady ? t("nodes.status.ready") : t("nodes.status.notReady")}
            </Badge>
         </div>
@@ -114,52 +123,52 @@ export default async function NodeDetailPage({ params }: { params: Promise<{ nam
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
         <Card className="p-5 shadow-sm border-border ring-1 ring-border bg-card">
-           <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest leading-none">{t("nodes.metric.cpu")}</p>
+           <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest leading-none">{t("nodes.metric.cpu")}</p>
            <p className={`text-3xl font-black mt-2.5 ${cpuUsage > 80 ? 'text-red-500' : 'text-foreground'}`}>{cpuUsage}%</p>
            <div className="flex items-center gap-2 mt-4">
              <div className="flex-1 bg-muted h-1.5 rounded-full overflow-hidden leading-[0]">
                <div className="bg-blue-600 h-full rounded-full transition-all duration-1000" style={{ width: `${cpuUsage}%` }} />
              </div>
-             <span className="text-[10px] font-bold text-muted-foreground mt-0.5">{cpuUsage}%</span>
+             <span className="text-xs font-bold text-muted-foreground mt-0.5">{cpuUsage}%</span>
            </div>
         </Card>
         <Card className="p-5 shadow-sm border-border ring-1 ring-border bg-card">
-           <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest leading-none">{t("nodes.metric.memory")}</p>
+           <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest leading-none">{t("nodes.metric.memory")}</p>
            <p className={`text-3xl font-black mt-2.5 ${memoryUsage > 80 ? 'text-red-500' : 'text-foreground'}`}>{memoryUsage}%</p>
            <div className="flex items-center gap-2 mt-4">
              <div className="flex-1 bg-muted h-1.5 rounded-full overflow-hidden leading-[0]">
                <div className="bg-green-600 h-full rounded-full transition-all duration-1000" style={{ width: `${memoryUsage}%` }} />
              </div>
-             <span className="text-[10px] font-bold text-muted-foreground mt-0.5">{memoryUsage}%</span>
+             <span className="text-xs font-bold text-muted-foreground mt-0.5">{memoryUsage}%</span>
            </div>
         </Card>
         <Card className="p-5 shadow-sm border-border ring-1 ring-border bg-card">
-           <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest leading-none">{t("nodes.metric.disk")}</p>
+           <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest leading-none">{t("nodes.metric.disk")}</p>
            <p className={`text-3xl font-black mt-2.5 ${diskUsage > 80 ? 'text-red-500' : 'text-foreground'}`}>{diskUsage}%</p>
            <div className="flex items-center gap-2 mt-4">
              <div className="flex-1 bg-muted h-1.5 rounded-full overflow-hidden leading-[0]">
                <div className="bg-amber-500 h-full rounded-full transition-all duration-1000" style={{ width: `${diskUsage}%` }} />
              </div>
-             <span className="text-[10px] font-bold text-muted-foreground mt-0.5">{diskUsage}%</span>
+             <span className="text-xs font-bold text-muted-foreground mt-0.5">{diskUsage}%</span>
            </div>
         </Card>
         <Card className="p-5 shadow-sm border-border ring-1 ring-border bg-card shadow-blue-50/50">
-           <p className="text-[11px] text-blue-600 font-bold uppercase tracking-widest leading-none">{t("nodes.metric.pods")}</p>
+           <p className="text-xs text-blue-600 font-bold uppercase tracking-widest leading-none">{t("nodes.metric.pods")}</p>
            <p className="text-3xl font-black mt-2.5 text-foreground font-mono tracking-tighter">{podCount}<span className="text-sm font-bold text-muted-foreground/50 ml-1.5">/ {detail.capacity.pods}</span></p>
            <div className="flex items-center gap-2 mt-4">
              <div className="flex-1 bg-muted h-1.5 rounded-full overflow-hidden leading-[0]">
                <div className="bg-narwhal-accent h-full rounded-full transition-all duration-1000" style={{ width: `${(podCount / parseInt(detail.capacity.pods)) * 100}%` }} />
              </div>
-             <span className="text-[10px] font-bold text-muted-foreground mt-0.5">{Math.round((podCount / parseInt(detail.capacity.pods)) * 100)}%</span>
+             <span className="text-xs font-bold text-muted-foreground mt-0.5">{Math.round((podCount / parseInt(detail.capacity.pods)) * 100)}%</span>
            </div>
         </Card>
       </div>
 
-      <Tabs defaultValue="overview" className="w-full">
+      <Tabs defaultValue={initialTab} className="w-full">
         <TabsList className="bg-muted/50 p-1 rounded-xl h-12 flex items-stretch gap-1 w-fit border border-border/50 shadow-sm">
-          <TabsTrigger value="overview" className="flex-1 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:scale-[1.03] transition-all font-black text-[11px] uppercase tracking-widest px-8 rounded-lg text-muted-foreground">{t("nodes.tab.overview")}</TabsTrigger>
-          <TabsTrigger value="telemetry" className="flex-1 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:scale-[1.03] transition-all font-black text-[11px] uppercase tracking-widest px-8 rounded-lg text-muted-foreground">{t("nodes.tab.telemetry")}</TabsTrigger>
-          <TabsTrigger value="audit" className="flex-1 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:scale-[1.03] transition-all font-black text-[11px] uppercase tracking-widest px-8 rounded-lg text-muted-foreground">{t("nodes.tab.audit")}</TabsTrigger>
+          <TabsTrigger value="overview" className="flex-1 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:scale-[1.03] transition-all font-black text-xs uppercase tracking-widest px-8 rounded-lg text-muted-foreground">{t("nodes.tab.overview")}</TabsTrigger>
+          <TabsTrigger value="telemetry" className="flex-1 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:scale-[1.03] transition-all font-black text-xs uppercase tracking-widest px-8 rounded-lg text-muted-foreground">{t("nodes.tab.telemetry")}</TabsTrigger>
+          <TabsTrigger value="audit" className="flex-1 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:scale-[1.03] transition-all font-black text-xs uppercase tracking-widest px-8 rounded-lg text-muted-foreground">{t("nodes.tab.audit")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6 pt-6">
@@ -168,7 +177,7 @@ export default async function NodeDetailPage({ params }: { params: Promise<{ nam
             <div className="lg:col-span-1 space-y-6">
               <Card className="shadow-sm border-border rounded-xl overflow-hidden bg-card">
                 <CardHeader className="py-4 border-b bg-muted/50/30 px-5">
-                  <CardTitle className="text-[11px] font-bold flex items-center gap-2 text-foreground uppercase tracking-widest leading-none"><Info className="h-4 w-4 text-muted-foreground" /> {t("nodes.info.infra")}</CardTitle>
+                  <CardTitle className="text-xs font-bold flex items-center gap-2 text-foreground uppercase tracking-widest leading-none"><Info className="h-4 w-4 text-muted-foreground" /> {t("nodes.info.infra")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-6 text-sm px-5 pb-6">
                    {[
@@ -179,7 +188,7 @@ export default async function NodeDetailPage({ params }: { params: Promise<{ nam
                     [t("nodes.info.createdAt"), formatDate(detail.createdAt, locale), <Clock className="h-4 w-4 text-muted-foreground" />]
                    ].map(([l, v, icon]) => (
                       <div key={l as string} className="flex flex-col gap-1.5 border-b border-border/50 pb-3.5 last:border-0 hover:bg-muted/50/40 transition-colors rounded px-4 -mx-4 -mt-2 pt-2">
-                         <div className="flex items-center gap-2.5 text-[10px] text-muted-foreground font-black uppercase tracking-widest leading-none">{icon}{l as string}</div>
+                         <div className="flex items-center gap-2.5 text-xs text-muted-foreground font-black uppercase tracking-widest leading-none">{icon}{l as string}</div>
                          <div className="font-bold text-foreground break-all leading-tight" title={v as string}>{v as string}</div>
                       </div>
                     ))}
@@ -188,7 +197,7 @@ export default async function NodeDetailPage({ params }: { params: Promise<{ nam
 
               <Card className="shadow-sm border-border rounded-xl overflow-hidden bg-card">
                 <CardHeader className="py-4 border-b bg-muted/50/30 px-5">
-                  <CardTitle className="text-[11px] font-bold flex items-center gap-2 text-foreground uppercase tracking-widest leading-none"><Database className="h-4 w-4 text-muted-foreground" /> {t("nodes.info.resources")}</CardTitle>
+                  <CardTitle className="text-xs font-bold flex items-center gap-2 text-foreground uppercase tracking-widest leading-none"><Database className="h-4 w-4 text-muted-foreground" /> {t("nodes.info.resources")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-6 text-sm px-5 pb-6">
                    {[
@@ -199,7 +208,7 @@ export default async function NodeDetailPage({ params }: { params: Promise<{ nam
                     [t("nodes.info.kubelet"), detail.kubeletVersion]
                    ].map(([l, v]) => (
                       <div key={l as string} className="flex justify-between border-b border-border/50 pb-3 last:border-0 hover:bg-muted/50/40 transition-colors rounded px-4 -mx-4 -mt-2 pt-2 items-center">
-                         <span className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest leading-none">{l as string}</span>
+                         <span className="text-xs text-muted-foreground font-bold uppercase tracking-widest leading-none">{l as string}</span>
                          <span className="font-bold text-foreground">{v as string}</span>
                       </div>
                     ))}
@@ -209,11 +218,11 @@ export default async function NodeDetailPage({ params }: { params: Promise<{ nam
 
             <Card className="lg:col-span-2 shadow-sm border-border rounded-xl overflow-hidden bg-card">
               <CardHeader className="py-4 border-b bg-muted/50/30 px-5">
-                <CardTitle className="text-[11px] font-bold flex items-center gap-2 text-foreground uppercase tracking-widest leading-none"><LayoutGrid className="h-4 w-4 text-muted-foreground" /> {t("nodes.workload.title")}</CardTitle>
+                <CardTitle className="text-xs font-bold flex items-center gap-2 text-foreground uppercase tracking-widest leading-none"><LayoutGrid className="h-4 w-4 text-muted-foreground" /> {t("nodes.workload.title")}</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-card text-[10px] font-black text-muted-foreground border-b uppercase tracking-[0.15em] border-border">
+                  <thead className="bg-card text-xs font-black text-muted-foreground border-b uppercase tracking-[0.15em] border-border">
                     <tr><th className="px-8 py-4.5">{t("nodes.workload.namespace")}</th><th className="px-8 py-4.5">{t("nodes.workload.name")}</th><th className="px-8 py-4.5 text-right">{t("nodes.workload.status")}</th></tr>
                   </thead>
                   <tbody className="divide-y divide-border/50 font-medium leading-tight text-sm">
@@ -234,7 +243,7 @@ export default async function NodeDetailPage({ params }: { params: Promise<{ nam
         <TabsContent value="telemetry" className="pt-6">
            <Card className="p-12 border border-border shadow-sm bg-card rounded-2xl sm:p-6">
               <CardHeader className="py-4 border-b p-0 mb-12 sm:mb-8">
-                 <CardTitle className="text-[11px] font-bold flex items-center gap-2 text-foreground uppercase tracking-widest"><BarChart3 className="h-4 w-4 text-blue-500" /> {t("nodes.tab.telemetryAnalysis")}</CardTitle>
+                 <CardTitle className="text-xs font-bold flex items-center gap-2 text-foreground uppercase tracking-widest"><BarChart3 className="h-4 w-4 text-blue-500" /> {t("nodes.tab.telemetryAnalysis")}</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12 min-h-[350px]">
