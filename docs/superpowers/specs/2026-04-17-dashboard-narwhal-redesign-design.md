@@ -178,10 +178,10 @@ Permission gating: use existing `useSession()` pattern from `alerts-widget.tsx:9
 
 ## 6. `/my-apps` — Developer Dashboard (Phase 2)
 
-**Audience:** users in a developer group (Authentik).
+**Audience:** users in a developer group (Keycloak).
 
 **Filtering logic:**
-1. Session includes Authentik group claims.
+1. Session includes Keycloak group claims.
 2. Map group → ArgoCD project / namespace prefix via config (`src/lib/role-filter.ts`).
 3. Show only apps and events scoped to those namespaces.
 
