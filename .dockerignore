@@ -1,0 +1,34 @@
+# 환경변수 파일 (example 제외)
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+
+# 빌드 산출물 및 의존성
+node_modules
+.next
+
+# 버전관리
+.git
+
+# 문서 (빌드 불필요)
+*.md
+
+# Skaffold / dev tooling
+skaffold.yaml
+Dockerfile.dev
+_workspace/
+.claude/
+.bkit/
+.omc/
+.idea/
+docs/
+scripts/
+playwright-report/
+test-results/
+coverage/
+
+# 인증서 비밀키 — 절대 이미지에 포함 금지
+certs/*.key
+*.pem
