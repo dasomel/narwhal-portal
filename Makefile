@@ -1,6 +1,6 @@
 export DOCKER_HOST := unix:///var/run/docker.sock
 REGISTRY   := harbor.local.narwhal.io
-REPO       := library/idp-portal
+REPO       := library/narwhal-portal
 VERSION    := $(shell node -p "require('./package.json').version")
 IMAGE      := $(REGISTRY)/$(REPO)
 TAG_VER    := $(IMAGE):v$(VERSION)
