@@ -6,6 +6,8 @@
 
 Management portal for the Narwhal Kubernetes cluster IDP. Provides dashboard (metrics, ArgoCD, alerts), settings (users/routes/certificates/policies), onboarding (kubeconfig, guide), and platform tools grid.
 
+> **Working procedure:** follow the global `<procedural_completion>` doctrine (`~/.claude/CLAUDE.md`) on substantive tasks — goal → decompose → execute → verify → risk (five principles + completion gate + escalation). Trivial one-shots answer directly.
+
 ---
 
 ## Companion Cluster Repository
