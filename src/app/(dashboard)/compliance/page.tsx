@@ -8,6 +8,7 @@ import { ConfigAuditTable } from "@/components/compliance/config-audit-table"
 import { RbacAuditTable } from "@/components/compliance/rbac-audit-table"
 import { InfraAuditList } from "@/components/compliance/infra-audit-list"
 import { FrameworksGrid } from "@/components/compliance/frameworks-grid"
+import { KisaChecklist } from "@/components/compliance/kisa-checklist"
 import type { ComplianceSummary } from "@/types/compliance"
 
 async function fetchComplianceSummary(): Promise<ComplianceSummary | null> {
@@ -69,6 +70,7 @@ export default async function CompliancePage() {
           <TabsTrigger value="rbac">{t(locale, "compliance.tab.rbac")}</TabsTrigger>
           <TabsTrigger value="infra">{t(locale, "compliance.tab.infra")}</TabsTrigger>
           <TabsTrigger value="frameworks">{t(locale, "compliance.tab.frameworks")}</TabsTrigger>
+          <TabsTrigger value="kisa">{t(locale, "compliance.tab.kisa")}</TabsTrigger>
         </TabsList>
         <TabsContent value="config-audit" className="mt-4">
           <ConfigAuditTable />
@@ -81,6 +83,9 @@ export default async function CompliancePage() {
         </TabsContent>
         <TabsContent value="frameworks" className="mt-4">
           <FrameworksGrid />
+        </TabsContent>
+        <TabsContent value="kisa" className="mt-4">
+          <KisaChecklist />
         </TabsContent>
       </Tabs>
     </div>

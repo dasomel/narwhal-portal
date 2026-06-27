@@ -1,0 +1,248 @@
+import "server-only"
+import { cacheGet, cacheSet } from "./valkey"
+import { KISA_CATALOG } from "./kisa-controls"
+import type { KisaControl, KisaResponse, KisaStatus } from "@/types/kisa"
+
+// Static status map for non-LIVE controls
+const STATIC_STATUS: Record<string, KisaStatus> = {
+  "KISA-CP-01": "fail",
+  "KISA-ETCD-01": "fail",
+  "KISA-SEC-01": "fail",
+  "KISA-ETCD-02": "fail",
+  "KISA-IMG-01": "fail",
+  "KISA-NET-01": "fail",
+  "KISA-POD-01": "fail",
+  "KISA-TLS-01": "warn",
+  "KISA-OBS-01": "warn",
+  "KISA-IMG-02": "warn",
+}
+
+const LIVE_IDS = new Set([
+  "KISA-RBAC-01",
+  "KISA-RBAC-02",
+  "KISA-IMG-03",
+  "KISA-ADM-01",
+  "KISA-TLS-02",
+  "KISA-CFG-01",
+])
+
+// --- Live check helpers ---
+
+async function checkImg03(): Promise<{ status: KisaStatus; detail: string }> {
+  const { getSecuritySummary } = await import("./trivy")
+  const summary = await getSecuritySummary()
+  if (summary.totals.Critical > 0) {
+    return { status: "fail", detail: `Critical CVE ${summary.totals.Critical}건` }
+  }
+  if (summary.totals.High > 0) {
+    return { status: "warn", detail: `High CVE ${summary.totals.High}건` }
+  }
+  return { status: "pass", detail: "Critical/High CVE 없음" }
+}
+
+async function checkCfg01(): Promise<{ status: KisaStatus; detail: string }> {
+  const { getComplianceFrameworks } = await import("./compliance")
+  const frameworks = await getComplianceFrameworks()
+  if (frameworks.length === 0) {
+    return { status: "manual", detail: "프레임워크 데이터 없음" }
+  }
+  const failing = frameworks.filter((f) => f.passRate < 0.6)
+  const warning = frameworks.filter((f) => f.passRate >= 0.6 && f.passRate < 0.9)
+  if (failing.length > 0) {
+    return {
+      status: "fail",
+      detail: `통과율 60% 미만 ${failing.length}건 (최저 ${Math.round(Math.min(...failing.map((f) => f.passRate)) * 100)}%)`,
+    }
+  }
+  if (warning.length > 0) {
+    return {
+      status: "warn",
+      detail: `통과율 90% 미만 ${warning.length}건`,
+    }
+  }
+  return { status: "pass", detail: `전 프레임워크 통과율 90% 이상` }
+}
+
+async function checkTls02(): Promise<{ status: KisaStatus; detail: string }> {
+  const { getCertificates } = await import("./k8s-client")
+  const certs = await getCertificates()
+  if (certs.length === 0) {
+    return { status: "manual", detail: "인증서 데이터 없음" }
+  }
+  const now = Date.now()
+  const thirtyDays = 30 * 24 * 60 * 60 * 1000
+  const notReady = certs.filter((c) => !c.ready)
+  const expiring = certs.filter(
+    (c) => c.notAfter && new Date(c.notAfter).getTime() - now < thirtyDays,
+  )
+  if (notReady.length > 0 || expiring.length > 0) {
+    const parts: string[] = []
+    if (notReady.length > 0) parts.push(`미준비 ${notReady.length}건`)
+    if (expiring.length > 0) parts.push(`30일 내 만료 ${expiring.length}건`)
+    return { status: "fail", detail: parts.join(", ") }
+  }
+  return { status: "pass", detail: `전체 ${certs.length}건 정상` }
+}
+
+async function checkAdm01(): Promise<{ status: KisaStatus; detail: string }> {
+  const { getKyvernoPolicies } = await import("./k8s-client")
+  const policies = await getKyvernoPolicies()
+  if (policies.length === 0) {
+    return { status: "manual", detail: "Kyverno 정책 없음" }
+  }
+  const notReady = policies.filter((p) => !p.ready)
+  const allAudit = policies.every((p) => p.validationFailureAction === "Audit")
+  if (notReady.length > 0 || allAudit) {
+    const parts: string[] = []
+    if (notReady.length > 0) parts.push(`미준비 ${notReady.length}건`)
+    if (allAudit) parts.push("전 정책 Audit 모드")
+    return { status: "warn", detail: parts.join(", ") }
+  }
+  return { status: "pass", detail: `Enforce 정책 ${policies.filter((p) => p.validationFailureAction === "Enforce").length}건 활성` }
+}
+
+async function checkRbac(id: "KISA-RBAC-01" | "KISA-RBAC-02"): Promise<{ status: KisaStatus; detail: string }> {
+  const { getRbacBindings, getClusterRoles, getRoles } = await import("./k8s-client")
+  const [bindings, clusterRoles, roles] = await Promise.all([
+    getRbacBindings(),
+    getClusterRoles(),
+    getRoles(),
+  ])
+
+  // Build a quick risk counter matching the governance/rbac route logic
+  const clusterRolesMap = new Map(clusterRoles.map((r) => [r.name, r]))
+  const rolesMap = new Map<string, Map<string, typeof roles[0]>>()
+  for (const r of roles) {
+    if (!rolesMap.has(r.namespace)) rolesMap.set(r.namespace, new Map())
+    rolesMap.get(r.namespace)!.set(r.name, r)
+  }
+
+  let criticalCount = 0
+  let highCount = 0
+
+  for (const b of bindings) {
+    let matchedRole: { rules?: unknown[] } | undefined
+    if (b.roleRef.kind === "ClusterRole") {
+      matchedRole = clusterRolesMap.get(b.roleRef.name)
+    } else if (b.roleRef.kind === "Role" && b.namespace) {
+      matchedRole = rolesMap.get(b.namespace)?.get(b.roleRef.name)
+    }
+
+    const rules = matchedRole?.rules ?? []
+    let wildcardVerbs = false
+    let wildcardResources = false
+    let escalation = false
+    let writeAccess = false
+    let secretsAccess = false
+
+    const writeVerbs = new Set(["create", "update", "patch", "delete", "deletecollection"])
+    const escalationTokens = new Set(["bind", "escalate", "impersonate"])
+
+    for (const r of rules as Array<{ verbs?: string[]; resources?: string[] }>) {
+      const verbs = r.verbs ?? []
+      const resources = r.resources ?? []
+      if (verbs.includes("*")) wildcardVerbs = true
+      if (resources.includes("*")) wildcardResources = true
+      if (resources.includes("secrets")) secretsAccess = true
+      if (verbs.some((v) => writeVerbs.has(v.toLowerCase()))) writeAccess = true
+      if (
+        verbs.some((v) => escalationTokens.has(v.toLowerCase())) ||
+        resources.some((res) => escalationTokens.has(res.toLowerCase()))
+      ) {
+        escalation = true
+      }
+    }
+
+    const isClusterAdmin = b.roleRef.name === "cluster-admin"
+    if (isClusterAdmin || (wildcardVerbs && wildcardResources) || escalation) {
+      criticalCount++
+    } else if (
+      b.scope === "cluster" &&
+      (writeAccess || secretsAccess || wildcardVerbs || wildcardResources)
+    ) {
+      highCount++
+    }
+  }
+
+  void id // both RBAC-01 and RBAC-02 use the same binding scan
+  if (criticalCount > 0) {
+    return { status: "fail", detail: `위험 바인딩 Critical ${criticalCount}건` }
+  }
+  if (highCount > 0) {
+    return { status: "warn", detail: `위험 바인딩 High ${highCount}건` }
+  }
+  return { status: "pass", detail: "위험 바인딩 없음" }
+}
+
+// --- Main export ---
+
+export async function getKisaControls(): Promise<KisaResponse> {
+  const cacheKey = "compliance:kisa:list"
+  const cached = await cacheGet<KisaResponse>(cacheKey)
+  if (cached) return cached
+
+  const controls: KisaControl[] = []
+
+  for (const entry of KISA_CATALOG) {
+    if (!LIVE_IDS.has(entry.id)) {
+      controls.push({
+        ...entry,
+        status: STATIC_STATUS[entry.id] ?? "manual",
+        live: false,
+      })
+      continue
+    }
+
+    // Live checks — each wrapped in its own try/catch
+    let status: KisaStatus = "manual"
+    let detail: string | undefined
+
+    try {
+      if (entry.id === "KISA-IMG-03") {
+        const r = await checkImg03()
+        status = r.status
+        detail = r.detail
+      } else if (entry.id === "KISA-CFG-01") {
+        const r = await checkCfg01()
+        status = r.status
+        detail = r.detail
+      } else if (entry.id === "KISA-TLS-02") {
+        const r = await checkTls02()
+        status = r.status
+        detail = r.detail
+      } else if (entry.id === "KISA-ADM-01") {
+        const r = await checkAdm01()
+        status = r.status
+        detail = r.detail
+      } else if (entry.id === "KISA-RBAC-01" || entry.id === "KISA-RBAC-02") {
+        const r = await checkRbac(entry.id)
+        status = r.status
+        detail = r.detail
+      }
+    } catch (err) {
+      console.warn(`[kisa] Live check ${entry.id} failed (non-fatal):`, err instanceof Error ? err.message : err)
+      status = "manual"
+      detail = undefined
+    }
+
+    controls.push({
+      ...entry,
+      status,
+      live: status !== "manual",
+      detail,
+    })
+  }
+
+  const summary = {
+    total: controls.length,
+    pass: controls.filter((c) => c.status === "pass").length,
+    fail: controls.filter((c) => c.status === "fail").length,
+    warn: controls.filter((c) => c.status === "warn").length,
+    manual: controls.filter((c) => c.status === "manual").length,
+    lastUpdated: new Date().toISOString(),
+  }
+
+  const result: KisaResponse = { controls, summary }
+  await cacheSet(cacheKey, result, 60)
+  return result
+}
