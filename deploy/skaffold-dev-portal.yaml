@@ -155,7 +155,7 @@ spec:
 ---
 # Narwhal Portal Deployment
 # replicas: 0 by default — image is built/pushed externally via 15-narwhal-portal.sh.
-# 15 scales to 1 after `docker push harbor.local.narwhal.io/library/narwhal-portal:latest`.
+# 15 scales to 1 after `docker push harbor.local.narwhal.internal/library/narwhal-portal:latest`.
 # ArgoCD ignoreDifferences (in gitops/apps/narwhal-portal.yaml) suppresses replicas drift.
 apiVersion: apps/v1
 kind: Deployment
@@ -180,7 +180,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: narwhal-portal
-          image: harbor.local.narwhal.io/library/narwhal-portal:latest
+          image: harbor.local.narwhal.internal/library/narwhal-portal:latest
           ports:
             - containerPort: 3000
           envFrom:
@@ -254,7 +254,7 @@ data:
         weight: 25
         check:
           type: image-source
-          allowedPrefixes: ["harbor.local.narwhal.io/"]
+          allowedPrefixes: ["harbor.local.narwhal.internal/"]
       - id: has-pdb
         name: "PodDisruptionBudget defined"
         weight: 20

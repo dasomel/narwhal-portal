@@ -162,16 +162,16 @@ const icons = {
 //   (narwhal gitops/resources/apisix-routes.yaml openbao-sso / velero-ui-sso 참고).
 //   velero-ui 백엔드 토큰 교환은 velero-ui.yaml의 NODE_EXTRA_CA_CERTS로 사설 CA 신뢰.
 export const PLATFORM_TOOLS: PlatformTool[] = [
-  { id: "argocd", name: "ArgoCD", description: "GitOps deployment management", url: "https://argocd.local.narwhal.io/auth/login", category: "gitops", icon: icons.argocd, roles: ["cluster-admin", "developer"] },
-  { id: "gitea", name: "Gitea", description: "Git source code repository", url: "https://gitea.local.narwhal.io/user/oauth2/keycloak", category: "source", icon: icons.gitea, roles: ["cluster-admin", "developer"] },
-  { id: "harbor", name: "Harbor", description: "Container image registry", url: "https://harbor.local.narwhal.io/c/oidc/login", category: "registry", icon: icons.harbor, roles: ["cluster-admin", "developer"] },
-  { id: "grafana", name: "Grafana", description: "Metrics dashboard", url: "https://grafana.local.narwhal.io/login/generic_oauth", category: "monitoring", icon: icons.grafana, roles: ["cluster-admin", "developer", "viewer"] },
-  { id: "prometheus", name: "Prometheus", description: "Metrics collection", url: "https://prometheus.local.narwhal.io", category: "monitoring", icon: icons.prometheus, roles: ["cluster-admin"] },
-  { id: "alertmanager", name: "Alertmanager", description: "Alert management", url: "https://alertmanager.local.narwhal.io", category: "monitoring", icon: icons.alertmanager, roles: ["cluster-admin"] },
-  { id: "headlamp", name: "Headlamp", description: "Kubernetes dashboard", url: "https://headlamp.local.narwhal.io/oidc?cluster=main", category: "infra", icon: icons.headlamp, roles: ["cluster-admin", "developer"] },
-  { id: "hubble", name: "Hubble UI", description: "Cilium network visualization", url: "https://hubble.local.narwhal.io", category: "infra", icon: icons.hubble, roles: ["cluster-admin"] },
-  { id: "openbao", name: "OpenBao", description: "Secret management", url: "https://openbao.local.narwhal.io/sso", category: "security", icon: icons.openbao, roles: ["cluster-admin"] },
-  { id: "velero-ui", name: "Velero UI", description: "Backup/restore management", url: "https://velero-ui.local.narwhal.io/sso", category: "backup", icon: icons.velero, roles: ["cluster-admin"] },
+  { id: "argocd", name: "ArgoCD", description: "GitOps deployment management", url: "https://argocd.local.narwhal.internal/auth/login", category: "gitops", icon: icons.argocd, roles: ["cluster-admin", "developer"] },
+  { id: "gitea", name: "Gitea", description: "Git source code repository", url: "https://gitea.local.narwhal.internal/user/oauth2/keycloak", category: "source", icon: icons.gitea, roles: ["cluster-admin", "developer"] },
+  { id: "harbor", name: "Harbor", description: "Container image registry", url: "https://harbor.local.narwhal.internal/c/oidc/login", category: "registry", icon: icons.harbor, roles: ["cluster-admin", "developer"] },
+  { id: "grafana", name: "Grafana", description: "Metrics dashboard", url: "https://grafana.local.narwhal.internal/login/generic_oauth", category: "monitoring", icon: icons.grafana, roles: ["cluster-admin", "developer", "viewer"] },
+  { id: "prometheus", name: "Prometheus", description: "Metrics collection", url: "https://prometheus.local.narwhal.internal", category: "monitoring", icon: icons.prometheus, roles: ["cluster-admin"] },
+  { id: "alertmanager", name: "Alertmanager", description: "Alert management", url: "https://alertmanager.local.narwhal.internal", category: "monitoring", icon: icons.alertmanager, roles: ["cluster-admin"] },
+  { id: "headlamp", name: "Headlamp", description: "Kubernetes dashboard", url: "https://headlamp.local.narwhal.internal/oidc?cluster=main", category: "infra", icon: icons.headlamp, roles: ["cluster-admin", "developer"] },
+  { id: "hubble", name: "Hubble UI", description: "Cilium network visualization", url: "https://hubble.local.narwhal.internal", category: "infra", icon: icons.hubble, roles: ["cluster-admin"] },
+  { id: "openbao", name: "OpenBao", description: "Secret management", url: "https://openbao.local.narwhal.internal/sso", category: "security", icon: icons.openbao, roles: ["cluster-admin"] },
+  { id: "velero-ui", name: "Velero UI", description: "Backup/restore management", url: "https://velero-ui.local.narwhal.internal/sso", category: "backup", icon: icons.velero, roles: ["cluster-admin"] },
 ]
 
 export function getToolsForRole(role: UserRole): PlatformTool[] {

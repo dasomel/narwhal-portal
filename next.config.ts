@@ -49,7 +49,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   // skaffold dev(라이브 HMR): APISIX 게이트웨이 도메인 경유 접근 시 Next 16이
   // /_next/* dev 리소스를 cross-origin으로 차단 → 대시보드/세션 UI 깨짐. dev 전용 허용.
-  allowedDevOrigins: ["portal.local.narwhal.io"],
+  allowedDevOrigins: ["portal.local.narwhal.internal"],
   serverExternalPackages: [
     "@kubernetes/client-node",
     "@opentelemetry/sdk-node",

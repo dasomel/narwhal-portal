@@ -15,7 +15,7 @@ export async function GET() {
     clientId: process.env.KEYCLOAK_K8S_CLIENT_ID ?? "kubernetes",
     issuer:
       process.env.KEYCLOAK_K8S_ISSUER ??
-      "https://keycloak.local.narwhal.io/realms/narwhal",
+      "https://keycloak.local.narwhal.internal/realms/narwhal",
   })
 
   return new NextResponse(kubeconfig, {

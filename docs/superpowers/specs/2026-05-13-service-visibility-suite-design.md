@@ -139,7 +139,7 @@ rules:
     weight: 15
     check:
       type: image-source
-      allowedPrefixes: ["harbor.local.narwhal.io/", "registry.k8s.io/"]
+      allowedPrefixes: ["harbor.local.narwhal.internal/", "registry.k8s.io/"]
   - id: argocd-healthy
     name: "ArgoCD Synced & Healthy"
     weight: 15

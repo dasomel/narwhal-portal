@@ -16,7 +16,7 @@
 #
 # 환경변수 오버라이드:
 #   BUILD_NAMESPACE=devtools               # Kaniko 빌드 네임스페이스
-#   REGISTRY=harbor.local.narwhal.io
+#   REGISTRY=harbor.local.narwhal.internal
 #   HARBOR_USERNAME=admin
 #   HARBOR_SECRET_NS=devtools
 #   HARBOR_SECRET_NAME=harbor-secrets
@@ -27,7 +27,7 @@
 set -euo pipefail
 
 BUILD_NAMESPACE="${BUILD_NAMESPACE:-devtools}"
-REGISTRY="${REGISTRY:-harbor.local.narwhal.io}"
+REGISTRY="${REGISTRY:-harbor.local.narwhal.internal}"
 HARBOR_USERNAME="${HARBOR_USERNAME:-admin}"
 HARBOR_SECRET_NS="${HARBOR_SECRET_NS:-devtools}"
 HARBOR_SECRET_NAME="${HARBOR_SECRET_NAME:-harbor-secrets}"

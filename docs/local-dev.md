@@ -19,7 +19,7 @@
 > cordon된 worker-2에 스케줄돼(`Successfully assigned ... to narwhal-worker-2`) `skaffold run`이
 > 빌드+push를 완료했습니다(이미지 `dev-m-20260614-231209`).
 >
-> **선행 조건**: harbor pull이 되려면 worker 노드가 `*.local.narwhal.io`를 master dnsmasq로
+> **선행 조건**: harbor pull이 되려면 worker 노드가 `*.local.narwhal.internal`를 master dnsmasq로
 > resolve해야 합니다(`tls: unrecognized name` 방지). 클린설치는 `10-worker-dns.sh`가 자동
 > 처리하지만, 수동 첫 빌드 전이라면 worker DNS가 설정돼 있는지 먼저 확인하세요.
 
@@ -155,7 +155,7 @@ bun run dev:skaffold
 실행 흐름:
 
 1. Kaniko Pod이 `Dockerfile.dev` 기반으로 빌드
-2. Harbor(`harbor.local.narwhal.io/library/idp-portal:dev-...`)에 push
+2. Harbor(`harbor.local.narwhal.internal/library/idp-portal:dev-...`)에 push
 3. `gitops/resources/idp-portal-k8s.yaml`을 적용 → Deployment 이미지 교체
 4. `idp-portal` Service 3000 → `localhost:3000` port-forward
 5. `src/**`, `public/**`, `next.config.ts` 변경 감지 → 컨테이너 `/app`으로 파일 동기화 → Next.js HMR
@@ -273,7 +273,7 @@ kubectl -n devtools get secret narwhal-root-ca-secret -o jsonpath='{.data}' | jq
 # ca.crt가 없으면 → bun run harbor:setup 재실행
 ```
 
-그래도 실패하면 임시로 TLS 검증 건너뛰기 (skaffold.yaml `kaniko.skipTLS: true` 또는 `skipTLSVerifyRegistry: ["harbor.local.narwhal.io"]`).
+그래도 실패하면 임시로 TLS 검증 건너뛰기 (skaffold.yaml `kaniko.skipTLS: true` 또는 `skipTLSVerifyRegistry: ["harbor.local.narwhal.internal"]`).
 
 ### Kaniko push 시 `UNAUTHORIZED`
 

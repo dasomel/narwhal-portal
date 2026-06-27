@@ -37,17 +37,17 @@ build:
             format: "20060102-150405"
             timezone: "Local"
   artifacts:
-    - image: harbor.local.narwhal.io/library/narwhal-portal
+    - image: harbor.local.narwhal.internal/library/narwhal-portal
       context: .
       kaniko:
         dockerfile: Dockerfile
         cache:
-          repo: harbor.local.narwhal.io/library/narwhal-portal-cache
+          repo: harbor.local.narwhal.internal/library/narwhal-portal-cache
         volumeMounts:
           - name: narwhal-ca
             mountPath: /kaniko/ssl/certs/narwhal
         registryCertificate:
-          harbor.local.narwhal.io: /kaniko/ssl/certs/narwhal/ca.crt
+          harbor.local.narwhal.internal: /kaniko/ssl/certs/narwhal/ca.crt
 
 manifests:
   rawYaml:
@@ -87,7 +87,7 @@ profiles:
         useDockerCLI: true
         concurrency: 1
       artifacts:
-        - image: harbor.local.narwhal.io/library/narwhal-portal
+        - image: harbor.local.narwhal.internal/library/narwhal-portal
           context: .
           docker:
             dockerfile: Dockerfile.dev
@@ -124,7 +124,7 @@ profiles:
             cpu: "2"
             memory: 4Gi
       artifacts:
-        - image: harbor.local.narwhal.io/library/narwhal-portal
+        - image: harbor.local.narwhal.internal/library/narwhal-portal
           context: .
           kaniko:
             dockerfile: Dockerfile.dev
@@ -132,12 +132,12 @@ profiles:
               - "--compressed-caching=false"
               - "--snapshot-mode=redo"
             cache:
-              repo: harbor.local.narwhal.io/library/narwhal-portal-cache
+              repo: harbor.local.narwhal.internal/library/narwhal-portal-cache
             volumeMounts:
               - name: narwhal-ca
                 mountPath: /kaniko/ssl/certs/narwhal
             registryCertificate:
-              harbor.local.narwhal.io: /kaniko/ssl/certs/narwhal/ca.crt
+              harbor.local.narwhal.internal: /kaniko/ssl/certs/narwhal/ca.crt
           sync:
             manual:
               - src: "src/**/*.{ts,tsx,js,jsx,css}"

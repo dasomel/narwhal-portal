@@ -25,7 +25,7 @@ export interface ArchitectureData {
 }
 
 // Health source = ArgoCD application health (the cluster's own reconciler), which is
-// authoritative. The previous approach HTTP-pinged external ingress hosts (*.local.narwhal.io)
+// authoritative. The previous approach HTTP-pinged external ingress hosts (*.local.narwhal.internal)
 // from inside the pod — those are unreachable in-cluster, so most nodes showed offline/unknown.
 function mapArgoHealth(h?: string): ArchNode["status"] {
   switch (h) {

@@ -28,7 +28,7 @@
 
 ## L2 — API Smoke (PASS)
 
-대상: 클러스터에 배포된 실 인스턴스 `https://portal.local.narwhal.io` (pod `narwhal-portal-586ffd4bd-6qp57`, devtools ns, Running 45h)
+대상: 클러스터에 배포된 실 인스턴스 `https://portal.local.narwhal.internal` (pod `narwhal-portal-586ffd4bd-6qp57`, devtools ns, Running 45h)
 
 | Check | Result |
 |-------|--------|

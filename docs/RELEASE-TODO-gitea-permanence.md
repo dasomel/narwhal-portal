@@ -95,9 +95,9 @@ kubectl -n devtools patch app apisix-routes --type merge \
 ```
 
 ### 1-5. 영구화 검증
-- `docker push harbor.local.narwhal.io/library/narwhal-portal:<tag>` 가 **413 없이** 통과 (100MB 초과 레이어).
+- `docker push harbor.local.narwhal.internal/library/narwhal-portal:<tag>` 가 **413 없이** 통과 (100MB 초과 레이어).
 - `kubectl -n platform-system logs deploy/apisix-ingress-controller | grep harbor` 에 `endpoints/service not found` 없음.
-- `curl -sk https://harbor.local.narwhal.io/v2/ -w '%{http_code}'` → 401 (도달).
+- `curl -sk https://harbor.local.narwhal.internal/v2/ -w '%{http_code}'` → 401 (도달).
 - 게이트웨이 다른 cross-ns route(argocd/gitea/grafana 등)도 sync 정상화됐는지 확인
   (동일 ExternalName 문제를 공유했음 — ApisixUpstream 전환이 전반에 적용됐는지).
 
@@ -135,7 +135,7 @@ portal repo 로컬 커밋:
   kaniko secret은 `debug` 프로파일(클러스터 kaniko)에서만 쓰임.
 - 노드 메모리(~5.9Gi/노드)가 작아 in-cluster kaniko가 node_modules 스냅샷에서 OOM →
   dev는 로컬 docker 빌드 채택. 노드 증설 시 kaniko 재검토 가능.
-- 로컬 docker push 인증: `docker login harbor.local.narwhal.io` (admin / `devtools/harbor-secrets`
+- 로컬 docker push 인증: `docker login harbor.local.narwhal.internal` (admin / `devtools/harbor-secrets`
   의 `HARBOR_ADMIN_PASSWORD`). TLS는 narwhal CA가 Docker Desktop에 신뢰됨.
 
 ---

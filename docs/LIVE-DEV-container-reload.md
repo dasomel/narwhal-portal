@@ -28,16 +28,16 @@ cd narwhal-portal
 
 # (최초 1회) harbor 로그인 — admin / devtools/harbor-secrets 의 HARBOR_ADMIN_PASSWORD
 PASS=$(kubectl -n devtools get secret harbor-secrets -o jsonpath='{.data.HARBOR_ADMIN_PASSWORD}' | base64 -d)
-echo "$PASS" | docker login harbor.local.narwhal.io -u admin --password-stdin
+echo "$PASS" | docker login harbor.local.narwhal.internal -u admin --password-stdin
 
 # 빌드 → push → 롤아웃
-docker build -f Dockerfile -t harbor.local.narwhal.io/library/narwhal-portal:latest .
-docker push harbor.local.narwhal.io/library/narwhal-portal:latest   # imagePullPolicy: Always
+docker build -f Dockerfile -t harbor.local.narwhal.internal/library/narwhal-portal:latest .
+docker push harbor.local.narwhal.internal/library/narwhal-portal:latest   # imagePullPolicy: Always
 kubectl -n devtools rollout restart deploy/narwhal-portal
 kubectl -n devtools rollout status  deploy/narwhal-portal --timeout=220s
 ```
 
-- push 경로: 로컬 Docker daemon → APISIX 게이트웨이(`harbor.local.narwhal.io` → 192.168.56.200) → Harbor.
+- push 경로: 로컬 Docker daemon → APISIX 게이트웨이(`harbor.local.narwhal.internal` → 192.168.56.200) → Harbor.
 - 큰 레이어가 **413**으로 막히면 harbor route의 APISIX `client-control` 한도 때문 → 아래 "100MB 제한" 참고.
 - TLS는 narwhal CA를 Docker가 신뢰(로그인 성공 시 OK).
 
