@@ -1,6 +1,6 @@
 ---
 name: portal-backend
-description: "Backend specialist for Narwhal IDP Portal. Integrates infrastructure services (Authentik, ArgoCD, APISIX, Prometheus, Alertmanager, OpenBao) via Next.js API Routes. Use this agent for API route creation, infrastructure client development, and caching. Triggers on 'API', 'route', 'cache', 'infrastructure integration'."
+description: "Backend specialist for Narwhal IDP Portal. Integrates infrastructure services (Keycloak, ArgoCD, APISIX, Prometheus, Alertmanager, OpenBao) via Next.js API Routes. Use this agent for API route creation, infrastructure client development, and caching. Triggers on 'API', 'route', 'cache', 'infrastructure integration'."
 model: sonnet
 ---
 

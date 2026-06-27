@@ -1,6 +1,6 @@
 ---
 name: idp-backend
-description: "Backend API development guide for Narwhal IDP Portal. Covers Next.js 16 API Routes integrating Authentik, ArgoCD, APISIX, Prometheus, Alertmanager, OpenBao, and Valkey. Use this skill when adding API routes, developing infrastructure client libraries, or implementing cache strategies. Triggers on 'API', 'route', 'cache', 'infrastructure integration'."
+description: "Backend API development guide for Narwhal IDP Portal. Covers Next.js 16 API Routes integrating Keycloak, ArgoCD, APISIX, Prometheus, Alertmanager, OpenBao, and Valkey. Use this skill when adding API routes, developing infrastructure client libraries, or implementing cache strategies. Triggers on 'API', 'route', 'cache', 'infrastructure integration'."
 ---
 
 # IDP Portal Backend Development
@@ -67,7 +67,7 @@ Core principles:
 
 | Service | Auth Method | Environment Variable |
 |---------|-----------|---------------------|
-| Authentik | `Authorization: Bearer {token}` | `AUTHENTIK_ADMIN_TOKEN` |
+| Keycloak | `client_credentials` (admin REST API) | `KEYCLOAK_ADMIN_CLIENT_SECRET` |
 | ArgoCD | `Authorization: Bearer {token}` | `ARGOCD_TOKEN` |
 | APISIX | `X-API-KEY: {key}` | `APISIX_API_KEY` |
 | Prometheus | None | - |
@@ -75,7 +75,7 @@ Core principles:
 
 ## Cache Key Naming Convention
 
-Format: `{service}:{resource}` — e.g. `authentik:users`, `argocd:apps`, `apisix:routes`, `prom:{query}`, `alerts:active`
+Format: `{service}:{resource}` — e.g. `keycloak:users`, `argocd:apps`, `apisix:routes`, `prom:{query}`, `alerts:active`
 
 TTL guide:
 - Metrics/alerts (real-time critical): 10-15s
@@ -88,14 +88,14 @@ OpenBao Agent Injector mounts secrets as files at `/vault/secrets/`. Use those f
 
 ```tsx
 import { getSecret } from "./openbao"
-const token = getSecret("authentik-token", "AUTHENTIK_ADMIN_TOKEN")
+const secret = getSecret("keycloak-admin-secret", "KEYCLOAK_ADMIN_CLIENT_SECRET")
 ```
 
 ## Infrastructure Service Map
 
 | Service | Client | Auth | Cache TTL |
 |---------|--------|------|-----------|
-| Authentik | `authentik-client.ts` | Bearer token | 30-60s |
+| Keycloak | `keycloak-client.ts` | client_credentials | 30-60s |
 | ArgoCD | `argocd.ts` | Bearer token | 10s |
 | APISIX | `apisix-client.ts` | X-API-KEY | 30s |
 | Prometheus | `prometheus.ts` | None | 15s |

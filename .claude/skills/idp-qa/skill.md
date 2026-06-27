@@ -27,7 +27,7 @@ API-Component mappings (single source of truth — keep updated when adding new 
 | `/api/metrics` | `{ cpu, memory, nodes, pods }` | `cluster-metrics.tsx` |
 | `/api/argocd` | `{ total, synced, outOfSync, degraded, healthy }` | `argocd-status.tsx` |
 | `/api/alerts` | `Alert[]` | `alerts-widget.tsx` |
-| `/api/settings/users` | `AuthentikUser[]` | `users-table.tsx` |
+| `/api/settings/users` | `KeycloakUser[]` | `users-table.tsx` |
 | `/api/settings/routes` | `ApisixRoute[]` | `routes-table.tsx` |
 | `/api/tools/health` | per-service health status | `tools-grid.tsx` |
 | `/api/onboarding/kubeconfig` | YAML text | `kubeconfig-download.tsx` |
