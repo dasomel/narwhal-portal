@@ -1,0 +1,147 @@
+---
+# Kaniko in-cluster build Job for narwhal-portal
+#
+# Namespace: devtools
+# Context  : clones narwhal-portal from the in-cluster Gitea (private), builds with Kaniko,
+#            pushes to harbor.${DOMAIN}/library/narwhal-portal:latest
+#
+# Required secrets (created by harbor-kaniko-setup.sh):
+#   devtools/idp-portal-kaniko-harbor   — docker config.json for Harbor push auth
+#   devtools/narwhal-root-ca-secret     — Narwhal Root CA (ca.crt key)
+#
+# Required secrets (runtime, not created here):
+#   devtools/gitea-admin                — admin-password key (created by 12-gitea.sh)
+#
+# Domain templating:
+#   KANIKO_DESTINATION placeholder is replaced at apply-time by kaniko-build.sh
+#   using `sed "s|__HARBOR_DESTINATION__|harbor.${DOMAIN}/library/narwhal-portal:latest|g"`.
+#
+# Live-build caveats (cannot verify without a running cluster):
+#   - oven/bun:1.3.13-alpine must be pullable inside the cluster (Docker Hub rate limits may apply).
+#   - node:22-alpine must be pullable (same concern).
+#   - Kaniko multi-stage builds with --use-new-run=false (default) work on ARM64;
+#     snapshot mode=redo is not needed unless the alpine multi-stage copy fails.
+#   - The Next.js standalone output (output: "standalone" in next.config.js) must be
+#     enabled; without it the runner stage's COPY .next/standalone fails.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kaniko-build-narwhal-portal
+  namespace: devtools
+  labels:
+    app.kubernetes.io/name: kaniko-build-narwhal-portal
+    app.kubernetes.io/component: build
+spec:
+  ttlSecondsAfterFinished: 3600   # keep logs for 1 h, then GC
+  backoffLimit: 1                 # fail fast; caller will surface the error
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kaniko-build-narwhal-portal
+        app.kubernetes.io/component: build
+      annotations:
+        # Opt out of Istio ambient mesh — ztunnel would intercept the Gitea
+        # clone and Harbor push and corrupt them under HBONE.
+        istio.io/dataplane-mode: "none"
+    spec:
+      restartPolicy: Never
+
+      # ------------------------------------------------------------------ #
+      #  initContainer: clone the narwhal-portal repo from in-cluster Gitea #
+      # ------------------------------------------------------------------ #
+      initContainers:
+        - name: git-clone
+          # alpine/git is musl-based, ARM64-compatible, available on ghcr
+          # fallback: docker.io/alpine/git (same image, Docker Hub mirror)
+          image: alpine/git:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GITEA_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gitea-admin
+                  key: admin-password
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              echo "==> Cloning narwhal-portal from in-cluster Gitea..."
+              # Gitea service: gitea-http.devtools.svc.cluster.local:3000
+              # Repo is created/pushed by kaniko-build.sh before this Job runs.
+              git clone \
+                "http://gitea-admin:${GITEA_ADMIN_PASSWORD}@gitea-http.devtools.svc.cluster.local:3000/gitea-admin/narwhal-portal.git" \
+                /workspace
+              echo "==> Clone complete. HEAD: $(git -C /workspace rev-parse --short HEAD)"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+
+      # ------------------------------------------------------------------ #
+      #  Main container: Kaniko builds from /workspace (dir:// context)     #
+      # ------------------------------------------------------------------ #
+      containers:
+        - name: kaniko
+          # gcr.io/kaniko-project/executor supports ARM64 from v1.21+
+          image: gcr.io/kaniko-project/executor:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--context=dir:///workspace"
+            - "--dockerfile=/workspace/Dockerfile"
+            # Destination is templated by kaniko-build.sh at apply-time.
+            # The placeholder below must match the sed pattern in kaniko-build.sh.
+            - "--destination=__HARBOR_DESTINATION__"
+            # Trust the Narwhal Root CA for Harbor TLS verification.
+            # The CA is mounted at /kaniko/ssl/certs/narwhal-ca.crt so Kaniko's
+            # built-in certificate store picks it up automatically.
+            - "--registry-certificate=__HARBOR_HOST__=/kaniko/ssl/certs/narwhal-ca.crt"
+            # Reproducible snapshot; safer for multi-stage Alpine builds on ARM64.
+            - "--snapshot-mode=redo"
+            # Disable layer caching (no cache backend configured in this cluster).
+            - "--cache=false"
+            # Compress final image layers.
+            - "--compressed-caching=true"
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "2Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          volumeMounts:
+            # Harbor push auth — Kaniko reads /kaniko/.docker/config.json
+            - name: kaniko-docker-config
+              mountPath: /kaniko/.docker
+              readOnly: true
+            # Narwhal Root CA — mounted into Kaniko's certificate path
+            - name: narwhal-root-ca
+              mountPath: /kaniko/ssl/certs/narwhal-ca.crt
+              subPath: ca.crt
+              readOnly: true
+            # Shared workspace from git-clone initContainer
+            - name: workspace
+              mountPath: /workspace
+              readOnly: true
+
+      volumes:
+        - name: kaniko-docker-config
+          secret:
+            secretName: idp-portal-kaniko-harbor
+            items:
+              - key: config.json
+                path: config.json
+        - name: narwhal-root-ca
+          secret:
+            secretName: narwhal-root-ca-secret
+        - name: workspace
+          emptyDir: {}
+
+      # Prefer worker nodes (avoid memory-tight masters)
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
