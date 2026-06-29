@@ -181,7 +181,31 @@ fi
 cleanup_pf
 trap - EXIT
 
-# ---- 7. 이전 Job 삭제 (있으면) ---------------------------------------------
+# ---- 7. Harbor 준비 대기 (D8: push race 방지) ---------------------------------
+# D8: On a clean install, harbor-core and harbor-registry restart several times
+# while config DB migrations run. Kaniko's push attempt hitting a mid-restart core
+# returns 502 Bad Gateway. Gate here: wait for both deployments to be fully
+# available before applying the Job, so the push never races a restarting Harbor.
+# Timeout: 5 min (300s). If Harbor is already ready this completes immediately.
+info "Harbor 준비 대기 (최대 5분)..."
+HARBOR_READY_TIMEOUT=300
+if ! kubectl rollout status deployment/harbor-core \
+    -n "${BUILD_NAMESPACE}" \
+    --timeout="${HARBOR_READY_TIMEOUT}s"; then
+  red "harbor-core가 ${HARBOR_READY_TIMEOUT}초 내에 Ready 상태가 되지 않았습니다."
+  red "  kubectl rollout status deployment/harbor-core -n ${BUILD_NAMESPACE} 로 상태를 확인하세요."
+  exit 1
+fi
+if ! kubectl rollout status deployment/harbor-registry \
+    -n "${BUILD_NAMESPACE}" \
+    --timeout="${HARBOR_READY_TIMEOUT}s"; then
+  red "harbor-registry가 ${HARBOR_READY_TIMEOUT}초 내에 Ready 상태가 되지 않았습니다."
+  red "  kubectl rollout status deployment/harbor-registry -n ${BUILD_NAMESPACE} 로 상태를 확인하세요."
+  exit 1
+fi
+info "Harbor 준비 완료 (core + registry 모두 Available)"
+
+# ---- 8. 이전 Job 삭제 (있으면) ---------------------------------------------
 if kubectl get job "${JOB_NAME}" -n "${BUILD_NAMESPACE}" &>/dev/null; then
   info "이전 Job 삭제: ${JOB_NAME}"
   kubectl delete job "${JOB_NAME}" -n "${BUILD_NAMESPACE}" --ignore-not-found=true
@@ -189,7 +213,7 @@ if kubectl get job "${JOB_NAME}" -n "${BUILD_NAMESPACE}" &>/dev/null; then
   sleep 5
 fi
 
-# ---- 8. Job manifest 적용 (domain placeholder 치환) -----------------------
+# ---- 9. Job manifest 적용 (domain placeholder 치환) -----------------------
 HARBOR_DESTINATION="${HARBOR_HOST}/${HARBOR_PROJECT}/${HARBOR_REPO}:${HARBOR_TAG}"
 info "Kaniko Job 적용: destination=${HARBOR_DESTINATION}"
 
@@ -198,7 +222,7 @@ sed \
   -e "s|__HARBOR_HOST__|${HARBOR_HOST}|g" \
   "${JOB_TEMPLATE}" | kubectl apply -f -
 
-# ---- 9. Job 완료 대기 -------------------------------------------------------
+# ---- 10. Job 완료 대기 -------------------------------------------------------
 info "Kaniko 빌드 대기 중 (최대 ${JOB_TIMEOUT}초)..."
 info "  로그 확인: kubectl logs -n ${BUILD_NAMESPACE} -l app.kubernetes.io/name=${JOB_NAME} -f"
 

@@ -99,14 +99,24 @@ spec:
             - "--snapshot-mode=redo"
             # Disable layer caching (no cache backend configured in this cluster).
             - "--cache=false"
-            # Compress final image layers.
-            - "--compressed-caching=true"
+            # D8: compressed-caching=false — do NOT keep a second compressed copy of each
+            # layer in memory during the build. Next.js 16 + React 19 standalone builds
+            # produce large snapshot diffs; having both uncompressed and compressed copies
+            # in-memory simultaneously caused the OOMKill at the previous 4 Gi limit.
+            # Trade-off: layers are compressed at push time (slight CPU cost), but peak
+            # RSS stays well under the limit. See: github.com/GoogleContainerTools/kaniko
+            - "--compressed-caching=false"
           resources:
             requests:
               cpu: "1000m"
+              # D8: 2 Gi request — enough to schedule on any worker node (workers have
+              # ~5.8 Gi allocatable; worker-2 had ~3.8 Gi free at install time).
               memory: "2Gi"
             limits:
               cpu: "2000m"
+              # D8: 4 Gi limit retained — sufficient now that compressed-caching=false
+              # halves peak memory. Node headroom confirmed: workers ≤ 5.8 Gi allocatable,
+              # 4 Gi request fits on any worker with normal system overhead (~1 Gi reserved).
               memory: "4Gi"
           volumeMounts:
             # Harbor push auth — Kaniko reads /kaniko/.docker/config.json
