@@ -224,3 +224,6 @@ SCAFFOLD_COMPLETE
 # graphify output (generated knowledge graph + cache) — do not commit
 /graphify-out/
 .claude/settings.local.json
+
+# harness scratch workspace — do not commit
+/.claude/_workspace/
