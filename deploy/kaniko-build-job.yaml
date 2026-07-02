@@ -108,7 +108,16 @@ spec:
             - "--compressed-caching=false"
           resources:
             requests:
-              cpu: "1000m"
+              # D15: lowered from 1000m — worker nodes only have 2 vCPU allocatable
+              # each, and the full narwhal platform stack (Cilium, Istio, Harbor,
+              # Keycloak, Prometheus, Loki, etc.) can reserve enough CPU via its own
+              # requests that no worker has 1 full core free, even at 6-17% actual
+              # CPU usage (scheduling is requests-based, not usage-based) — observed
+              # live: "0/6 nodes: 3 insufficient cpu" leaving the Kaniko pod Pending
+              # for its whole 1200s wait, forever unable to schedule. 300m reliably
+              # fits; the limit stays high so the build can still burst when CPU is
+              # actually available.
+              cpu: "300m"
               # D8: 2 Gi request — enough to schedule on any worker node (workers have
               # ~5.8 Gi allocatable; worker-2 had ~3.8 Gi free at install time).
               memory: "2Gi"
