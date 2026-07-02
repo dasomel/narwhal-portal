@@ -33,7 +33,22 @@ metadata:
     app.kubernetes.io/component: build
 spec:
   ttlSecondsAfterFinished: 3600   # keep logs for 1 h, then GC
-  backoffLimit: 1                 # fail fast; caller will surface the error
+  # D16: raised from 1 — on a clean install this Job runs while Harbor/Gitea are
+  # still settling from their own just-completed rollout. kaniko-build.sh's
+  # readiness gate only waits for harbor-core/harbor-registry Deployments to
+  # report Available; it does not (and practically cannot) confirm the internal
+  # JWT trust between harbor-core (token issuer) and harbor-registry (token
+  # verifier) has finished propagating, nor that Gitea has fully warmed up.
+  # Observed live (2026-07-02): attempt 1 failed with a clean push 401
+  # (`HEAD .../manifests/latest: unexpected status code 401`) after a fully
+  # successful build; attempt 2 failed earlier with a Gitea clone 500. Manually
+  # re-running the exact same push flow (auth token fetch + push) seconds later
+  # succeeded immediately with the same credentials — confirming both failures
+  # were transient startup races, not a credentials or config defect. 3 gives
+  # the Job's own exponential backoff (10s/20s/40s/80s) enough attempts to ride
+  # out the window; JOB_TIMEOUT=1200s in kaniko-build.sh comfortably fits 4
+  # build attempts at ~3 min each plus backoff delay.
+  backoffLimit: 3
   template:
     metadata:
       labels:
