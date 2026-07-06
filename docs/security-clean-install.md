@@ -7,7 +7,7 @@
 - Narwhal 클러스터 부트스트랩 완료 (`/Users/m/Documents/IdeaProjects/20.dasomel/narwhal` 리포의 `idp/` Terraform + `gitops/apps/app-of-apps.yaml` 적용)
 - 도구: `kubectl`, `openssl`, `docker`, `helm`, `vault`(OpenBao), `argocd` CLI, `curl`, `jq`
 - 클러스터 접근 권한: cluster-admin
-- 도메인: 본 가이드는 `*.narwhal.local`을 가정. 실제 환경에 맞게 치환
+- 도메인: 본 가이드는 `*.local.narwhal.internal`을 가정. 실제 환경에 맞게 치환
 
 ---
 

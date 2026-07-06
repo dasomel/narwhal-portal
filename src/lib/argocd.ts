@@ -12,8 +12,8 @@ const DEVELOPER_PROJECTS = (process.env.ARGOCD_DEVELOPER_PROJECTS ?? "")
   .map((s) => s.trim())
   .filter((s) => s.length > 0)
 
-// ArgoCD 앱 목록에서 숨길 앱 이름 (APISIX 내장 대시보드 등 중복 노출 방지)
-const HIDDEN_APPS = ["apisix-dashboard"]
+// ArgoCD 앱 목록에서 숨길 앱 이름 (중복 노출 방지)
+const HIDDEN_APPS: string[] = []
 
 export interface ArgoApp {
   metadata: { name: string; namespace?: string; creationTimestamp?: string; annotations?: Record<string, string> }

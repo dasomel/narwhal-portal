@@ -21,8 +21,9 @@ the same IDP workspace; the cluster source is the sibling directory:
 
 | Path (under `narwhal/`) | Purpose |
 |------|---------|
-| `gitops/apps/` | ArgoCD Applications — source of truth for deployed cluster apps (incl. `narwhal-portal.yaml`) |
-| `gitops/resources/`, `gitops/templates/` | Cluster manifests & resource templates (where K8s Service/Ingress/RBAC manifests live) |
+| `gitops/charts/narwhal-apps/templates/` | ArgoCD Applications — source of truth for deployed cluster apps (rendered by the app-of-apps Helm chart) |
+| `gitops/charts/narwhal-platform/templates/` | Platform manifests incl. the portal's K8s resources (`narwhal-portal-k8s.yaml`) and APISIX routes |
+| `gitops/apps/` | `app-of-apps.yaml` only (points ArgoCD at `charts/narwhal-apps`) |
 | `configs/gitops/` | GitOps configuration values |
 | `scripts/cluster/` | Cluster install/operation scripts — incl. `11-3-keycloak-clients.sh` (OIDC clients), `13-2-narwhal-portal-bindings.sh` (portal RBAC + API token), `15-narwhal-portal.sh` (portal deploy) |
 | `csp/` | CSP/cloud provider integration |
@@ -30,7 +31,7 @@ the same IDP workspace; the cluster source is the sibling directory:
 | `CLAUDE.md`, `README.md`, `VERSIONS.md`, `CHANGELOG.md` | Authoritative cluster references |
 
 ### When to consult the cluster repo
-- Adding/modifying portal integrations with cluster services (Keycloak, ArgoCD, APISIX, OpenBao, Prometheus, Alertmanager, Falco) — verify endpoints, namespaces, secret paths, and service names against `gitops/apps/` and `gitops/resources/`.
+- Adding/modifying portal integrations with cluster services (Keycloak, ArgoCD, APISIX, OpenBao, Prometheus, Alertmanager, Falco) — verify endpoints, namespaces, secret paths, and service names against `gitops/charts/narwhal-apps/templates/` and `gitops/charts/narwhal-platform/templates/`.
 - Implementing onboarding/auth flows (kubeconfig, OIDC) — match against `scripts/cluster/11-*-keycloak*.sh`.
 - RBAC role definitions — cross-check `gitops/resources/` ClusterRole/RoleBinding sources and `scripts/cluster/13-2-narwhal-portal-bindings.sh`.
 - Resolving any "what's the real URL/port/secret name?" question — cluster repo wins over assumptions.
@@ -57,7 +58,7 @@ and routes fixes back to the owning harness. Single-repo portal work stays with 
 | Cache | Valkey (ioredis) |
 | Secrets | OpenBao Agent Injector |
 | Package | pnpm |
-| Test | Vitest + Playwright |
+| Test | Vitest + Playwright (planned — not yet implemented) |
 
 ---
 
