@@ -1,0 +1,91 @@
+name: Build & Publish Container (GHCR)
+
+# Builds the narwhal-portal container and publishes it to GitHub Container
+# Registry (ghcr.io/dasomel/narwhal-portal).
+#
+# Tagging strategy (docker/metadata-action):
+#   - push to main            -> :main, :sha-<git7>   (continuous / dev)
+#   - push tag v1.2.3 (SemVer)-> :1.2.3, :1.2, :1, :latest
+#   - manual (workflow_dispatch)
+# Version source of truth = git tags (v-prefixed). On a release tag we also
+# assert the tag matches package.json "version" so the two never drift.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+concurrency:
+  group: ghcr-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }} # ghcr.io/dasomel/narwhal-portal (lowercase)
+
+jobs:
+  build-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to GHCR via GITHUB_TOKEN
+      id-token: write # provenance/attestation
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Guard: on a vX.Y.Z tag, the tag must match package.json version.
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          pkg="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          echo "package.json=$pkg  tag=$tag"
+          if [ "$pkg" != "$tag" ]; then
+            echo "::error::git tag v$tag does not match package.json version $pkg — bump package.json before tagging."
+            exit 1
+          fi
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags & labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=narwhal-portal
+            org.opencontainers.image.description=Narwhal IDP management portal (Next.js)
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
