@@ -91,7 +91,7 @@ portal-frontend + portal-backend (parallel, run_in_background: true)
     ↓
 portal-qa (sequential, after both complete)
     ├── 0 failures → report results
-    └── failures → re-run relevant agent with fix instructions (max 2 loops)
+    └── failures   → re-run relevant agent with fix instructions (max 2 loops)
 ```
 
 - Pass the **same API response shape spec** to both frontend/backend agents
