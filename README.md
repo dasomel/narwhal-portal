@@ -1,5 +1,7 @@
 # Narwhal IDP Portal
 
+English | [한국어](README_ko.md)
+
 Management portal (Next.js) for the **Narwhal Kubernetes Internal Developer Platform (IDP)**
 cluster. Sibling repo `../narwhal` provisions the cluster itself (GitOps, SSO, monitoring,
 storage); this repo is the web UI operators and developers use to observe and operate it.
