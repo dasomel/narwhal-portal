@@ -23,6 +23,21 @@ Served in-cluster at **https://portal.local.narwhal.internal** via the cluster's
 
 Routes live under `src/app/(dashboard)/`; backing API routes under `src/app/api/`.
 
+## Screenshots
+
+> Placeholder gallery — drop your captures into [`docs/images/`](docs/images/) using the filenames shown ([details & tips](docs/images/README.md)); they render automatically.
+
+| Dashboard | Architecture |
+| :---: | :---: |
+| ![Dashboard](docs/images/dashboard.png) | ![Architecture](docs/images/architecture.png) |
+| _Real-time metrics, ArgoCD apps & alerts_ | _Nodes, namespaces & service graph_ |
+| **Security** | **Cost** |
+| ![Security](docs/images/security.png) | ![Cost](docs/images/cost.png) |
+| _Trivy vulnerability reports_ | _Namespace cost breakdown_ |
+| **Governance** | **Catalog** |
+| ![Governance](docs/images/governance.png) | ![Catalog](docs/images/catalog.png) |
+| _Scorecard, DORA & distribution_ | _Self-service app catalog_ |
+
 ## Tech Stack
 
 | Layer | Technology |

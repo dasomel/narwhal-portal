@@ -23,6 +23,21 @@
 
 라우트는 `src/app/(dashboard)/` 아래에 위치하며, 이를 지원하는 API 라우트는 `src/app/api/` 아래에 위치합니다.
 
+## Screenshots
+
+> 자리표시 갤러리 — 캡쳐 PNG를 [`docs/images/`](docs/images/)에 아래 파일명으로 넣으면 자동 렌더됩니다 ([상세·팁](docs/images/README.md)).
+
+| 대시보드 | 아키텍처 |
+| :---: | :---: |
+| ![Dashboard](docs/images/dashboard.png) | ![Architecture](docs/images/architecture.png) |
+| _실시간 메트릭·ArgoCD 앱·알럿_ | _노드·네임스페이스·서비스 그래프_ |
+| **보안** | **비용** |
+| ![Security](docs/images/security.png) | ![Cost](docs/images/cost.png) |
+| _Trivy 취약점 리포트_ | _네임스페이스 비용 분석_ |
+| **거버넌스** | **카탈로그** |
+| ![Governance](docs/images/governance.png) | ![Catalog](docs/images/catalog.png) |
+| _스코어카드·DORA·분포_ | _셀프서비스 앱 카탈로그_ |
+
 ## Tech Stack
 
 | 레이어 | 기술 |
