@@ -95,18 +95,21 @@ export function K8sTuningSection({ locale, systemStatus, nodeName, userRole }: K
             </AccordionItem>
           )}
 
-          {/* CNI Plugin — always shown (not tracked by computeActionItems) */}
-          <AccordionItem {...itemProps("cni-plugin")} className={ITEM_CLS}>
-            <AccordionTrigger className={TRIGGER_CLS}>
-              <span className={`${TRIGGER_LABEL} group-hover:text-cyan-500 transition-colors`}>
-                <Network className="h-4 w-4 text-cyan-500" />
-                {t("nodes.audit.cniPlugin")}
-              </span>
-            </AccordionTrigger>
-            <AccordionContent className="border-t border-border bg-card">
-              <AuditItemDetail id="cni-plugin" {...detailProps} />
-            </AccordionContent>
-          </AccordionItem>
+          {/* CNI Plugin — informational (not an action check): shown only in "show all".
+              Hidden in action-only mode so the list stays purely actionable. */}
+          {showAll && (
+            <AccordionItem {...itemProps("cni-plugin")} className={ITEM_CLS}>
+              <AccordionTrigger className={TRIGGER_CLS}>
+                <span className={`${TRIGGER_LABEL} group-hover:text-cyan-500 transition-colors`}>
+                  <Network className="h-4 w-4 text-cyan-500" />
+                  {t("nodes.audit.cniPlugin")}
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="border-t border-border bg-card">
+                <AuditItemDetail id="cni-plugin" {...detailProps} />
+              </AccordionContent>
+            </AccordionItem>
+          )}
 
           {/* Kubelet Config */}
           {isVisible("kubelet-config") && (
@@ -161,8 +164,9 @@ export function K8sTuningSection({ locale, systemStatus, nodeName, userRole }: K
             </AccordionItem>
           )}
 
-          {/* Control-plane Flags — master nodes only, always shown */}
-          {controlPlaneFlags.length > 0 && (
+          {/* Control-plane Flags — informational (master nodes only): shown only in
+              "show all", hidden in action-only mode like the CNI panel above. */}
+          {showAll && controlPlaneFlags.length > 0 && (
             <AccordionItem {...itemProps("cp-flags")} className={ITEM_CLS}>
               <AccordionTrigger className={TRIGGER_CLS}>
                 <span className={`${TRIGGER_LABEL} group-hover:text-rose-500 transition-colors`}>
