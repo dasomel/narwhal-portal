@@ -93,13 +93,14 @@ interface RawComplianceReport {
       failCount?: number
     }
     detailReport?: {
-      controls: Array<{
+      // trivy-operator (reportType=all) emits `results`, each control carrying a
+      // `checks[]` array with per-check `success` — NOT `controls[]`/passTotal/failTotal.
+      results?: Array<{
         id: string
         name: string
         severity: string
-        passTotal: number
-        failTotal: number
         description?: string
+        checks?: Array<{ success?: boolean }>
       }>
     }
   }
@@ -441,21 +442,25 @@ export async function getComplianceFrameworkDetail(
     const aggPass = item.status?.summary?.passCount ?? 0
     const aggFail = item.status?.summary?.failCount ?? 0
 
-    // status.detailReport.controls 가 있으면 per-control 사용, 없으면 spec.compliance.controls 폴백
-    // (Trivy spec.reportType=summary 이면 detailReport 비어있음 — 정의만 표시, pass/fail은 0으로)
-    const detailControls = item.status?.detailReport?.controls ?? []
+    // status.detailReport.results 가 있으면 per-control 사용, 없으면 spec.compliance.controls 폴백.
+    // (Trivy reportType=summary 이면 detailReport 비어있음 — 정의만 표시, pass/fail은 0으로.
+    //  reportType=all 이면 results[].checks[].success 로 컨트롤별 pass/fail 집계.)
+    const detailControls = item.status?.detailReport?.results ?? []
     const specControls = item.spec.compliance.controls ?? []
 
     let controls: ComplianceControl[]
     if (detailControls.length > 0) {
-      controls = detailControls.map((c) => ({
-        id: c.id,
-        name: c.name,
-        severity: mapSeverity(c.severity),
-        passCount: c.passTotal,
-        failCount: c.failTotal,
-        description: c.description,
-      }))
+      controls = detailControls.map((c) => {
+        const checks = c.checks ?? []
+        return {
+          id: c.id,
+          name: c.name,
+          severity: mapSeverity(c.severity),
+          passCount: checks.filter((k) => k.success === true).length,
+          failCount: checks.filter((k) => k.success === false).length,
+          description: c.description,
+        }
+      })
     } else {
       controls = specControls.map((c) => ({
         id: c.id,
