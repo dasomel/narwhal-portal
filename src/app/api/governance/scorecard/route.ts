@@ -45,8 +45,19 @@ export async function GET() {
       else if (app.status.health.status === "Progressing") { health = 70; details.push("Progressing") }
       else { health = 0; details.push(`Health: ${app.status.health.status}`) }
 
-      // Alert score (penalize for related alerts)
-      const relatedAlerts = alerts.filter((a) => a.labels.namespace === app.spec.destination?.namespace)
+      // Alert score (penalize for related alerts).
+      // Exclude non-actionable meta-alerts: Watchdog (heartbeat) and InfoInhibitor
+      // (severity=none inhibition source) always fire by design in kube-prometheus-stack
+      // and are NOT real problems. They carry a namespace label, so counting them flagged
+      // every app sharing that namespace (e.g. all `storage`-ns apps: openbao, seaweedfs,
+      // velero, velero-ui) with a phantom "1 active alert".
+      const relatedAlerts = alerts.filter(
+        (a) =>
+          a.labels.namespace === app.spec.destination?.namespace &&
+          a.labels.severity !== "none" &&
+          a.labels.alertname !== "Watchdog" &&
+          a.labels.alertname !== "InfoInhibitor",
+      )
       if (relatedAlerts.length > 0) {
         alerting = Math.max(0, 100 - relatedAlerts.length * 25)
         details.push(`${relatedAlerts.length} active alert(s)`)
