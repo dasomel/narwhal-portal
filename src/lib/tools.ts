@@ -163,7 +163,7 @@ const icons = {
 //   velero-ui 백엔드 토큰 교환은 velero-ui.yaml의 NODE_EXTRA_CA_CERTS로 사설 CA 신뢰.
 export const PLATFORM_TOOLS: PlatformTool[] = [
   { id: "argocd", name: "ArgoCD", description: "GitOps deployment management", url: "https://argocd.local.narwhal.internal/auth/login", category: "gitops", icon: icons.argocd, roles: ["cluster-admin", "developer"] },
-  { id: "gitea", name: "Gitea", description: "Git source code repository", url: "https://gitea.local.narwhal.internal/user/oauth2/keycloak", category: "source", icon: icons.gitea, roles: ["cluster-admin", "developer"] },
+  { id: "gitea", name: "Gitea", description: "Git source code repository", url: "https://gitea.local.narwhal.internal/gitea-admin/narwhal-gitops", category: "source", icon: icons.gitea, roles: ["cluster-admin", "developer"] },
   { id: "harbor", name: "Harbor", description: "Container image registry", url: "https://harbor.local.narwhal.internal/c/oidc/login", category: "registry", icon: icons.harbor, roles: ["cluster-admin", "developer"] },
   { id: "grafana", name: "Grafana", description: "Metrics dashboard", url: "https://grafana.local.narwhal.internal/login/generic_oauth", category: "monitoring", icon: icons.grafana, roles: ["cluster-admin", "developer", "viewer"] },
   { id: "prometheus", name: "Prometheus", description: "Metrics collection", url: "https://prometheus.local.narwhal.internal", category: "monitoring", icon: icons.prometheus, roles: ["cluster-admin"] },
