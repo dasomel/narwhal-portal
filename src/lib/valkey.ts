@@ -4,6 +4,12 @@ let client: Redis | null = null
 let isValkeyConnected = true
 
 function assertProductionSecurity(): void {
+  if (process.env.VALKEY_INSECURE_PRODUCTION === "true") {
+    if (!process.env.VALKEY_PASSWORD) {
+      console.warn("[Valkey] VALKEY_PASSWORD is not set in insecure production mode")
+    }
+    return
+  }
   if (process.env.NODE_ENV !== "production") {
     if (!process.env.VALKEY_PASSWORD) {
       console.warn("[Valkey] VALKEY_PASSWORD is not set — connection may fail if AUTH is required")
