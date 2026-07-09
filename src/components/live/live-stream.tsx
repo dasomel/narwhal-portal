@@ -81,7 +81,7 @@ function filterEvents(events: LiveEvent[], filter: FilterKey): LiveEvent[] {
     case "syncs":
       return events.filter((e) => e.type === "sync")
     case "critical":
-      return events.filter((e) => e.severity === "error")
+      return events.filter((e) => e.severity === "error" || e.severity === "warning")
     default:
       return events
   }

@@ -45,7 +45,26 @@ function toIngest(ev: K8sEvent): LiveEventIngest | null {
 
   const io = ev.involvedObject ?? {}
   const severity: LiveSeverity = isWarning ? "warning" : "info"
-  const type: LiveEventType = io.kind === "Node" ? "node" : "custom"
+
+  let type: LiveEventType = "custom"
+  if (isWarning) {
+    type = "alert"
+  } else if (
+    io.kind === "Pod" ||
+    io.kind === "Deployment" ||
+    io.kind === "ReplicaSet" ||
+    io.kind === "StatefulSet" ||
+    io.kind === "DaemonSet" ||
+    io.kind === "Job" ||
+    io.kind === "CronJob"
+  ) {
+    type = "deploy"
+  } else if (io.kind === "Application" || reason === "LeaderElection") {
+    type = "sync"
+  } else if (io.kind === "Node") {
+    type = "node"
+  }
+
   // Prefix `namespace=<ns>` so the SSE route's role/namespace filter can scope it.
   const nsTag = io.namespace ? `namespace=${io.namespace} ` : ""
   const objRef = `${io.kind ?? "Object"} ${io.name ?? ""}`.trim()
