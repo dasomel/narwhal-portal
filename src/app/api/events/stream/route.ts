@@ -65,6 +65,12 @@ export async function GET(request: Request) {
         }
       }
 
+      // Open the stream immediately: `retry` sets the browser's reconnect backoff
+      // and the comment flushes response headers so EventSource fires `open` right
+      // away — the client shows "live" instead of reconnect-storming while we set up.
+      enqueue("retry: 5000\n\n")
+      enqueue(": connected\n\n")
+
       const fetchLimit = lastEventId ? MAX_EVENTS_REPLAY : DEFAULT_REPLAY
       const recent = await getRecentEvents(fetchLimit)
       // getRecentEvents returns newest-first; reverse to send oldest first.
@@ -88,31 +94,40 @@ export async function GET(request: Request) {
         enqueue(": heartbeat\n\n")
       }, HEARTBEAT_MS)
 
-      const abortHandler = () => {
-        try {
-          controller.close()
-        } catch {
-          // already closed
-        }
-      }
-      request.signal.addEventListener("abort", abortHandler)
-
-      try {
-        for await (const event of subscribeLive()) {
-          if (request.signal.aborted) break
-          if (!isFiltered(event, role, scope)) {
-            enqueue(formatSSE(event))
-          }
-        }
-      } finally {
+      // The stream's lifetime is bound to the CLIENT connection (request abort),
+      // NOT to the pub/sub subscription. Only the client disconnecting closes it.
+      let closed = false
+      const cleanup = () => {
+        if (closed) return
+        closed = true
         clearInterval(heartbeatTimer)
-        request.signal.removeEventListener("abort", abortHandler)
+        request.signal.removeEventListener("abort", cleanup)
         try {
           controller.close()
         } catch {
           // already closed
         }
       }
+      request.signal.addEventListener("abort", cleanup)
+
+      // Consume live pub/sub in the background. If it ends or throws (e.g. Valkey
+      // pub/sub unavailable / degraded), DO NOT close the stream — the heartbeat
+      // keeps it open until the client disconnects. Previously an early return from
+      // subscribeLive() ran the finally→controller.close(), ending the response in
+      // ~10ms before the first heartbeat, so the browser reconnected every few
+      // seconds ("reconnecting" forever) even though Valkey was healthy.
+      void (async () => {
+        try {
+          for await (const event of subscribeLive()) {
+            if (request.signal.aborted) break
+            if (!isFiltered(event, role, scope)) {
+              enqueue(formatSSE(event))
+            }
+          }
+        } catch {
+          // pub/sub unavailable — heartbeat keeps the connection alive
+        }
+      })()
     },
   })
 
