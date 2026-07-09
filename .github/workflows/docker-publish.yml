@@ -4,15 +4,18 @@ name: Build & Publish Container (GHCR)
 # Registry (ghcr.io/dasomel/narwhal-portal).
 #
 # Tagging strategy (docker/metadata-action):
-#   - push to main            -> :main, :sha-<git7>   (continuous / dev)
 #   - push tag v1.2.3 (SemVer)-> :1.2.3, :1.2, :1, :latest
 #   - manual (workflow_dispatch)
 # Version source of truth = git tags (v-prefixed). On a release tag we also
 # assert the tag matches package.json "version" so the two never drift.
+#
+# Builds ONLY on version tags (not on every main push): a release commit is
+# pushed to main AND tagged, which previously fired two duplicate builds of the
+# same commit. GitOps pins an immutable SemVer tag, so a release == a tag == one
+# build. Use workflow_dispatch for ad-hoc builds.
 
 on:
   push:
-    branches: [main]
     tags: ['v*.*.*']
   workflow_dispatch:
 
@@ -70,7 +73,7 @@ jobs:
             type=semver,pattern={{major}}
             type=ref,event=branch
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
           labels: |
             org.opencontainers.image.title=narwhal-portal
             org.opencontainers.image.description=Narwhal IDP management portal (Next.js)
