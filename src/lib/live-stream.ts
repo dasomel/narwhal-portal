@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto"
-import { getValkey } from "./valkey"
+import { getLiveValkey } from "./valkey"
 import type { LiveEvent, LiveEventIngest } from "@/types/live"
 
 const RING_KEY = "live:events"
@@ -33,7 +33,7 @@ export async function pushEvent(ingest: LiveEventIngest): Promise<LiveEvent> {
   const payload = JSON.stringify(event)
 
   try {
-    const valkey = getValkey()
+    const valkey = getLiveValkey()
     // LPUSH + LTRIM keeps newest events at index 0; pipeline avoids 3× RTT.
     await valkey
       .pipeline()
@@ -61,7 +61,7 @@ export async function getRecentEvents(limit: number): Promise<LiveEvent[]> {
   }
 
   try {
-    const valkey = getValkey()
+    const valkey = getLiveValkey()
     const items = await valkey.lrange(RING_KEY, 0, limit - 1)
     return items.map((item) => JSON.parse(item) as LiveEvent)
   } catch {
@@ -72,10 +72,10 @@ export async function getRecentEvents(limit: number): Promise<LiveEvent[]> {
 
 export async function* subscribeLive(): AsyncIterable<LiveEvent> {
   // Each subscriber needs its own dedicated connection for subscribe mode
-  let subscriber: ReturnType<typeof getValkey> | null = null
+  let subscriber: ReturnType<typeof getLiveValkey> | null = null
 
   try {
-    subscriber = getValkey().duplicate()
+    subscriber = getLiveValkey().duplicate()
   } catch {
     markDegraded()
   }

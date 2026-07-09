@@ -54,6 +54,41 @@ export function getValkey(): Redis {
   return client
 }
 
+let liveClient: Redis | null = null
+
+/**
+ * Dedicated Valkey client for the live event stream (pub/sub + pipelines).
+ *
+ * The cache client (getValkey) is tuned fail-fast — `commandTimeout: 500` and
+ * `maxRetriesPerRequest: 1` — which is correct for best-effort caching (miss →
+ * fall back to a direct fetch) but breaks the live stream: a long-lived SUBSCRIBE
+ * and the LPUSH+LTRIM+PUBLISH pipeline get cut off / dropped, so events never reach
+ * Valkey and the stream falls into permanent degraded (in-memory) mode. This client
+ * is lenient: no per-command timeout and unlimited retries (required for pub/sub).
+ */
+export function getLiveValkey(): Redis {
+  if (!liveClient) {
+    assertProductionSecurity()
+    const tlsEnabled = process.env.VALKEY_TLS === "true"
+    const password = process.env.VALKEY_PASSWORD
+
+    liveClient = new Redis(process.env.VALKEY_URL ?? "redis://localhost:6379", {
+      maxRetriesPerRequest: null, // pub/sub must not drop commands
+      enableReadyCheck: true,
+      lazyConnect: true,
+      connectTimeout: 3000,
+      // deliberately NO commandTimeout: SUBSCRIBE is long-lived and pipelines
+      // must not be aborted mid-flight.
+      ...(tlsEnabled ? { tls: {} } : {}),
+      ...(password ? { password } : {}),
+    })
+    liveClient.on("error", (err) => {
+      console.warn("[live-valkey] connection error:", err.message)
+    })
+  }
+  return liveClient
+}
+
 export async function cacheGet<T>(key: string): Promise<T | null> {
   if (!isValkeyConnected) return null
   try {
