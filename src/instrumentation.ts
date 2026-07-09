@@ -4,6 +4,14 @@ export async function register() {
     throw new Error("AUTH_MOCK is forbidden in production")
   }
 
+  // Live event source for `/live`: start the Kubernetes Events informer. Node.js
+  // runtime only (it uses ioredis + streaming fetch); dynamic import keeps it out
+  // of the edge bundle. Without this the live stream has no producer.
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { startLiveK8sInformer } = await import("./lib/live-k8s-informer")
+    startLiveK8sInformer()
+  }
+
   if (process.env.NEXT_RUNTIME === "nodejs" && process.env.OTEL_ENABLED === "true") {
     // L-4: OTEL_EXPORTER_OTLP_ENDPOINT 미설정 시 처리
     const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://tempo.monitoring.svc.cluster.local:4318"
