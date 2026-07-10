@@ -8,8 +8,8 @@ export const KISA_CATALOG: Omit<KisaControl, "status" | "live" | "detail">[] = [
     severity: "Critical",
     standardRefs: ["CIS 1.2.x", "NSA/CISA §7", "ISMS-P 2.11"],
     evidence:
-      "kube-apiserver --audit-log-path/--audit-policy-file 부재. Falco k8s_audit 룰이 로드되나 audit webhook 백엔드 없음.",
-    remediation: "감사 정책+로그 경로 설정 후 Loki로 출하.",
+      "kube-apiserver 3/3에 --audit-log-path/--audit-policy-file 구성됨, /var/log/kubernetes/audit/audit.log 실기록+로테이션(maxage 30/backup 10/size 100). Falco는 2026-07-08 kernel 7.0 비호환으로 비활성화됨(감사 webhook 백엔드 없음은 유지되는 사실).",
+    remediation: "감사 로그의 Loki 출하 연계(현재 파일 로컬 보관만)와 감사 정책 커버리지 점검.",
   },
   {
     id: "KISA-ETCD-01",
@@ -18,8 +18,8 @@ export const KISA_CATALOG: Omit<KisaControl, "status" | "live" | "detail">[] = [
     severity: "Critical",
     standardRefs: ["CIS 2.x", "ISMS-P 2.7.1"],
     evidence:
-      "--encryption-provider-config 부재 — Secret·ConfigMap이 etcd에 평문 저장.",
-    remediation: "EncryptionConfiguration 적용 후 기존 Secret 재암호화.",
+      "EncryptionConfiguration aescbc 프로바이더 활성(identity 폴백 포함), apiserver --encryption-provider-config 적용됨.",
+    remediation: "암호화 키 주기 로테이션 절차 수립 및 기존 시크릿 재암호화(kubectl replace) 주기화.",
   },
   {
     id: "KISA-SEC-01",
@@ -82,9 +82,8 @@ export const KISA_CATALOG: Omit<KisaControl, "status" | "live" | "detail">[] = [
     severity: "Medium",
     standardRefs: ["CIS 5.2", "Pod Security Standards"],
     evidence:
-      "네임스페이스 PSA enforce 라벨 부재 — 워크로드 보안이 Kyverno 가동에만 의존.",
-    remediation:
-      "네임스페이스별 pod-security.kubernetes.io/enforce 라벨 부여(이중 방어).",
+      "전 네임스페이스(14개)에 pod-security.kubernetes.io audit/warn 라벨 적용(앱 ns=baseline, 호스트 접근 ns=privileged). enforce 모드는 미적용.",
+    remediation: "audit 위반 로그 관찰 후 단계적 enforce 승격.",
   },
   {
     id: "KISA-OBS-01",
@@ -95,7 +94,7 @@ export const KISA_CATALOG: Omit<KisaControl, "status" | "live" | "detail">[] = [
     evidence:
       "Alertmanager 수신자 미설정 — 알림 룰이 통지로 이어지지 않음.",
     remediation:
-      "수신자(Slack/Email/webhook) 구성+보안 전용 룰(Falco critical, CVE).",
+      "수신자(Slack/Email/webhook) 구성+보안 전용 룰(CVE, RBAC 이상탐지). Falco는 2026-07-08 kernel 7.0 비호환으로 비활성화 상태라 대체 시그널 필요.",
   },
   {
     id: "KISA-NET-01",
