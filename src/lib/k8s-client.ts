@@ -430,6 +430,83 @@ export async function getKyvernoPolicies(): Promise<KyvernoPolicy[]> {
   }
 }
 
+// --- KISA live-check helpers ---
+
+export interface ApiServerPodInfo {
+  name: string
+  containerArgs: string[]
+}
+
+interface ApiServerPodList {
+  items: Array<{
+    metadata: { name: string }
+    spec: { containers?: Array<{ command?: string[]; args?: string[] }> }
+  }>
+}
+
+/** kube-apiserver pods (kube-system, label component=kube-apiserver) with flattened command+args. */
+export async function getApiServerPods(): Promise<ApiServerPodInfo[]> {
+  const cached = await cacheGet<ApiServerPodInfo[]>("k8s:apiserver-pods")
+  if (cached) return cached
+  try {
+    const data = await k8sFetch<ApiServerPodList>(
+      "/api/v1/namespaces/kube-system/pods?labelSelector=component%3Dkube-apiserver",
+    )
+    const pods = (data.items ?? []).map((p) => ({
+      name: p.metadata.name,
+      containerArgs: (p.spec.containers ?? []).flatMap((c) => [...(c.command ?? []), ...(c.args ?? [])]),
+    }))
+    await cacheSet("k8s:apiserver-pods", pods, 60)
+    return pods
+  } catch (err) {
+    console.warn("[k8s] API server pods fetch failed:", (err as Error).message)
+    return []
+  }
+}
+
+export interface NetworkPolicyInfo {
+  name: string
+  namespace: string
+  policyTypes: string[]
+  podSelectorEmpty: boolean
+}
+
+interface NetworkPolicyList {
+  items: Array<{
+    metadata: { name: string; namespace: string }
+    spec: {
+      policyTypes?: string[]
+      podSelector?: { matchLabels?: Record<string, string>; matchExpressions?: unknown[] }
+    }
+  }>
+}
+
+export async function getNetworkPolicies(): Promise<NetworkPolicyInfo[]> {
+  const cached = await cacheGet<NetworkPolicyInfo[]>("k8s:netpol")
+  if (cached) return cached
+  try {
+    const data = await k8sFetch<NetworkPolicyList>("/apis/networking.k8s.io/v1/networkpolicies")
+    const policies = (data.items ?? []).map((i) => {
+      const sel = i.spec.podSelector
+      const podSelectorEmpty =
+        !sel ||
+        ((!sel.matchLabels || Object.keys(sel.matchLabels).length === 0) &&
+          (!sel.matchExpressions || sel.matchExpressions.length === 0))
+      return {
+        name: i.metadata.name,
+        namespace: i.metadata.namespace,
+        policyTypes: i.spec.policyTypes ?? [],
+        podSelectorEmpty,
+      }
+    })
+    await cacheSet("k8s:netpol", policies, 30)
+    return policies
+  } catch (err) {
+    console.warn("[k8s] NetworkPolicies fetch failed:", (err as Error).message)
+    return []
+  }
+}
+
 export interface PackageUpdate {
   name: string
   currentVersion: string

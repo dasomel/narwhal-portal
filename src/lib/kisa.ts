@@ -3,21 +3,41 @@ import { cacheGet, cacheSet } from "./valkey"
 import { KISA_CATALOG } from "./kisa-controls"
 import type { KisaControl, KisaResponse, KisaStatus } from "@/types/kisa"
 
-// Static status map for non-LIVE controls
+// Static status map for non-LIVE controls.
+//
+// These 6 remain static because they are node/host-level or process-level facts that are
+// NOT observable via the K8s API the portal has access to (SSH-only config, external service
+// config outside the cluster API, or signing/registry infra state). Their statuses reflect the
+// last manual security audit and must be updated by hand whenever the underlying cluster
+// configuration changes:
+//   - KISA-SEC-01  (OpenBao unseal key isolation)     — Secret *contents* need a value read,
+//                                                        not just existence; out of API scope.
+//   - KISA-ETCD-02 (APISIX etcd access protection)     — etcd transport security is a
+//                                                        host/process-level fact (TLS+auth on
+//                                                        the APISIX-internal etcd endpoint).
+//   - KISA-IMG-01  (Registry TLS certificate verify)   — containerd skip_verify is a per-node
+//                                                        config file setting, not a K8s object.
+//   - KISA-TLS-01  (Service mesh mTLS coverage)        — mesh dataplane-mode opt-out is a pod
+//                                                        annotation audit across many services;
+//                                                        kept manual pending a dedicated scan.
+//   - KISA-OBS-01  (Security event real-time alerting) — Alertmanager receiver wiring lives in
+//                                                        its own config, not a simple K8s read.
+//   - KISA-IMG-02  (Image tag/signature management)    — Cosign signature verification state
+//                                                        isn't exposed via any K8s API object.
 const STATIC_STATUS: Record<string, KisaStatus> = {
-  "KISA-CP-01": "fail",
-  "KISA-ETCD-01": "fail",
   "KISA-SEC-01": "fail",
   "KISA-ETCD-02": "fail",
   "KISA-IMG-01": "fail",
-  "KISA-NET-01": "fail",
-  "KISA-POD-01": "fail",
   "KISA-TLS-01": "warn",
   "KISA-OBS-01": "warn",
   "KISA-IMG-02": "warn",
 }
 
 const LIVE_IDS = new Set([
+  "KISA-CP-01",
+  "KISA-ETCD-01",
+  "KISA-POD-01",
+  "KISA-NET-01",
   "KISA-RBAC-01",
   "KISA-RBAC-02",
   "KISA-IMG-03",
@@ -25,6 +45,23 @@ const LIVE_IDS = new Set([
   "KISA-TLS-02",
   "KISA-CFG-01",
 ])
+
+const KISA_NET01_NAMESPACES = ["iam", "devtools", "monitoring", "storage", "database"]
+
+// Bindings that are unavoidable K8s builtins — excluded from the RBAC-01/02 verdict because the
+// cluster/operators cannot function without them (kubeadm bootstrap, control-plane component
+// identities, the built-in cluster-admin binding to system:masters).
+function isUnavoidableRbacBuiltin(b: { name: string; subjects: Array<{ kind: string; name: string }> }): boolean {
+  if (b.name === "cluster-admin") return true
+  if (b.name.startsWith("system:") || b.name.startsWith("kubeadm:")) return true
+  if (
+    b.subjects.length > 0 &&
+    b.subjects.every((s) => s.kind === "Group" && (s.name === "system:masters" || s.name.startsWith("system:")))
+  ) {
+    return true
+  }
+  return false
+}
 
 // --- Live check helpers ---
 
@@ -101,6 +138,76 @@ async function checkAdm01(): Promise<{ status: KisaStatus; detail: string }> {
   return { status: "pass", detail: `Enforce 정책 ${policies.filter((p) => p.validationFailureAction === "Enforce").length}건 활성` }
 }
 
+async function checkCp01(): Promise<{ status: KisaStatus; detail: string }> {
+  const { getApiServerPods } = await import("./k8s-client")
+  const pods = await getApiServerPods()
+  if (pods.length === 0) return { status: "manual", detail: "API 서버 파드 정보 없음" }
+
+  const hasBoth = pods.filter(
+    (p) =>
+      p.containerArgs.some((a) => a.includes("--audit-log-path")) &&
+      p.containerArgs.some((a) => a.includes("--audit-policy-file")),
+  )
+  if (hasBoth.length === pods.length) {
+    return { status: "pass", detail: `apiserver ${pods.length}건 모두 감사 로그 설정 확인` }
+  }
+  if (hasBoth.length > 0) {
+    return { status: "warn", detail: `apiserver ${hasBoth.length}/${pods.length}건만 감사 로그 설정` }
+  }
+  return { status: "fail", detail: `apiserver ${pods.length}건 모두 --audit-log-path/--audit-policy-file 미설정` }
+}
+
+async function checkEtcd01(): Promise<{ status: KisaStatus; detail: string }> {
+  const { getApiServerPods } = await import("./k8s-client")
+  const pods = await getApiServerPods()
+  if (pods.length === 0) return { status: "manual", detail: "API 서버 파드 정보 없음" }
+
+  const encrypted = pods.filter((p) => p.containerArgs.some((a) => a.includes("--encryption-provider-config")))
+  if (encrypted.length === pods.length) {
+    return { status: "pass", detail: `apiserver ${pods.length}건 모두 --encryption-provider-config 설정` }
+  }
+  return { status: "fail", detail: `apiserver ${pods.length - encrypted.length}/${pods.length}건 암호화 미설정` }
+}
+
+async function checkPod01(): Promise<{ status: KisaStatus; detail: string }> {
+  const { getNamespaces } = await import("./k8s-client")
+  const namespaces = await getNamespaces()
+  const considered = namespaces.filter((n) => n.name !== "kube-node-lease" && n.name !== "kube-public")
+  if (considered.length === 0) return { status: "manual", detail: "네임스페이스 정보 없음" }
+
+  const psaKeys = [
+    "pod-security.kubernetes.io/enforce",
+    "pod-security.kubernetes.io/audit",
+    "pod-security.kubernetes.io/warn",
+  ]
+  const labeled = considered.filter((n) => psaKeys.some((k) => k in n.labels))
+  const ratio = labeled.length / considered.length
+  if (ratio === 1) {
+    return { status: "pass", detail: `대상 네임스페이스 ${considered.length}건 모두 PSA 라벨 적용` }
+  }
+  if (ratio >= 0.5) {
+    return { status: "warn", detail: `PSA 라벨 적용 ${labeled.length}/${considered.length}건` }
+  }
+  return { status: "fail", detail: `PSA 라벨 적용 ${labeled.length}/${considered.length}건` }
+}
+
+async function checkNet01(): Promise<{ status: KisaStatus; detail: string }> {
+  const { getNetworkPolicies } = await import("./k8s-client")
+  const policies = await getNetworkPolicies()
+
+  const hasDefaultDeny = (ns: string) =>
+    policies.some((p) => p.namespace === ns && p.policyTypes.includes("Ingress") && p.podSelectorEmpty)
+  const covered = KISA_NET01_NAMESPACES.filter(hasDefaultDeny)
+
+  if (covered.length === KISA_NET01_NAMESPACES.length) {
+    return { status: "pass", detail: `대상 네임스페이스 ${KISA_NET01_NAMESPACES.length}건 모두 default-deny 적용` }
+  }
+  if (covered.length > 0) {
+    return { status: "warn", detail: `default-deny 적용 ${covered.length}/${KISA_NET01_NAMESPACES.length}건` }
+  }
+  return { status: "fail", detail: "대상 네임스페이스에 ingress default-deny NetworkPolicy 없음" }
+}
+
 async function checkRbac(id: "KISA-RBAC-01" | "KISA-RBAC-02"): Promise<{ status: KisaStatus; detail: string }> {
   const { getRbacBindings, getClusterRoles, getRoles } = await import("./k8s-client")
   const [bindings, clusterRoles, roles] = await Promise.all([
@@ -117,10 +224,10 @@ async function checkRbac(id: "KISA-RBAC-01" | "KISA-RBAC-02"): Promise<{ status:
     rolesMap.get(r.namespace)!.set(r.name, r)
   }
 
-  let criticalCount = 0
-  let highCount = 0
+  const writeVerbs = new Set(["create", "update", "patch", "delete", "deletecollection"])
+  const escalationTokens = new Set(["bind", "escalate", "impersonate"])
 
-  for (const b of bindings) {
+  function classify(b: (typeof bindings)[number]) {
     let matchedRole: { rules?: unknown[] } | undefined
     if (b.roleRef.kind === "ClusterRole") {
       matchedRole = clusterRolesMap.get(b.roleRef.name)
@@ -134,9 +241,6 @@ async function checkRbac(id: "KISA-RBAC-01" | "KISA-RBAC-02"): Promise<{ status:
     let escalation = false
     let writeAccess = false
     let secretsAccess = false
-
-    const writeVerbs = new Set(["create", "update", "patch", "delete", "deletecollection"])
-    const escalationTokens = new Set(["bind", "escalate", "impersonate"])
 
     for (const r of rules as Array<{ verbs?: string[]; resources?: string[] }>) {
       const verbs = r.verbs ?? []
@@ -153,18 +257,38 @@ async function checkRbac(id: "KISA-RBAC-01" | "KISA-RBAC-02"): Promise<{ status:
       }
     }
 
-    const isClusterAdmin = b.roleRef.name === "cluster-admin"
-    if (isClusterAdmin || (wildcardVerbs && wildcardResources) || escalation) {
+    return { wildcardVerbs, wildcardResources, escalation, writeAccess, secretsAccess }
+  }
+
+  // Unavoidable K8s builtins (cluster-admin's own binding, system:*/kubeadm:* bindings, and
+  // bindings whose only subjects are system:masters/system:* groups) are never actionable —
+  // exclude them from both verdicts.
+  const nonBuiltin = bindings.filter((b) => !isUnavoidableRbacBuiltin(b))
+
+  if (id === "KISA-RBAC-01") {
+    const clusterAdminBindings = nonBuiltin.filter((b) => b.roleRef.name === "cluster-admin")
+    if (clusterAdminBindings.length > 0) {
+      return {
+        status: "fail",
+        detail: `불필요한 cluster-admin 바인딩 ${clusterAdminBindings.length}건 (${clusterAdminBindings.map((b) => b.name).join(", ")})`,
+      }
+    }
+    return { status: "pass", detail: "built-in 외 cluster-admin 바인딩 없음" }
+  }
+
+  // KISA-RBAC-02: risky bindings among the remaining non-builtin, non-cluster-admin bindings.
+  const remaining = nonBuiltin.filter((b) => b.roleRef.name !== "cluster-admin")
+  let criticalCount = 0
+  let highCount = 0
+  for (const b of remaining) {
+    const { wildcardVerbs, wildcardResources, escalation, writeAccess, secretsAccess } = classify(b)
+    if ((wildcardVerbs && wildcardResources) || escalation) {
       criticalCount++
-    } else if (
-      b.scope === "cluster" &&
-      (writeAccess || secretsAccess || wildcardVerbs || wildcardResources)
-    ) {
+    } else if (b.scope === "cluster" && (writeAccess || secretsAccess || wildcardVerbs || wildcardResources)) {
       highCount++
     }
   }
 
-  void id // both RBAC-01 and RBAC-02 use the same binding scan
   if (criticalCount > 0) {
     return { status: "fail", detail: `위험 바인딩 Critical ${criticalCount}건` }
   }
@@ -198,7 +322,23 @@ export async function getKisaControls(): Promise<KisaResponse> {
     let detail: string | undefined
 
     try {
-      if (entry.id === "KISA-IMG-03") {
+      if (entry.id === "KISA-CP-01") {
+        const r = await checkCp01()
+        status = r.status
+        detail = r.detail
+      } else if (entry.id === "KISA-ETCD-01") {
+        const r = await checkEtcd01()
+        status = r.status
+        detail = r.detail
+      } else if (entry.id === "KISA-POD-01") {
+        const r = await checkPod01()
+        status = r.status
+        detail = r.detail
+      } else if (entry.id === "KISA-NET-01") {
+        const r = await checkNet01()
+        status = r.status
+        detail = r.detail
+      } else if (entry.id === "KISA-IMG-03") {
         const r = await checkImg03()
         status = r.status
         detail = r.detail
