@@ -60,9 +60,9 @@ export const KISA_CATALOG: Omit<KisaControl, "status" | "live" | "detail">[] = [
     severity: "High",
     standardRefs: ["CIS 5.1", "NSA/CISA", "ISMS-P 2.6"],
     evidence:
-      "온디맨드로 kube-system에 cluster-admin SA+8760h 토큰 생성(set-config.sh).",
+      "이전에 지적된 온디맨드 kube-system cluster-admin SA는 제거됨 — headlamp(view), velero-ui(velero-ui-readonly+storage ns Role), platform-admin(와일드카드 없는 명시적 룰)로 최소권한 전환 완료. 남은 cluster-admin 바인딩은 velero-server(storage ns SA, Velero 업스트림 요구사항) 1건뿐(K8s 빌트인 제외).",
     remediation:
-      "단명 토큰(TokenRequest)·작업 후 바인딩 회수·cluster-admin 직접부여 지양.",
+      "velero-server는 Velero 백업/복원 특성상 사실상 불가피 — 네임스페이스 스코프 Role 대체 가능 여부만 주기 검토, 신규 cluster-admin 직접부여 지양.",
   },
   {
     id: "KISA-TLS-01",
@@ -71,9 +71,9 @@ export const KISA_CATALOG: Omit<KisaControl, "status" | "live" | "detail">[] = [
     severity: "High",
     standardRefs: ["NSA/CISA", "ISMS-P 2.7.1"],
     evidence:
-      "ArgoCD·Grafana·Harbor·OpenBao·APISIX 등 핵심 서비스가 mTLS opt-out(dataplane-mode:none).",
+      "메시 기본값은 STRICT(istio-system/default PeerAuthentication). 비-메시 클라이언트 연동을 위해 platform-system·database·devtools(harbor)·monitoring 4개 네임스페이스에 PERMISSIVE 예외 적용 중 — ArgoCD·Grafana·Harbor·OpenBao·APISIX 등 opt-out 서비스가 이 예외 범위에 포함됨.",
     remediation:
-      "opt-out 최소화, 불가 구간 NetworkPolicy 보완, AuthorizationPolicy 추가.",
+      "PERMISSIVE 네임스페이스별로 실제 비-메시 트래픽 경로를 재확인해 필요 최소 범위로 축소, 나머지는 STRICT 복귀 검토. 예외 구간은 NetworkPolicy+AuthorizationPolicy로 보완.",
   },
   {
     id: "KISA-POD-01",
@@ -103,8 +103,8 @@ export const KISA_CATALOG: Omit<KisaControl, "status" | "live" | "detail">[] = [
     severity: "Medium",
     standardRefs: ["CIS 5.3", "NSA/CISA §4", "KISA 망분리"],
     evidence:
-      "ingress NetworkPolicy 부재 — 클러스터 내 pod 간 인바운드 무제한.",
-    remediation: "네임스페이스별 default-deny ingress+명시적 허용.",
+      "이전의 curated egress 허용목록 설계는 폐기되고(2026-07-09) iam·devtools·monitoring·storage·database 5개 네임스페이스에 egress 전체 허용(egress:[{}]) NetworkPolicy로 대체됨 — egress 통제는 사실상 무력화. ingress default-deny NetworkPolicy는 어느 네임스페이스에도 없어 pod 간 인바운드가 여전히 무제한.",
+    remediation: "네임스페이스별 ingress default-deny + 명시적 허용 정책 추가. egress도 전체 허용 대신 대상별 최소 허용목록으로 재설계 검토.",
   },
   {
     id: "KISA-IMG-02",
@@ -113,8 +113,8 @@ export const KISA_CATALOG: Omit<KisaControl, "status" | "live" | "detail">[] = [
     severity: "Low",
     standardRefs: ["NSA/CISA", "SLSA"],
     evidence:
-      ":latest 태그 다수, Cosign 서명·검증 부재, Kyverno :latest 정책이 Audit.",
-    remediation: "Enforce 전환+다이제스트 핀, Kyverno verifyImages.",
+      "클러스터 전체 실행 이미지(78종) 중 :latest 태그 0건 — Harbor(v2.15.1), 포털(1.0.4) 등 전량 불변 태그로 고정됨. 다만 Cosign 서명·검증은 여전히 부재하고, Kyverno disallow-latest-tag 정책도 Audit 모드라 재발 방지 기제는 없음.",
+    remediation: "Kyverno disallow-latest-tag를 Audit→Enforce로 전환해 회귀 방지, Cosign 서명+verifyImages 도입.",
   },
   {
     id: "KISA-IMG-03",
