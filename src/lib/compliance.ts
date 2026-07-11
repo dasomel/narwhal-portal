@@ -522,11 +522,26 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
       getComplianceFrameworks(),
     ])
 
-    // Headline number reflects ACTIONABLE findings only; system-namespace findings are
-    // inherent to K8s/CNI/mesh and surfaced separately (not silently dropped).
-    const totalConfigAuditFailures = configAuditList
+    // Headline number reflects ACTIONABLE findings only: non-system namespace AND
+    // Critical/High/Medium severity. LOW-severity checks (KSV020/021 UID/GID, KSV011/015/016/018
+    // resource limits) are risk-accepted hygiene per narwhal/docs/compliance-hardening.md and are
+    // split into their own tier so they don't inflate the actionable count. System-namespace
+    // findings are inherent to K8s/CNI/mesh and surfaced separately (not silently dropped).
+    const nonSystemConfigAuditFailures = configAuditList
       .filter((row) => !row.accepted)
       .reduce((acc, row) => addSummaries(acc, row.summary), { ...emptyCheckSummary })
+    const totalConfigAuditFailures: CheckSummary = {
+      Critical: nonSystemConfigAuditFailures.Critical,
+      High: nonSystemConfigAuditFailures.High,
+      Medium: nonSystemConfigAuditFailures.Medium,
+      Low: 0,
+    }
+    const lowSeverityConfigAuditFailures: CheckSummary = {
+      Critical: 0,
+      High: 0,
+      Medium: 0,
+      Low: nonSystemConfigAuditFailures.Low,
+    }
     const acceptedSystemConfigAuditFailures = configAuditList
       .filter((row) => row.accepted)
       .reduce((acc, row) => addSummaries(acc, row.summary), { ...emptyCheckSummary })
@@ -566,6 +581,7 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
 
     const result: ComplianceSummary = {
       totalConfigAuditFailures,
+      lowSeverityConfigAuditFailures,
       acceptedSystemConfigAuditFailures,
       totalRbacFailures,
       totalInfraFailures,
@@ -581,6 +597,7 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
     console.warn("[compliance] getComplianceSummary failed:", err instanceof Error ? err.message : err)
     return {
       totalConfigAuditFailures: { ...emptyCheckSummary },
+      lowSeverityConfigAuditFailures: { ...emptyCheckSummary },
       acceptedSystemConfigAuditFailures: { ...emptyCheckSummary },
       totalRbacFailures: { ...emptyCheckSummary },
       totalInfraFailures: { ...emptyCheckSummary },

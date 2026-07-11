@@ -77,8 +77,14 @@ export interface ComplianceFrameworkDetail extends ComplianceFramework {
 
 export interface ComplianceSummary {
   /** ACTIONABLE config-audit failures only — excludes system namespaces (see SYSTEM_NAMESPACES
-   *  in lib/compliance.ts). Reclassified 2026-07; field name kept for API compatibility. */
+   *  in lib/compliance.ts) AND excludes LOW severity (see lowSeverityConfigAuditFailures below;
+   *  KSV020/021 UID/GID, KSV011/015/016/018 resource limits are risk-accepted hygiene checks per
+   *  narwhal/docs/compliance-hardening.md). Reclassified 2026-07; field name kept for API compat. */
   totalConfigAuditFailures: CheckSummary
+  /** NEW: LOW-severity config-audit failures in non-system namespaces — risk-accepted hygiene
+   *  checks, shown separately so they don't inflate the actionable headline. Only the `Low` field
+   *  is ever non-zero here (Critical/High/Medium always 0 by construction). */
+  lowSeverityConfigAuditFailures: CheckSummary
   /** NEW: config-audit failures in system namespaces (kube-system/istio-system/…), inherent to
    *  K8s/CNI/mesh and not actionable — kept visible separately rather than dropped. */
   acceptedSystemConfigAuditFailures: CheckSummary

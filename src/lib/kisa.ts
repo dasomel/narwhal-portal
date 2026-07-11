@@ -93,13 +93,19 @@ async function checkCfg01(): Promise<{ status: KisaStatus; detail: string }> {
   // still surface the actionable-vs-accepted split of the underlying raw config-audit findings
   // (same Trivy scan, namespace-attributed) alongside the verdict so a low framework score isn't
   // read as "N actionable issues" when it's largely system-namespace noise.
+  // Actionable excludes LOW severity too — KSV020/021 UID/GID and KSV011/015/016/018 resource
+  // limit checks are risk-accepted hygiene per narwhal/docs/compliance-hardening.md, same tiering
+  // as getComplianceSummary's totalConfigAuditFailures/lowSeverityConfigAuditFailures split.
   const actionableFailures = configAuditRows
     .filter((r) => !r.accepted)
-    .reduce((sum, r) => sum + r.summary.Critical + r.summary.High + r.summary.Medium + r.summary.Low, 0)
+    .reduce((sum, r) => sum + r.summary.Critical + r.summary.High + r.summary.Medium, 0)
+  const lowSeverityFailures = configAuditRows
+    .filter((r) => !r.accepted)
+    .reduce((sum, r) => sum + r.summary.Low, 0)
   const acceptedFailures = configAuditRows
     .filter((r) => r.accepted)
     .reduce((sum, r) => sum + r.summary.Critical + r.summary.High + r.summary.Medium + r.summary.Low, 0)
-  const breakdown = `(config-audit 조치가능 ${actionableFailures}건, 시스템 수용 ${acceptedFailures}건)`
+  const breakdown = `(config-audit 조치가능 ${actionableFailures}건, 위생 ${lowSeverityFailures}건, 시스템 수용 ${acceptedFailures}건)`
 
   const failing = frameworks.filter((f) => f.passRate < 0.6)
   const warning = frameworks.filter((f) => f.passRate >= 0.6 && f.passRate < 0.9)

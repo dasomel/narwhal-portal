@@ -167,14 +167,25 @@ export function ConfigAuditTable() {
     [rows]
   )
 
-  const { actionableCount, acceptedCount } = useMemo(() => {
+  // Three-tier split: system-accepted (namespace-based) takes priority; of the remaining
+  // "actionable" rows, ones whose non-system findings are ALL Low severity are hygiene-only
+  // (KSV020/021 UID/GID, KSV011/015/016/018 resource limits — risk-accepted per
+  // narwhal/docs/compliance-hardening.md) and are broken out separately rather than inflating
+  // the actionable headline. Derived from the row's existing severity summary — no new field.
+  const { actionableCount, lowSeverityCount, acceptedCount } = useMemo(() => {
     let actionableCount = 0
+    let lowSeverityCount = 0
     let acceptedCount = 0
     for (const r of rows) {
-      if (r.accepted) acceptedCount++
-      else actionableCount++
+      if (r.accepted) {
+        acceptedCount++
+        continue
+      }
+      const hasActionableSeverity = r.summary.Critical + r.summary.High + r.summary.Medium > 0
+      if (hasActionableSeverity) actionableCount++
+      else lowSeverityCount++
     }
-    return { actionableCount, acceptedCount }
+    return { actionableCount, lowSeverityCount, acceptedCount }
   }, [rows])
 
   const filtered = useMemo(() => {
@@ -227,10 +238,14 @@ export function ConfigAuditTable() {
 
   return (
     <>
-      {(actionableCount > 0 || acceptedCount > 0) && (
-        <p className="text-xs text-muted-foreground mb-2" title={t("compliance.table.acceptedHint")}>
+      {(actionableCount > 0 || lowSeverityCount > 0 || acceptedCount > 0) && (
+        <p
+          className="text-xs text-muted-foreground mb-2"
+          title={`${t("compliance.table.lowSeverityHint")} · ${t("compliance.table.acceptedHint")}`}
+        >
           {t("compliance.table.actionableSummary", {
             actionable: String(actionableCount),
+            low: String(lowSeverityCount),
             accepted: String(acceptedCount),
           })}
         </p>
@@ -320,6 +335,15 @@ export function ConfigAuditTable() {
                               title={t("compliance.table.acceptedHint")}
                             >
                               {t("compliance.table.accepted")}
+                            </Badge>
+                          )}
+                          {!row.accepted && row.summary.Critical + row.summary.High + row.summary.Medium === 0 && row.summary.Low > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="ml-2 text-[0.65rem] px-1.5 py-0 text-muted-foreground border-muted-foreground/30"
+                              title={t("compliance.table.lowSeverityHint")}
+                            >
+                              {t("compliance.table.lowSeverity")}
                             </Badge>
                           )}
                         </td>
