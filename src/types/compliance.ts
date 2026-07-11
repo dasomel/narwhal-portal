@@ -38,6 +38,10 @@ export interface RbacAuditRow {
   kind: string
   name: string
   summary: CheckSummary
+  /** true when `name` (the owning Role/ClusterRole) is a Kubernetes built-in role (system:*,
+   *  kubeadm:*, cluster-admin/admin/edit/view) or an upstream controller/chart-owned role —
+   *  findings are inherent to what that role does and are not actionable by the platform team. */
+  accepted: boolean
 }
 
 export interface RbacAuditDetail extends RbacAuditRow {
@@ -88,7 +92,13 @@ export interface ComplianceSummary {
   /** NEW: config-audit failures in system namespaces (kube-system/istio-system/…), inherent to
    *  K8s/CNI/mesh and not actionable — kept visible separately rather than dropped. */
   acceptedSystemConfigAuditFailures: CheckSummary
+  /** ACTIONABLE RBAC-audit failures only — excludes findings owned by Kubernetes built-in roles
+   *  and upstream controller/chart roles (see isAcceptedRbacRole in lib/compliance.ts). Field
+   *  name kept for API compat; reclassified 2026-07. */
   totalRbacFailures: CheckSummary
+  /** NEW: RBAC-audit failures owned by built-in K8s roles or upstream controllers/charts —
+   *  inherent to what those roles do and not actionable, shown separately rather than dropped. */
+  acceptedRbacFailures: CheckSummary
   totalInfraFailures: CheckSummary
   frameworks: ComplianceFramework[]
   scannedWorkloads: number

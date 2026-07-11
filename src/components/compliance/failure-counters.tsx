@@ -59,6 +59,11 @@ export function FailureCounters({ summary, locale }: Props) {
     (summary.acceptedSystemConfigAuditFailures?.Medium ?? 0) +
     (summary.acceptedSystemConfigAuditFailures?.Low ?? 0)
   const lowSeverityTotal = summary.lowSeverityConfigAuditFailures?.Low ?? 0
+  const acceptedRbacTotal =
+    (summary.acceptedRbacFailures?.Critical ?? 0) +
+    (summary.acceptedRbacFailures?.High ?? 0) +
+    (summary.acceptedRbacFailures?.Medium ?? 0) +
+    (summary.acceptedRbacFailures?.Low ?? 0)
 
   const values: Record<(typeof counterConfig)[number]["key"], string> = {
     configAudit: String(
@@ -94,6 +99,13 @@ export function FailureCounters({ summary, locale }: Props) {
                 {t(locale, "compliance.counter.configAuditBreakdown", {
                   low: String(lowSeverityTotal),
                   accepted: String(acceptedSystemTotal),
+                })}
+              </div>
+            )}
+            {key === "rbac" && acceptedRbacTotal > 0 && (
+              <div className="text-[0.7rem] text-muted-foreground/70 mt-0.5">
+                {t(locale, "compliance.counter.rbacBreakdown", {
+                  accepted: String(acceptedRbacTotal),
                 })}
               </div>
             )}

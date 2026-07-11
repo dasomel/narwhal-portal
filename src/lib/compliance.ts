@@ -42,6 +42,39 @@ function isSystemNamespace(namespace: string): boolean {
   return (SYSTEM_NAMESPACES as readonly string[]).includes(namespace)
 }
 
+// K8s default ClusterRoles bound cluster-wide by kubeadm/aggregation — inherently broad, not
+// authored by the platform team.
+const K8S_DEFAULT_CLUSTER_ROLES = new Set(["cluster-admin", "admin", "edit", "view"])
+
+// Upstream controller/chart-owned RBAC role name patterns (case-insensitive substring match) —
+// these roles need broad permissions inherent to their function (cert-manager manages secrets,
+// kyverno manages webhooks, etc.) and are NOT actionable by the platform team — see
+// narwhal/docs/compliance-hardening.md "Risk-accepted exceptions".
+const UPSTREAM_RBAC_ROLE_PATTERNS = [
+  "cert-manager", "kyverno", "cilium", "metallb", "prometheus", "kube-prom", "trivy",
+  "velero", "openbao", "seaweedfs", "argocd", "istio", "harbor", "keycloak", "loki",
+  "tempo", "alloy", "k8s-monitoring", "nfs-", "headlamp", "apisix", "cnpg", "narwhal-db",
+  "gitea", "ghost-pod", "coredns", "metrics-server", "csi-", "snapshot", "node-",
+  "gatekeeper", "kubelet",
+] as const
+
+// Our own authored roles whose name happens to contain an upstream pattern as a substring
+// (e.g. "velero-ui-admin" contains "velero") — must be checked BEFORE the upstream patterns so
+// they aren't swept into "accepted".
+const OWN_ROLE_EXCEPTIONS = ["velero-ui"] as const
+
+// RBAC findings owned by Kubernetes built-in roles (system:*/kubeadm:*, default cluster-admin/
+// admin/edit/view) or upstream controller/chart roles are inherent to what those roles do and are
+// NOT actionable by the platform team. Only our own authored roles (platform-admin, developer,
+// narwhal-portal*, velero-ui-*, etc.) are actionable.
+export function isAcceptedRbacRole(roleName: string): boolean {
+  if (roleName.startsWith("system:") || roleName.startsWith("kubeadm:")) return true
+  if (K8S_DEFAULT_CLUSTER_ROLES.has(roleName)) return true
+  const lower = roleName.toLowerCase()
+  if (OWN_ROLE_EXCEPTIONS.some((exception) => lower.includes(exception))) return false
+  return UPSTREAM_RBAC_ROLE_PATTERNS.some((pattern) => lower.includes(pattern))
+}
+
 // --- CRD raw types ---
 
 interface RawCheck {
@@ -68,6 +101,7 @@ interface RawAuditReport {
     namespace?: string
     creationTimestamp?: string
     labels?: Record<string, string>
+    ownerReferences?: Array<{ kind: string; name: string }>
   }
   report: {
     summary: RawAuditSummary
@@ -181,6 +215,15 @@ function addSummaries(a: CheckSummary, b: CheckSummary): CheckSummary {
 
 const emptyCheckSummary: CheckSummary = { Critical: 0, High: 0, Medium: 0, Low: 0 }
 
+// rbacassessmentreport/clusterrbacassessmentreport metadata.name is a content hash, not the real
+// Role/ClusterRole name — the real name is the report's owning object (ownerReferences[0].name).
+// Falls back to the resource-name label / metadata.name if ownerReferences is absent.
+function resolveRbacRoleName(item: RawAuditReport): string {
+  const labels = item.metadata.labels ?? {}
+  const ownerRefs = item.metadata.ownerReferences ?? []
+  return ownerRefs[0]?.name ?? labels["trivy-operator.resource.name"] ?? item.metadata.name
+}
+
 // --- getConfigAuditList ---
 
 export async function getConfigAuditList(): Promise<ConfigAuditRow[]> {
@@ -276,12 +319,13 @@ export async function getRbacAuditList(): Promise<RbacAuditRow[]> {
     const rows: RbacAuditRow[] = allItems.map((item) => {
       const labels = item.metadata.labels ?? {}
       const kind = labels["trivy-operator.resource.kind"] ?? "Unknown"
-      const name = labels["trivy-operator.resource.name"] ?? item.metadata.name
+      const name = resolveRbacRoleName(item)
       return {
         namespace: item.metadata.namespace ?? "",
         kind,
         name,
         summary: buildCheckSummaryFromCounts(item.report.summary),
+        accepted: isAcceptedRbacRole(name),
       }
     })
     await cacheSet(cacheKey, rows, 60)
@@ -314,8 +358,7 @@ export async function getRbacAuditDetail(
 
     const allItems = [...(namespaced.items ?? []), ...(clustered.items ?? [])]
     const item = allItems.find((i) => {
-      const labels = i.metadata.labels ?? {}
-      const rName = labels["trivy-operator.resource.name"] ?? i.metadata.name
+      const rName = resolveRbacRoleName(i)
       const rNamespace = i.metadata.namespace ?? ""
       return rNamespace === namespace && rName === name
     })
@@ -323,13 +366,14 @@ export async function getRbacAuditDetail(
 
     const labels = item.metadata.labels ?? {}
     const kind = labels["trivy-operator.resource.kind"] ?? "Unknown"
-    const rName = labels["trivy-operator.resource.name"] ?? item.metadata.name
+    const rName = resolveRbacRoleName(item)
     const checks = mapChecks(item.report.checks ?? [])
     const detail: RbacAuditDetail = {
       namespace: item.metadata.namespace ?? "",
       kind,
       name: rName,
       summary: buildCheckSummaryFromCounts(item.report.summary),
+      accepted: isAcceptedRbacRole(rName),
       checks,
     }
     await cacheSet(cacheKey, detail, 60)
@@ -545,10 +589,15 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
     const acceptedSystemConfigAuditFailures = configAuditList
       .filter((row) => row.accepted)
       .reduce((acc, row) => addSummaries(acc, row.summary), { ...emptyCheckSummary })
-    const totalRbacFailures = rbacAuditList.reduce(
-      (acc, row) => addSummaries(acc, row.summary),
-      { ...emptyCheckSummary },
-    )
+    // Headline RBAC number reflects ACTIONABLE findings only: excludes findings owned by K8s
+    // built-in roles or upstream controller/chart roles (see isAcceptedRbacRole above) — those
+    // are inherent to what the role does and not actionable by the platform team.
+    const totalRbacFailures = rbacAuditList
+      .filter((row) => !row.accepted)
+      .reduce((acc, row) => addSummaries(acc, row.summary), { ...emptyCheckSummary })
+    const acceptedRbacFailures = rbacAuditList
+      .filter((row) => row.accepted)
+      .reduce((acc, row) => addSummaries(acc, row.summary), { ...emptyCheckSummary })
     const totalInfraFailures = infraAuditList.reduce(
       (acc, row) => addSummaries(acc, row.summary),
       { ...emptyCheckSummary },
@@ -584,6 +633,7 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
       lowSeverityConfigAuditFailures,
       acceptedSystemConfigAuditFailures,
       totalRbacFailures,
+      acceptedRbacFailures,
       totalInfraFailures,
       frameworks,
       scannedWorkloads: configAuditList.length,
@@ -600,6 +650,7 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
       lowSeverityConfigAuditFailures: { ...emptyCheckSummary },
       acceptedSystemConfigAuditFailures: { ...emptyCheckSummary },
       totalRbacFailures: { ...emptyCheckSummary },
+      acceptedRbacFailures: { ...emptyCheckSummary },
       totalInfraFailures: { ...emptyCheckSummary },
       frameworks: [],
       scannedWorkloads: 0,
