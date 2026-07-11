@@ -33,6 +33,15 @@ async function complianceK8sFetch<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+// System namespaces whose config-audit findings are inherent to K8s static pods / CNI / mesh
+// (hostNetwork, root, hostPath on apiserver/etcd/cilium/istio) and are NOT actionable by the
+// platform team — see narwhal/docs/compliance-hardening.md "Risk-accepted exceptions".
+export const SYSTEM_NAMESPACES = ["kube-system", "kube-public", "kube-node-lease", "istio-system"] as const
+
+function isSystemNamespace(namespace: string): boolean {
+  return (SYSTEM_NAMESPACES as readonly string[]).includes(namespace)
+}
+
 // --- CRD raw types ---
 
 interface RawCheck {
@@ -187,11 +196,13 @@ export async function getConfigAuditList(): Promise<ConfigAuditRow[]> {
       const labels = item.metadata.labels ?? {}
       const kind = labels["trivy-operator.resource.kind"] ?? "Unknown"
       const name = labels["trivy-operator.resource.name"] ?? item.metadata.name
+      const namespace = item.metadata.namespace ?? ""
       return {
-        namespace: item.metadata.namespace ?? "",
+        namespace,
         kind,
         name,
         summary: buildCheckSummaryFromCounts(item.report.summary),
+        accepted: isSystemNamespace(namespace),
       }
     })
     await cacheSet(cacheKey, rows, 60)
@@ -226,12 +237,14 @@ export async function getConfigAuditDetail(
     const labels = item.metadata.labels ?? {}
     const kind = labels["trivy-operator.resource.kind"] ?? "Unknown"
     const rName = labels["trivy-operator.resource.name"] ?? item.metadata.name
+    const rNamespace = item.metadata.namespace ?? ""
     const checks = mapChecks(item.report.checks ?? [])
     const detail: ConfigAuditDetail = {
-      namespace: item.metadata.namespace ?? "",
+      namespace: rNamespace,
       kind,
       name: rName,
       summary: buildCheckSummaryFromCounts(item.report.summary),
+      accepted: isSystemNamespace(rNamespace),
       checks,
     }
     await cacheSet(cacheKey, detail, 60)
@@ -509,10 +522,14 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
       getComplianceFrameworks(),
     ])
 
-    const totalConfigAuditFailures = configAuditList.reduce(
-      (acc, row) => addSummaries(acc, row.summary),
-      { ...emptyCheckSummary },
-    )
+    // Headline number reflects ACTIONABLE findings only; system-namespace findings are
+    // inherent to K8s/CNI/mesh and surfaced separately (not silently dropped).
+    const totalConfigAuditFailures = configAuditList
+      .filter((row) => !row.accepted)
+      .reduce((acc, row) => addSummaries(acc, row.summary), { ...emptyCheckSummary })
+    const acceptedSystemConfigAuditFailures = configAuditList
+      .filter((row) => row.accepted)
+      .reduce((acc, row) => addSummaries(acc, row.summary), { ...emptyCheckSummary })
     const totalRbacFailures = rbacAuditList.reduce(
       (acc, row) => addSummaries(acc, row.summary),
       { ...emptyCheckSummary },
@@ -549,6 +566,7 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
 
     const result: ComplianceSummary = {
       totalConfigAuditFailures,
+      acceptedSystemConfigAuditFailures,
       totalRbacFailures,
       totalInfraFailures,
       frameworks,
@@ -563,6 +581,7 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
     console.warn("[compliance] getComplianceSummary failed:", err instanceof Error ? err.message : err)
     return {
       totalConfigAuditFailures: { ...emptyCheckSummary },
+      acceptedSystemConfigAuditFailures: { ...emptyCheckSummary },
       totalRbacFailures: { ...emptyCheckSummary },
       totalInfraFailures: { ...emptyCheckSummary },
       frameworks: [],

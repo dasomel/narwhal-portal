@@ -78,26 +78,44 @@ async function checkImg03(): Promise<{ status: KisaStatus; detail: string }> {
 }
 
 async function checkCfg01(): Promise<{ status: KisaStatus; detail: string }> {
-  const { getComplianceFrameworks } = await import("./compliance")
-  const frameworks = await getComplianceFrameworks()
+  const { getComplianceFrameworks, getConfigAuditList } = await import("./compliance")
+  const [frameworks, configAuditRows] = await Promise.all([getComplianceFrameworks(), getConfigAuditList()])
   if (frameworks.length === 0) {
     return { status: "manual", detail: "프레임워크 데이터 없음" }
   }
+
+  // D: trivy-operator's ClusterComplianceReport (source of `frameworks`) aggregates pass/fail
+  // per CONTROL across the whole cluster and does not carry per-check namespace/resource
+  // attribution — unlike raw configauditreports, it cannot be split into actionable/accepted
+  // findings at the API level (verified: RawComplianceReport.status.detailReport.results[].checks
+  // only exposes `success`, no resource ref). So the framework passRate itself stays cluster-wide
+  // (consistent with how CIS/NSA benchmarks are meant to be read). As a transparency aid, we
+  // still surface the actionable-vs-accepted split of the underlying raw config-audit findings
+  // (same Trivy scan, namespace-attributed) alongside the verdict so a low framework score isn't
+  // read as "N actionable issues" when it's largely system-namespace noise.
+  const actionableFailures = configAuditRows
+    .filter((r) => !r.accepted)
+    .reduce((sum, r) => sum + r.summary.Critical + r.summary.High + r.summary.Medium + r.summary.Low, 0)
+  const acceptedFailures = configAuditRows
+    .filter((r) => r.accepted)
+    .reduce((sum, r) => sum + r.summary.Critical + r.summary.High + r.summary.Medium + r.summary.Low, 0)
+  const breakdown = `(config-audit 조치가능 ${actionableFailures}건, 시스템 수용 ${acceptedFailures}건)`
+
   const failing = frameworks.filter((f) => f.passRate < 0.6)
   const warning = frameworks.filter((f) => f.passRate >= 0.6 && f.passRate < 0.9)
   if (failing.length > 0) {
     return {
       status: "fail",
-      detail: `통과율 60% 미만 ${failing.length}건 (최저 ${Math.round(Math.min(...failing.map((f) => f.passRate)) * 100)}%)`,
+      detail: `통과율 60% 미만 ${failing.length}건 (최저 ${Math.round(Math.min(...failing.map((f) => f.passRate)) * 100)}%) ${breakdown}`,
     }
   }
   if (warning.length > 0) {
     return {
       status: "warn",
-      detail: `통과율 90% 미만 ${warning.length}건`,
+      detail: `통과율 90% 미만 ${warning.length}건 ${breakdown}`,
     }
   }
-  return { status: "pass", detail: `전 프레임워크 통과율 90% 이상` }
+  return { status: "pass", detail: `전 프레임워크 통과율 90% 이상 ${breakdown}` }
 }
 
 async function checkTls02(): Promise<{ status: KisaStatus; detail: string }> {

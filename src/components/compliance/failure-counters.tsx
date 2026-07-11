@@ -53,6 +53,11 @@ const counterConfig = [
 
 export function FailureCounters({ summary, locale }: Props) {
   const passRate = avgPassRate(summary.frameworks)
+  const acceptedSystemTotal =
+    (summary.acceptedSystemConfigAuditFailures?.Critical ?? 0) +
+    (summary.acceptedSystemConfigAuditFailures?.High ?? 0) +
+    (summary.acceptedSystemConfigAuditFailures?.Medium ?? 0) +
+    (summary.acceptedSystemConfigAuditFailures?.Low ?? 0)
 
   const values: Record<(typeof counterConfig)[number]["key"], string> = {
     configAudit: String(
@@ -83,6 +88,11 @@ export function FailureCounters({ summary, locale }: Props) {
           <div key={key} className={`rounded-lg border p-4 ${bg}`}>
             <div className={`text-2xl font-bold ${color}`}>{values[key]}</div>
             <div className="text-xs font-medium text-muted-foreground mt-1">{t(locale, labelKey)}</div>
+            {key === "configAudit" && acceptedSystemTotal > 0 && (
+              <div className="text-[0.7rem] text-muted-foreground/70 mt-0.5">
+                {t(locale, "compliance.counter.configAuditAccepted", { count: String(acceptedSystemTotal) })}
+              </div>
+            )}
           </div>
         ))}
       </div>

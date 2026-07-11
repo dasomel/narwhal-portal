@@ -167,6 +167,16 @@ export function ConfigAuditTable() {
     [rows]
   )
 
+  const { actionableCount, acceptedCount } = useMemo(() => {
+    let actionableCount = 0
+    let acceptedCount = 0
+    for (const r of rows) {
+      if (r.accepted) acceptedCount++
+      else actionableCount++
+    }
+    return { actionableCount, acceptedCount }
+  }, [rows])
+
   const filtered = useMemo(() => {
     if (!nameSearch.trim()) return rows
     const q = nameSearch.toLowerCase()
@@ -217,6 +227,14 @@ export function ConfigAuditTable() {
 
   return (
     <>
+      {(actionableCount > 0 || acceptedCount > 0) && (
+        <p className="text-xs text-muted-foreground mb-2" title={t("compliance.table.acceptedHint")}>
+          {t("compliance.table.actionableSummary", {
+            actionable: String(actionableCount),
+            accepted: String(acceptedCount),
+          })}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <Select value={severity} onValueChange={(v) => { setSeverity(v as Severity | "all"); setPage(1) }}>
           <SelectTrigger className="w-44">
@@ -294,7 +312,18 @@ export function ConfigAuditTable() {
                             ›
                           </span>
                         </td>
-                        <td className="px-4 py-2.5 text-muted-foreground">{row.namespace}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">
+                          <span>{row.namespace}</span>
+                          {row.accepted && (
+                            <Badge
+                              variant="outline"
+                              className="ml-2 text-[0.65rem] px-1.5 py-0 text-muted-foreground border-muted-foreground/30"
+                              title={t("compliance.table.acceptedHint")}
+                            >
+                              {t("compliance.table.accepted")}
+                            </Badge>
+                          )}
+                        </td>
                         <td className="px-4 py-2.5 text-xs text-muted-foreground">{row.kind}</td>
                         <td className="px-4 py-2.5 font-medium">{row.name}</td>
                         <td className="px-4 py-2.5"><SeverityMini severity="Critical" count={row.summary.Critical} /></td>

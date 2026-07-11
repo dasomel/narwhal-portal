@@ -22,6 +22,7 @@ async function fetchComplianceSummary(): Promise<ComplianceSummary | null> {
 
 const emptySummary: ComplianceSummary = {
   totalConfigAuditFailures: { Critical: 0, High: 0, Medium: 0, Low: 0 },
+  acceptedSystemConfigAuditFailures: { Critical: 0, High: 0, Medium: 0, Low: 0 },
   totalRbacFailures: { Critical: 0, High: 0, Medium: 0, Low: 0 },
   totalInfraFailures: { Critical: 0, High: 0, Medium: 0, Low: 0 },
   frameworks: [],

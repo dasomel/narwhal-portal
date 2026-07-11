@@ -24,6 +24,9 @@ export interface ConfigAuditRow {
   kind: string
   name: string
   summary: CheckSummary
+  /** true when `namespace` is a system namespace (kube-system/istio-system/…) — findings are
+   *  inherent to K8s static pods/CNI/mesh and are not actionable by the platform team. */
+  accepted: boolean
 }
 
 export interface ConfigAuditDetail extends ConfigAuditRow {
@@ -73,7 +76,12 @@ export interface ComplianceFrameworkDetail extends ComplianceFramework {
 }
 
 export interface ComplianceSummary {
+  /** ACTIONABLE config-audit failures only — excludes system namespaces (see SYSTEM_NAMESPACES
+   *  in lib/compliance.ts). Reclassified 2026-07; field name kept for API compatibility. */
   totalConfigAuditFailures: CheckSummary
+  /** NEW: config-audit failures in system namespaces (kube-system/istio-system/…), inherent to
+   *  K8s/CNI/mesh and not actionable — kept visible separately rather than dropped. */
+  acceptedSystemConfigAuditFailures: CheckSummary
   totalRbacFailures: CheckSummary
   totalInfraFailures: CheckSummary
   frameworks: ComplianceFramework[]
