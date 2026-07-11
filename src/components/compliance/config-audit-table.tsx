@@ -1,5 +1,5 @@
 "use client"
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, Fragment } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useT, useLocale } from "@/lib/i18n-client"
 import { translateTitle, translateRemediation } from "@/lib/check-translations"
@@ -297,9 +297,8 @@ export function ConfigAuditTable() {
                   const rowKey = `${row.namespace}|${row.kind}|${row.name}`
                   const isExpanded = expandedKey === rowKey
                   return (
-                    <>
+                    <Fragment key={rowKey}>
                       <tr
-                        key={rowKey}
                         className="border-b hover:bg-muted/20 cursor-pointer transition-colors"
                         onClick={() => toggleRow(rowKey)}
                       >
@@ -332,13 +331,13 @@ export function ConfigAuditTable() {
                         <td className="px-4 py-2.5"><SeverityMini severity="Low" count={row.summary.Low} /></td>
                       </tr>
                       {isExpanded && (
-                        <tr key={`${rowKey}__expand`}>
+                        <tr>
                           <td colSpan={COL_COUNT + 1} className="p-0">
                             <ExpandedConfigPanel namespace={row.namespace} name={row.name} />
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   )
                 })}
               </tbody>
