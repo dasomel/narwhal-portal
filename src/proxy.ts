@@ -30,9 +30,20 @@ export function proxy(request: NextRequest) {
   // React tree (white "couldn't load" screen). Redirect to /login first so the
   // dashboard never renders without a session. Token validity is still verified
   // by auth() in pages and API routes; this only checks cookie presence (Edge-safe).
-  const hasSession =
-    request.cookies.has("__Secure-authjs.session-token") ||
-    request.cookies.has("authjs.session-token")
+  // NextAuth splits a JWE over ~4KB into chunked cookies named
+  // "<base>.0", "<base>.1", … and the base-named cookie then does NOT exist
+  // (since the session JWT carries Keycloak access/refresh tokens it always
+  // chunks). Checking only the base names sent every login into a redirect
+  // loop: callback sets .0/.1 → this gate misses them → /login → SSO → loop.
+  const hasSession = request.cookies
+    .getAll()
+    .some(
+      ({ name }) =>
+        name === "__Secure-authjs.session-token" ||
+        name === "authjs.session-token" ||
+        name.startsWith("__Secure-authjs.session-token.") ||
+        name.startsWith("authjs.session-token.")
+    )
   if (!hasSession && !request.nextUrl.pathname.startsWith("/login")) {
     const url = request.nextUrl.clone()
     url.pathname = "/login"

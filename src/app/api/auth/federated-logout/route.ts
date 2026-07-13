@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/lib/auth"
 
 // RP-initiated (federated) logout: clears the portal session AND ends the Keycloak
 // SSO session via the end_session_endpoint. Without this, NextAuth signOut() only
 // drops the local cookie while the Keycloak session survives, so the portal's
 // auto-redirect silently logs the user straight back in.
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await auth()
   const issuer = process.env.KEYCLOAK_ISSUER
   const authUrl = process.env.AUTH_URL ?? ""
@@ -43,6 +43,17 @@ export async function GET() {
     expire("__Secure-authjs.session-token", true)
     expire("__Secure-authjs.callback-url", true)
     res.cookies.set("__Host-authjs.csrf-token", "", { path: "/", expires: new Date(0), secure: true, httpOnly: true, sameSite: "lax" })
+  }
+  // The session JWE chunks into "<base>.0", "<base>.1", … cookies (it always
+  // exceeds 4KB since it carries Keycloak tokens). Expiring only the base names
+  // above would leave the chunks alive → user still logged in after logout.
+  for (const { name } of request.cookies.getAll()) {
+    if (
+      name.startsWith("authjs.session-token.") ||
+      name.startsWith("__Secure-authjs.session-token.")
+    ) {
+      expire(name, name.startsWith("__Secure-"))
+    }
   }
   return res
 }
