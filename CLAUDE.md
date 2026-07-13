@@ -47,21 +47,6 @@ and routes fixes back to the owning harness. Single-repo portal work stays with 
 
 ---
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Framework | Next.js 16 (App Router) + React 19 |
-| Styling | TailwindCSS 4 + shadcn/ui |
-| Data | TanStack Query (server) + Zustand (client) |
-| Auth | NextAuth 5 (beta) + Keycloak OIDC |
-| Cache | Valkey (ioredis) |
-| Secrets | OpenBao Agent Injector |
-| Package | pnpm |
-| Test | Vitest + Playwright (planned — not yet implemented) |
-
----
-
 ## Agent Team Harness
 
 3 specialist agents + 3 domain skills. Agents handle behavior, skills provide domain knowledge.

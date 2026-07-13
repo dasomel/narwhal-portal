@@ -1,6 +1,6 @@
 {
   "name": "idp-portal",
-  "version": "1.0.4",
+  "version": "1.0.15",
   "private": true,
   "packageManager": "pnpm@10.27.0",
   "scripts": {
