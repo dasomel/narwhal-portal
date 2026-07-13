@@ -121,6 +121,17 @@ const icons = {
     </svg>`
   ),
 
+  nfsQuota: svgUri(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+      <rect width="100" height="100" rx="20" fill="#0B3D5C"/>
+      <ellipse cx="50" cy="32" rx="24" ry="9" fill="#2DD4BF"/>
+      <path d="M26 32 v14 c0 5 10.7 9 24 9 s24 -4 24 -9 V32" fill="none" stroke="#2DD4BF" stroke-width="5"/>
+      <path d="M26 50 v14 c0 5 10.7 9 24 9 s24 -4 24 -9 V50" fill="none" stroke="#2DD4BF" stroke-width="5" opacity="0.65"/>
+      <rect x="30" y="78" width="40" height="7" rx="3.5" fill="#123f5e" stroke="#2DD4BF" stroke-width="2"/>
+      <rect x="30" y="78" width="26" height="7" rx="3.5" fill="#2DD4BF"/>
+    </svg>`
+  ),
+
   hubble: svgUri(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
       <rect width="100" height="100" rx="20" fill="#1B1F23"/>
@@ -184,6 +195,9 @@ export const PLATFORM_TOOLS: PlatformTool[] = [
   // PKCE 로그인 → id_token(aud에 kubernetes) → Dashboard /api/v1/login → token 쿠키
   // 를 자동 처리 (narwhal gitops apisix-routes.yaml kubernetes-dashboard-sso 참고).
   { id: "kubernetes-dashboard", name: "Kubernetes Dashboard", description: "Official Kubernetes workloads dashboard", url: "https://dashboard.local.narwhal.internal/sso", category: "infra", icon: icons.kubernetesDashboard, roles: ["cluster-admin", "developer"] },
+  // SSO is enforced at the gateway (openid-connect plugin on the ApisixRoute), so a
+  // plain URL is already zero-click once a Keycloak session exists.
+  { id: "nfs-quota", name: "NFS Quota", description: "NFS storage quota dashboard", url: "https://nfs-quota.local.narwhal.internal/", category: "infra", icon: icons.nfsQuota, roles: ["cluster-admin"] },
   { id: "hubble", name: "Hubble UI", description: "Cilium network visualization", url: "https://hubble.local.narwhal.internal", category: "infra", icon: icons.hubble, roles: ["cluster-admin"] },
   { id: "openbao", name: "OpenBao", description: "Secret management", url: "https://openbao.local.narwhal.internal/sso", category: "security", icon: icons.openbao, roles: ["cluster-admin"] },
   { id: "velero-ui", name: "Velero UI", description: "Backup/restore management", url: "https://velero-ui.local.narwhal.internal/sso", category: "backup", icon: icons.velero, roles: ["cluster-admin"] },
