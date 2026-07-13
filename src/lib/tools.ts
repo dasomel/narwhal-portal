@@ -110,6 +110,17 @@ const icons = {
     </svg>`
   ),
 
+  kubernetesDashboard: svgUri(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+      <rect width="100" height="100" rx="20" fill="#326CE5"/>
+      <path d="M50 22 L74 34 L74 58 L50 72 L26 58 L26 34 Z" fill="none" stroke="white" stroke-width="4" stroke-linejoin="round"/>
+      <circle cx="50" cy="47" r="8" fill="white"/>
+      <line x1="50" y1="47" x2="50" y2="26" stroke="white" stroke-width="3"/>
+      <line x1="50" y1="47" x2="69" y2="55" stroke="white" stroke-width="3"/>
+      <line x1="50" y1="47" x2="31" y2="55" stroke="white" stroke-width="3"/>
+    </svg>`
+  ),
+
   hubble: svgUri(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
       <rect width="100" height="100" rx="20" fill="#1B1F23"/>
@@ -169,6 +180,10 @@ export const PLATFORM_TOOLS: PlatformTool[] = [
   { id: "prometheus", name: "Prometheus", description: "Metrics collection", url: "https://prometheus.local.narwhal.internal", category: "monitoring", icon: icons.prometheus, roles: ["cluster-admin"] },
   { id: "alertmanager", name: "Alertmanager", description: "Alert management", url: "https://alertmanager.local.narwhal.internal", category: "monitoring", icon: icons.alertmanager, roles: ["cluster-admin"] },
   { id: "headlamp", name: "Headlamp", description: "Kubernetes dashboard", url: "https://headlamp.local.narwhal.internal/oidc?cluster=main", category: "infra", icon: icons.headlamp, roles: ["cluster-admin", "developer"] },
+  // 제로클릭 SSO: /sso 부트스트랩 페이지(APISIX serverless-pre-function)가 Keycloak
+  // PKCE 로그인 → id_token(aud에 kubernetes) → Dashboard /api/v1/login → token 쿠키
+  // 를 자동 처리 (narwhal gitops apisix-routes.yaml kubernetes-dashboard-sso 참고).
+  { id: "kubernetes-dashboard", name: "Kubernetes Dashboard", description: "Official Kubernetes workloads dashboard", url: "https://dashboard.local.narwhal.internal/sso", category: "infra", icon: icons.kubernetesDashboard, roles: ["cluster-admin", "developer"] },
   { id: "hubble", name: "Hubble UI", description: "Cilium network visualization", url: "https://hubble.local.narwhal.internal", category: "infra", icon: icons.hubble, roles: ["cluster-admin"] },
   { id: "openbao", name: "OpenBao", description: "Secret management", url: "https://openbao.local.narwhal.internal/sso", category: "security", icon: icons.openbao, roles: ["cluster-admin"] },
   { id: "velero-ui", name: "Velero UI", description: "Backup/restore management", url: "https://velero-ui.local.narwhal.internal/sso", category: "backup", icon: icons.velero, roles: ["cluster-admin"] },
