@@ -132,10 +132,37 @@ const keycloakProvider = {
   },
 }
 
+// Keep the Keycloak SSO session warm. The portal validates its own JWT and never
+// re-hits Keycloak after login, so Keycloak's ssoSessionIdleTimeout (30m) would
+// idle-expire during portal-only use — then the FIRST linked app (Grafana, Dashboard,
+// …) re-prompts for login. Refreshing the access token before it expires counts as
+// session activity on Keycloak and resets that idle timer, so linked apps stay
+// zero-click while the portal is actively used. Returns the refreshed token fields,
+// or throws so the caller can mark the session errored (forces a clean re-login).
+async function refreshKeycloakToken(refreshToken: string): Promise<{
+  access_token: string
+  expires_in: number
+  refresh_token?: string
+  id_token?: string
+}> {
+  const res = await fetch(`${process.env.KEYCLOAK_ISSUER}/protocol/openid-connect/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: process.env.KEYCLOAK_CLIENT_ID ?? "",
+      client_secret: process.env.KEYCLOAK_CLIENT_SECRET ?? "",
+      refresh_token: refreshToken,
+    }),
+  })
+  if (!res.ok) throw new Error(`keycloak refresh failed: ${res.status}`)
+  return res.json()
+}
+
 export const config: NextAuthConfig = {
   providers: process.env.AUTH_MOCK === "true" ? [mockProvider] : [keycloakProvider],
   callbacks: {
-    jwt({ token, profile, user, account }) {
+    async jwt({ token, profile, user, account }) {
       const p = profile as Record<string, unknown> | undefined
       const u = user as Record<string, unknown> | undefined
 
@@ -144,6 +171,33 @@ export const config: NextAuthConfig = {
       // survives and the user is silently logged back in.
       if (account?.id_token) {
         token.idToken = account.id_token as string
+      }
+      // On initial sign-in, stash the refresh token + expiry for keep-alive below.
+      if (account?.refresh_token) {
+        token.refreshToken = account.refresh_token as string
+        token.accessToken = account.access_token as string | undefined
+        token.expiresAt = account.expires_at as number | undefined
+      }
+      // SSO keep-alive: if the access token is within 60s of expiring (or already
+      // expired) and we have a refresh token, refresh now. Mock mode / no refresh
+      // token → skip. On failure, flag the session so the client re-authenticates.
+      if (
+        process.env.AUTH_MOCK !== "true" &&
+        token.refreshToken &&
+        typeof token.expiresAt === "number" &&
+        Date.now() >= token.expiresAt * 1000 - 60_000
+      ) {
+        try {
+          const r = await refreshKeycloakToken(token.refreshToken)
+          token.accessToken = r.access_token
+          token.expiresAt = Math.floor(Date.now() / 1000) + r.expires_in
+          if (r.refresh_token) token.refreshToken = r.refresh_token
+          if (r.id_token) token.idToken = r.id_token
+          delete token.error
+        } catch (e) {
+          console.error("[auth/jwt] keycloak token refresh failed:", (e as Error).message)
+          token.error = "RefreshTokenError"
+        }
       }
 
       // C-5: re-validate iss/aud on the raw OIDC profile when present (defense in depth).
@@ -177,6 +231,8 @@ export const config: NextAuthConfig = {
       session.teams = Array.isArray(token.teams) ? token.teams : []
       session.user.role = getRoleFromGroups(safeGroups)
       session.idToken = token.idToken
+      // Surface a refresh failure so the client can force a clean re-login.
+      if (token.error) session.error = token.error as string
       return session
     },
   },
