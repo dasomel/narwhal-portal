@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 
+import { hasSessionCookie } from "@/lib/session-cookie"
+
 // connect-src 외부 origin (런타임 env 기반, 모듈 1회 계산)
 function extractOrigin(url: string | undefined): string | null {
   if (!url) return null
@@ -30,20 +32,10 @@ export function proxy(request: NextRequest) {
   // React tree (white "couldn't load" screen). Redirect to /login first so the
   // dashboard never renders without a session. Token validity is still verified
   // by auth() in pages and API routes; this only checks cookie presence (Edge-safe).
-  // NextAuth splits a JWE over ~4KB into chunked cookies named
-  // "<base>.0", "<base>.1", … and the base-named cookie then does NOT exist
-  // (since the session JWT carries Keycloak access/refresh tokens it always
-  // chunks). Checking only the base names sent every login into a redirect
-  // loop: callback sets .0/.1 → this gate misses them → /login → SSO → loop.
-  const hasSession = request.cookies
-    .getAll()
-    .some(
-      ({ name }) =>
-        name === "__Secure-authjs.session-token" ||
-        name === "authjs.session-token" ||
-        name.startsWith("__Secure-authjs.session-token.") ||
-        name.startsWith("authjs.session-token.")
-    )
+  // Checking only the base cookie names sent every login into a redirect loop:
+  // the chunked session cookie (see session-cookie.ts) meant the base name
+  // never exists → this gate missed it → /login → SSO → loop.
+  const hasSession = hasSessionCookie(request.cookies)
   if (!hasSession && !request.nextUrl.pathname.startsWith("/login")) {
     const url = request.nextUrl.clone()
     url.pathname = "/login"

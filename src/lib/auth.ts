@@ -139,24 +139,39 @@ const keycloakProvider = {
 // session activity on Keycloak and resets that idle timer, so linked apps stay
 // zero-click while the portal is actively used. Returns the refreshed token fields,
 // or throws so the caller can mark the session errored (forces a clean re-login).
-async function refreshKeycloakToken(refreshToken: string): Promise<{
+type RefreshedToken = {
   access_token: string
   expires_in: number
   refresh_token?: string
   id_token?: string
-}> {
-  const res = await fetch(`${process.env.KEYCLOAK_ISSUER}/protocol/openid-connect/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      client_id: process.env.KEYCLOAK_CLIENT_ID ?? "",
-      client_secret: process.env.KEYCLOAK_CLIENT_SECRET ?? "",
-      refresh_token: refreshToken,
-    }),
-  })
-  if (!res.ok) throw new Error(`keycloak refresh failed: ${res.status}`)
-  return res.json()
+}
+
+// Single-flight: the jwt callback runs on EVERY request, so concurrent requests
+// inside the 60s pre-expiry window (page + parallel API fetches, multiple tabs)
+// would each POST the SAME refresh_token to Keycloak — redundant I/O, and if
+// Keycloak rotates the refresh token on first use the losers get invalid_grant
+// and force a spurious re-login. Concurrent callers share one in-flight fetch.
+const inflightRefresh = new Map<string, Promise<RefreshedToken>>()
+
+function refreshKeycloakToken(refreshToken: string): Promise<RefreshedToken> {
+  const existing = inflightRefresh.get(refreshToken)
+  if (existing) return existing
+  const p = (async (): Promise<RefreshedToken> => {
+    const res = await fetch(`${process.env.KEYCLOAK_ISSUER}/protocol/openid-connect/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: process.env.KEYCLOAK_CLIENT_ID ?? "",
+        client_secret: process.env.KEYCLOAK_CLIENT_SECRET ?? "",
+        refresh_token: refreshToken,
+      }),
+    })
+    if (!res.ok) throw new Error(`keycloak refresh failed: ${res.status}`)
+    return res.json()
+  })().finally(() => inflightRefresh.delete(refreshToken))
+  inflightRefresh.set(refreshToken, p)
+  return p
 }
 
 export const config: NextAuthConfig = {

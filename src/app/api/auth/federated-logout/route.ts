@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/lib/auth"
+import { isSessionCookieChunk } from "@/lib/session-cookie"
 
 // RP-initiated (federated) logout: clears the portal session AND ends the Keycloak
 // SSO session via the end_session_endpoint. Without this, NextAuth signOut() only
@@ -44,14 +45,10 @@ export async function GET(request: NextRequest) {
     expire("__Secure-authjs.callback-url", true)
     res.cookies.set("__Host-authjs.csrf-token", "", { path: "/", expires: new Date(0), secure: true, httpOnly: true, sameSite: "lax" })
   }
-  // The session JWE chunks into "<base>.0", "<base>.1", … cookies (it always
-  // exceeds 4KB since it carries Keycloak tokens). Expiring only the base names
-  // above would leave the chunks alive → user still logged in after logout.
+  // The session cookie is chunked (see session-cookie.ts). Expiring only the
+  // base names above would leave the chunks alive → still logged in after logout.
   for (const { name } of request.cookies.getAll()) {
-    if (
-      name.startsWith("authjs.session-token.") ||
-      name.startsWith("__Secure-authjs.session-token.")
-    ) {
+    if (isSessionCookieChunk(name)) {
       expire(name, name.startsWith("__Secure-"))
     }
   }
