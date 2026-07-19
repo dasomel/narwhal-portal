@@ -1,0 +1,51 @@
+name: design-lint
+
+# Lint the DESIGN.md token contract. Alpha spec (@google/design.md) is PINNED.
+# Fails on errors (broken token refs, schema errors) and the two high-value
+# warnings — broken-ref and contrast-ratio (WCAG AA). Orphaned-token and
+# section-order warnings are tolerated: the portal's colors are consumed by
+# shadcn/ui + Tailwind utilities, not by DESIGN.md's `components` map, so
+# "orphaned" is expected noise here, not a defect.
+
+on:
+  push:
+    paths:
+      - "DESIGN.md"
+      - "src/app/globals.css"
+      - ".github/workflows/design-lint.yml"
+  pull_request:
+    paths:
+      - "DESIGN.md"
+      - "src/app/globals.css"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Lint DESIGN.md
+        run: |
+          set -euo pipefail
+          npx -y @google/design.md@0.3.0 lint --format json DESIGN.md > report.json
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync("report.json", "utf8"));
+            // Block on any error (broken-ref is error severity) plus the one
+            // high-value warning: contrast-ratio. Match on distinctive words
+            // only — NOT "reference" (the orphaned-token message says
+            // "never referenced" and must stay tolerated).
+            const blocking = r.findings.filter(f =>
+              f.severity === "error" ||
+              (f.severity === "warning" && /contrast|wcag|ratio/i.test(f.message))
+            );
+            const orphans = r.findings.filter(f => /never referenced/.test(f.message)).length;
+            console.log(`errors=${r.summary.errors} warnings=${r.summary.warnings} (orphaned=${orphans}, tolerated)`);
+            if (blocking.length) {
+              console.error("Blocking findings:");
+              for (const f of blocking) console.error(`  [${f.severity}] ${f.path ?? ""}: ${f.message}`);
+              process.exit(1);
+            }
+            console.log("DESIGN.md OK (no blocking findings).");
+          '

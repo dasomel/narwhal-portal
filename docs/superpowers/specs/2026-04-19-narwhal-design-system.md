@@ -3,6 +3,10 @@
 **Date:** 2026-04-19
 **Status:** Authoritative — all UI components must comply
 **Supersedes:** §4 of `2026-04-17-dashboard-narwhal-redesign-design.md` (dark-only palette)
+**Machine-readable contract:** the token values in this doc are mirrored in
+[`/DESIGN.md`](../../../DESIGN.md) (Google DESIGN.md format, YAML front matter),
+which is linted in CI (`.github/workflows/design-lint.yml`). Runtime source of
+truth remains `src/app/globals.css`; keep all three in sync in the same commit.
 
 ## 1. Goals
 

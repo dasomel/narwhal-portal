@@ -10,7 +10,8 @@
     "deploy:skaffold": "skaffold run",
     "harbor:setup": "bash scripts/harbor-kaniko-setup.sh",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "design:lint": "npx -y @google/design.md@0.3.0 lint DESIGN.md"
   },
   "dependencies": {
     "@auth/core": "^0.34.3",
