@@ -464,6 +464,75 @@ export async function getApiServerPods(): Promise<ApiServerPodInfo[]> {
   }
 }
 
+export interface NodeReadiness {
+  total: number
+  ready: number
+}
+
+interface NodeListForReadiness {
+  items: Array<{
+    status: { conditions: Array<{ type: string; status: string }> }
+  }>
+}
+
+/** Node Ready-condition counts, shared by /api/cluster and /api/status. */
+export async function getNodeReadiness(): Promise<NodeReadiness> {
+  const cached = await cacheGet<NodeReadiness>("k8s:node-readiness")
+  if (cached) return cached
+  try {
+    const data = await k8sFetch<NodeListForReadiness>("/api/v1/nodes")
+    const items = data.items ?? []
+    const ready = items.filter((n) =>
+      n.status.conditions.some((c) => c.type === "Ready" && c.status === "True"),
+    ).length
+    const result: NodeReadiness = { total: items.length, ready }
+    await cacheSet("k8s:node-readiness", result, 30)
+    return result
+  } catch (err) {
+    console.warn("[k8s] node readiness fetch failed:", (err as Error).message)
+    return { total: 0, ready: 0 }
+  }
+}
+
+export interface ControlPlanePodHealth {
+  name: string
+  status: "Running" | "Pending" | "Failed"
+  restarts: number
+}
+
+interface ControlPlanePodListRaw {
+  items: Array<{
+    metadata: { name: string }
+    status: { phase: string; containerStatuses?: Array<{ restartCount: number }> }
+  }>
+}
+
+/** kube-system tier=control-plane pod health (apiserver/etcd/scheduler/controller-manager), shared by /api/cluster and /api/status. */
+export async function getControlPlaneHealth(): Promise<ControlPlanePodHealth[]> {
+  const cached = await cacheGet<ControlPlanePodHealth[]>("k8s:control-plane-health")
+  if (cached) return cached
+  try {
+    const data = await k8sFetch<ControlPlanePodListRaw>(
+      "/api/v1/namespaces/kube-system/pods?labelSelector=tier%3Dcontrol-plane",
+    )
+    const phaseMap: Record<string, "Running" | "Pending" | "Failed"> = {
+      Running: "Running",
+      Pending: "Pending",
+      Failed: "Failed",
+    }
+    const pods = (data.items ?? []).map((p) => ({
+      name: p.metadata.name.replace(/-[^-]+$/, ""),
+      status: phaseMap[p.status.phase] ?? "Pending",
+      restarts: p.status.containerStatuses?.reduce((s, c) => s + c.restartCount, 0) ?? 0,
+    }))
+    await cacheSet("k8s:control-plane-health", pods, 30)
+    return pods
+  } catch (err) {
+    console.warn("[k8s] control-plane health fetch failed:", (err as Error).message)
+    return []
+  }
+}
+
 export interface NetworkPolicyInfo {
   name: string
   namespace: string
