@@ -59,11 +59,6 @@ and routes fixes back to the owning harness. Single-repo portal work stays with 
 | `portal-backend` | `portal-backend` | sonnet | API development (routes, infra clients, cache) |
 | `portal-qa` | `portal-qa` | sonnet | Integration coherence verification |
 
-`model` values are aliases, never pinned ids. Escalate to `opus` only on an explicit trigger: a
-sonnet lane already failed on this run, or a final approval pass on a high-risk diff (auth/session
-handling, RBAC gating, secret exposure) — and that pass runs in a separate context from whoever
-wrote the code.
-
 ### Skills (`.claude/skills/`)
 
 | Skill | Description |
@@ -92,9 +87,8 @@ portal-qa (sequential, after both complete)
 
 ## Critical Rules
 
-### Next.js 16 Mandatory
-- **Always read** `node_modules/next/dist/docs/` guides before writing code. APIs may differ from training data.
-- Follow deprecation warnings.
+> The Next.js "read `node_modules/next/dist/docs/` first" rule lives in `AGENTS.md`, loaded
+> alongside this file — don't restate it here, and don't hand-edit inside its generated markers.
 
 ### Server/Client Component Boundary
 - **Default is Server Component**. Only declare `"use client"` when client features like `useState`, `useEffect`, or `onClick` are needed.
