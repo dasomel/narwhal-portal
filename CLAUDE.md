@@ -87,8 +87,14 @@ portal-qa (sequential, after both complete)
 
 ## Critical Rules
 
-> The Next.js "read `node_modules/next/dist/docs/` first" rule lives in `AGENTS.md`, loaded
-> alongside this file — don't restate it here, and don't hand-edit inside its generated markers.
+### Next.js 16 Mandatory
+
+The rule below is imported from `AGENTS.md`, which Next.js generates between
+`BEGIN/END:nextjs-agent-rules` markers — edit it there, not here. Claude Code does **not**
+discover project `AGENTS.md` on its own (canary-verified 2026-07-25), so this import is the only
+thing that makes it load; `agyp` expands it the same way for agy worker lanes. Don't remove it.
+
+@AGENTS.md
 
 ### Server/Client Component Boundary
 - **Default is Server Component**. Only declare `"use client"` when client features like `useState`, `useEffect`, or `onClick` are needed.
