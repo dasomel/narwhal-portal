@@ -107,7 +107,9 @@ portal-qa (sequential, after both complete)
 - `nav.tsx` `menuItems[].roles` and `tools.ts` `PLATFORM_TOOLS[].roles` must stay consistent.
 
 ### i18n (Korean/English)
-- All UI text must use the i18n system — no hardcoded Korean or English strings in components.
+- New UI text must use the i18n system. ~48 hardcoded Korean strings predate this rule
+  (`architecture/`, `catalog/`, `cost/`, `governance/`); `scripts/harness-rules.sh` blocks the
+  count from growing. Korean in comments/JSDoc is fine.
 - Shared translations: `src/lib/i18n.ts` (dictionaries + `t()` function + types)
 - Server components: `import { getLocale } from "@/lib/i18n-server"` then `t(locale, "key")`
 - Client components: `import { useT } from "@/lib/i18n-client"` then `const t = useT(); t("key")`
@@ -116,7 +118,9 @@ portal-qa (sequential, after both complete)
 
 ### UI Convention
 - Prefer shadcn/ui components. If missing, run `npx shadcn@latest add {component}`.
-- Use TailwindCSS utility classes only, no inline styles.
+- Tailwind utilities for anything static. `style={{}}` only for values computed at runtime
+  (a colour from data, a width from a percentage) — Tailwind cannot express those. The
+  `scripts/harness-rules.sh` ratchet blocks the count from growing past its baseline.
 
 ### Commit Policy
 - **Commit after each task** (once complete + verified), scoped to the files it touched, Conventional Commits.

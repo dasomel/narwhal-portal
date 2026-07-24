@@ -1,0 +1,27 @@
+name: harness-rules
+
+# Enforce the countable CLAUDE.md "Critical Rules" (Tailwind-first styling, i18n
+# for UI text). Both have pre-existing debt, so this is a ratchet against
+# recorded baselines — see scripts/harness-rules.sh. It blocks NEW violations,
+# not the existing ones.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "scripts/harness-rules.sh"
+      - ".github/workflows/harness-rules.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "scripts/harness-rules.sh"
+
+jobs:
+  ratchet:
+    name: CLAUDE.md rule ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check rule baselines
+        run: bash scripts/harness-rules.sh
