@@ -59,6 +59,11 @@ and routes fixes back to the owning harness. Single-repo portal work stays with 
 | `portal-backend` | `portal-backend` | sonnet | API development (routes, infra clients, cache) |
 | `portal-qa` | `portal-qa` | sonnet | Integration coherence verification |
 
+All three stay on **sonnet** (Sonnet 5 covers UI/API authoring and 1st-pass QA). `model` values are
+aliases, never pinned ids. Escalate to `opus` only on an explicit trigger: a sonnet lane already
+failed on this run, or a final approval pass on a high-risk diff (auth/session handling, RBAC gating,
+secret exposure) — and that pass runs in a separate context from whoever wrote the code.
+
 ### Skills (`.claude/skills/`)
 
 | Skill | Description |
