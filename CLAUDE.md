@@ -19,24 +19,13 @@ the same IDP workspace; the cluster source is the sibling directory:
 /Users/m/Documents/IdeaProjects/20.dasomel/idp/narwhal
 ```
 
-| Path (under `narwhal/`) | Purpose |
-|------|---------|
-| `gitops/charts/narwhal-apps/templates/` | ArgoCD Applications — source of truth for deployed cluster apps (rendered by the app-of-apps Helm chart) |
-| `gitops/charts/narwhal-platform/templates/` | Platform manifests incl. the portal's K8s resources (`narwhal-portal-k8s.yaml`) and APISIX routes |
-| `gitops/apps/` | `app-of-apps.yaml` only (points ArgoCD at `charts/narwhal-apps`) |
-| `configs/gitops/` | GitOps configuration values |
-| `scripts/cluster/` | Cluster install/operation scripts — incl. `11-3-keycloak-clients.sh` (OIDC clients), `13-2-narwhal-portal-bindings.sh` (portal RBAC + API token), `15-narwhal-portal.sh` (portal deploy) |
-| `csp/` | CSP/cloud provider integration |
-| `docs/` | Cluster architecture and operational docs |
-| `CLAUDE.md`, `README.md`, `VERSIONS.md`, `CHANGELOG.md` | Authoritative cluster references |
+Whenever this portal assumes something about the cluster — an endpoint, a namespace, a service
+name, a secret path, an OIDC client, an RBAC role — **the cluster repo is the answer and your
+recollection is not.** The rendered ArgoCD Applications under `gitops/charts/` are what actually
+runs; three scripts own the portal's own seam: `11-3-keycloak-clients.sh` (OIDC clients),
+`13-2-narwhal-portal-bindings.sh` (portal RBAC + API token), `15-narwhal-portal.sh` (deploy).
 
-### When to consult the cluster repo
-- Adding/modifying portal integrations with cluster services (Keycloak, ArgoCD, APISIX, OpenBao, Prometheus, Alertmanager, Falco) — verify endpoints, namespaces, secret paths, and service names against `gitops/charts/narwhal-apps/templates/` and `gitops/charts/narwhal-platform/templates/`.
-- Implementing onboarding/auth flows (kubeconfig, OIDC) — match against `scripts/cluster/11-*-keycloak*.sh`.
-- RBAC role definitions — cross-check `gitops/resources/` ClusterRole/RoleBinding sources and `scripts/cluster/13-2-narwhal-portal-bindings.sh`.
-- Resolving any "what's the real URL/port/secret name?" question — cluster repo wins over assumptions.
-
-> Treat the cluster repo as **read-only reference**. Do not modify it from this project; route any cluster changes back to that repository.
+> Treat the cluster repo as **read-only from here**. Route cluster changes back to that repository.
 
 ### Cross-repo seam harness
 When a change spans BOTH repos (a portal integration depends on a cluster contract, or you
@@ -49,39 +38,13 @@ and routes fixes back to the owning harness. Single-repo portal work stays with 
 
 ## Agent Team Harness
 
-3 specialist agents + 3 domain skills. Agents handle behavior, skills provide domain knowledge.
+`portal-frontend`, `portal-backend`, and `portal-qa` in `.claude/agents/`, backed by the
+`idp-frontend` / `idp-backend` / `idp-qa` skills — each file states its own role and model.
 
-### Agents (`.claude/agents/`)
-
-| Agent | subagent_type | model | Role |
-|-------|--------------|-------|------|
-| `portal-frontend` | `portal-frontend` | sonnet | UI development (pages, components, widgets) |
-| `portal-backend` | `portal-backend` | sonnet | API development (routes, infra clients, cache) |
-| `portal-qa` | `portal-qa` | sonnet | Integration coherence verification |
-
-### Skills (`.claude/skills/`)
-
-| Skill | Description |
-|-------|-------------|
-| `idp-frontend` | Frontend patterns, project structure, data fetching, RBAC, shadcn/ui, i18n |
-| `idp-backend` | API patterns, infra client integration, cache strategy, secret management |
-| `idp-qa` | QA procedures, API-frontend shape mapping, boundary verification checklist |
-
-### Orchestration Workflow (main context executes directly)
-
-```
-User request → Analyze requirements + write API response shape spec
-    ↓
-portal-frontend + portal-backend (parallel, run_in_background: true)
-    ↓
-portal-qa (sequential, after both complete)
-    ├── 0 failures → report results
-    └── failures   → re-run relevant agent with fix instructions (max 2 loops)
-```
-
-- Pass the **same API response shape spec** to both frontend/backend agents
-- If only one side changes, run only that agent
-- QA report goes to `_workspace/qa_report.md`
+The one thing the files can't tell you: **frontend and backend must be handed the same API
+response-shape spec, written before either starts.** That shared spec is what makes the two lanes
+safe to run in parallel, and it is what `portal-qa` checks them against afterwards (report in
+`_workspace/qa_report.md`). Skip the parallelism when only one side is changing.
 
 ---
 
@@ -134,33 +97,9 @@ thing that makes it load; `agyp` expands it the same way for agy worker lanes. D
 
 ---
 
-## Development Commands
+## Off-limits
 
-```bash
-# Dev server
-pnpm dev
-
-# Build
-pnpm build
-
-# Type check
-npx tsc --noEmit
-
-# Add shadcn/ui component
-npx shadcn@latest add {component}
-```
-
----
-
-## Permissions
-
-### Allowed
-- Modify any TypeScript/TSX files under `src/`
-- Add static files to `public/`
-- Add dependencies via package.json (pnpm)
-- Modify harness configuration under `.claude/`
-
-### Forbidden
-- No hardcoding real secrets in `.env*` files
-- No direct modification of `node_modules/`
-- No direct modification of shadcn/ui base components (`src/components/ui/`) — regenerate via CLI
+Scripts live in `package.json`; the package manager is pnpm. Two things are not obvious from the
+tree: `src/components/ui/` holds generated shadcn/ui bases — change them through
+`npx shadcn@latest add`, not by hand — and `.env*` must never carry a real secret, since the
+portal reads live cluster credentials at runtime.
