@@ -6,7 +6,7 @@
 
 Management portal for the Narwhal Kubernetes cluster IDP. Provides dashboard (metrics, ArgoCD, alerts), settings (users/routes/certificates/policies), onboarding (kubeconfig, guide), and platform tools grid.
 
-> **Working procedure:** follow the global `<procedural_completion>` doctrine (`~/.claude/CLAUDE.md`) on substantive tasks — goal → decompose → execute → verify → risk (five principles + completion gate + escalation). Trivial one-shots answer directly.
+> Substantive work follows the global `<procedural_completion>` doctrine.
 
 ---
 
@@ -21,8 +21,11 @@ the same IDP workspace; the cluster source is the sibling directory:
 
 Whenever this portal assumes something about the cluster — an endpoint, a namespace, a service
 name, a secret path, an OIDC client, an RBAC role — **the cluster repo is the answer and your
-recollection is not.** The rendered ArgoCD Applications under `gitops/charts/` are what actually
-runs; three scripts own the portal's own seam: `11-3-keycloak-clients.sh` (OIDC clients),
+recollection is not.** What actually runs is rendered from
+`gitops/charts/narwhal-apps/templates/` (ArgoCD Applications) and
+`gitops/charts/narwhal-platform/templates/` (platform manifests, incl. the portal's own K8s
+resources and APISIX routes); RBAC manifests live in `gitops/resources/`. Three scripts own the
+portal's own seam: `11-3-keycloak-clients.sh` (OIDC clients),
 `13-2-narwhal-portal-bindings.sh` (portal RBAC + API token), `15-narwhal-portal.sh` (deploy).
 
 > Treat the cluster repo as **read-only from here**. Route cluster changes back to that repository.
@@ -41,10 +44,11 @@ and routes fixes back to the owning harness. Single-repo portal work stays with 
 `portal-frontend`, `portal-backend`, and `portal-qa` in `.claude/agents/`, backed by the
 `idp-frontend` / `idp-backend` / `idp-qa` skills — each file states its own role and model.
 
-The one thing the files can't tell you: **frontend and backend must be handed the same API
-response-shape spec, written before either starts.** That shared spec is what makes the two lanes
-safe to run in parallel, and it is what `portal-qa` checks them against afterwards (report in
-`_workspace/qa_report.md`). Skip the parallelism when only one side is changing.
+The one thing the files can't tell you: the shared **API response-shape spec** (see Critical
+Rules) must be written before either lane starts — that is what makes frontend and backend safe
+to run in parallel, and what `portal-qa` checks them against afterwards (report in
+`_workspace/qa_report.md`). Skip the parallelism when only one side is changing; re-run a failing
+lane at most twice before escalating.
 
 ---
 
@@ -99,7 +103,9 @@ thing that makes it load; `agyp` expands it the same way for agy worker lanes. D
 
 ## Off-limits
 
-Scripts live in `package.json`; the package manager is pnpm. Two things are not obvious from the
-tree: `src/components/ui/` holds generated shadcn/ui bases — change them through
-`npx shadcn@latest add`, not by hand — and `.env*` must never carry a real secret, since the
-portal reads live cluster credentials at runtime.
+- `src/components/ui/` holds generated shadcn/ui bases — change them through
+  `npx shadcn@latest add`, not by hand.
+- `.env*` must never carry a real secret; the portal reads live cluster credentials at runtime.
+  `.gitignore` covers `.env*` only softly (opt-in commit is allowed) and no secret scan runs in
+  CI, so nothing catches a mistake here.
+- Never hand-edit `node_modules/`; add dependencies with pnpm.
