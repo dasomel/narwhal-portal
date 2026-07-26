@@ -54,14 +54,39 @@ and routes fixes back to the owning harness. Single-repo portal work stays with 
 
 ## Agent Team Harness
 
-`portal-frontend`, `portal-backend`, and `portal-qa` in `.claude/agents/`, backed by the
-`idp-frontend` / `idp-backend` / `idp-qa` skills — each file states its own role and model.
+3 specialist agents + 3 domain skills. Agents handle behavior, skills provide domain knowledge.
 
-The one thing the files can't tell you: the shared **API response-shape spec** (see Critical
-Rules) must be written before either lane starts — that is what makes frontend and backend safe
-to run in parallel, and what `portal-qa` checks them against afterwards (report in
-`_workspace/qa_report.md`). Skip the parallelism when only one side is changing; re-run a failing
-lane at most twice before escalating.
+### Agents (`.claude/agents/`)
+
+| Agent | subagent_type | model | Role |
+|-------|--------------|-------|------|
+| `portal-frontend` | `portal-frontend` | sonnet | UI development (pages, components, widgets) |
+| `portal-backend` | `portal-backend` | sonnet | API development (routes, infra clients, cache) |
+| `portal-qa` | `portal-qa` | sonnet | Integration coherence verification |
+
+### Skills (`.claude/skills/`)
+
+| Skill | Description |
+|-------|-------------|
+| `idp-frontend` | Frontend patterns, project structure, data fetching, RBAC, shadcn/ui, i18n |
+| `idp-backend` | API patterns, infra client integration, cache strategy, secret management |
+| `idp-qa` | QA procedures, API-frontend shape mapping, boundary verification checklist |
+
+### Orchestration Workflow (main context executes directly)
+
+```
+User request → Analyze requirements + write API response shape spec
+    ↓
+portal-frontend + portal-backend (parallel, run_in_background: true)
+    ↓
+portal-qa (sequential, after both complete)
+    ├── 0 failures → report results
+    └── failures   → re-run relevant agent with fix instructions (max 2 loops)
+```
+
+The shared **API response-shape spec** must be written before either lane starts — that is what
+makes frontend and backend safe to run in parallel, and what `portal-qa` checks them against
+afterwards (report in `_workspace/qa_report.md`). If only one side changes, run only that agent.
 
 ---
 
