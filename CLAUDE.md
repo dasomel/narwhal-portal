@@ -21,12 +21,25 @@ the same IDP workspace; the cluster source is the sibling directory:
 
 Whenever this portal assumes something about the cluster — an endpoint, a namespace, a service
 name, a secret path, an OIDC client, an RBAC role — **the cluster repo is the answer and your
-recollection is not.** What actually runs is rendered from
-`gitops/charts/narwhal-apps/templates/` (ArgoCD Applications) and
-`gitops/charts/narwhal-platform/templates/` (platform manifests, incl. the portal's own K8s
-resources and APISIX routes); RBAC manifests live in `gitops/resources/`. Three scripts own the
-portal's own seam: `11-3-keycloak-clients.sh` (OIDC clients),
-`13-2-narwhal-portal-bindings.sh` (portal RBAC + API token), `15-narwhal-portal.sh` (deploy).
+recollection is not.**
+
+| Path (under `narwhal/`) | Purpose |
+|------|---------|
+| `gitops/charts/narwhal-apps/templates/` | ArgoCD Applications — source of truth for deployed cluster apps (rendered by the app-of-apps Helm chart) |
+| `gitops/charts/narwhal-platform/templates/` | Platform manifests incl. the portal's K8s resources (`narwhal-portal-k8s.yaml`) and APISIX routes |
+| `gitops/apps/` | `app-of-apps.yaml` only (points ArgoCD at `charts/narwhal-apps`) |
+| `gitops/resources/` | Raw manifests incl. the ClusterRole/RoleBinding sources |
+| `configs/gitops/` | GitOps configuration values |
+| `scripts/cluster/` | Cluster install/operation scripts — incl. `11-3-keycloak-clients.sh` (OIDC clients), `13-2-narwhal-portal-bindings.sh` (portal RBAC + API token), `15-narwhal-portal.sh` (portal deploy) |
+| `csp/` | CSP/cloud provider integration |
+| `docs/` | Cluster architecture and operational docs |
+| `CLAUDE.md`, `README.md`, `VERSIONS.md`, `CHANGELOG.md` | Authoritative cluster references |
+
+### When to consult the cluster repo
+- Adding/modifying portal integrations with cluster services (Keycloak, ArgoCD, APISIX, OpenBao, Prometheus, Alertmanager, Falco) — verify endpoints, namespaces, secret paths, and service names against `gitops/charts/narwhal-apps/templates/` and `gitops/charts/narwhal-platform/templates/`.
+- Implementing onboarding/auth flows (kubeconfig, OIDC) — match against `scripts/cluster/11-*-keycloak*.sh`.
+- RBAC role definitions — cross-check `gitops/resources/` ClusterRole/RoleBinding sources and `scripts/cluster/13-2-narwhal-portal-bindings.sh`.
+- Resolving any "what's the real URL/port/secret name?" question — cluster repo wins over assumptions.
 
 > Treat the cluster repo as **read-only from here**. Route cluster changes back to that repository.
 
@@ -101,8 +114,26 @@ thing that makes it load; `agyp` expands it the same way for agy worker lanes. D
 
 ---
 
-## Off-limits
+## Development Commands
 
+```bash
+pnpm dev                          # dev server
+pnpm build                        # production build
+npx tsc --noEmit                  # type check
+npx shadcn@latest add {component} # add a shadcn/ui component
+```
+
+---
+
+## Permissions
+
+**Allowed**
+- Any TypeScript/TSX file under `src/`
+- Static files added to `public/`
+- Dependencies via `package.json` (pnpm)
+- Harness configuration under `.claude/`
+
+**Forbidden**
 - `src/components/ui/` holds generated shadcn/ui bases — change them through
   `npx shadcn@latest add`, not by hand.
 - `.env*` must never carry a real secret; the portal reads live cluster credentials at runtime.
