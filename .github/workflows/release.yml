@@ -1,0 +1,79 @@
+name: Release
+
+# Publishes a GitHub Release whose body is the CHANGELOG.md section for the tag.
+#
+# Runs alongside "Build & Publish Container (GHCR)" on the same v*.*.* tag; the
+# two are independent (this one touches no registry, that one creates no
+# release), so they are deliberately not chained — a slow arm64 build must not
+# hold up the release notes, and a bad changelog must not block the image.
+#
+# MISSING ENTRY IS A FAILURE, NOT A PLACEHOLDER. The sibling narwhal repo's
+# version writes "No changelog entry found" into the body and exits 0; its
+# v1.1.0 release therefore shipped with an empty body and nobody noticed for a
+# month. Here a tag with no matching `## [X.Y.Z]` section fails the job, the
+# same way docker-publish.yml already fails a tag that disagrees with
+# package.json. Both guards say the same thing: a release is a claim about the
+# repo, so the repo has to back it up before the tag goes out.
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: publish release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract the changelog section for this tag
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          echo "building release notes for ${version}"
+
+          # Everything between `## [VERSION]` and the next `## [` heading, with
+          # leading and trailing blank lines trimmed. The blank lines in the
+          # MIDDLE must survive — they separate the lead paragraph from the
+          # ### subsections and the bullets from each other.
+          #
+          # The heading is matched as a literal prefix, not a regex: passing a
+          # regex through `awk -v` does not survive, because -v consumes the
+          # backslash escapes and `^## \[1.0.16\]` arrives as the character
+          # class `^## [1.0.16]`, which matches nothing here. A prefix compare
+          # also makes the version's dots literal for free, so `1.0.1` cannot
+          # match the `1.0.15` heading.
+          awk -v target="## [${version}]" '
+            index($0, target) == 1 {flag=1; next}
+            /^## \[/ {flag=0}
+            flag {
+              lines[++n] = $0
+              if (NF) last = n
+            }
+            END {
+              for (i = 1; i <= last; i++) {
+                if (!started && !length(lines[i])) continue
+                started = 1
+                print lines[i]
+              }
+            }' CHANGELOG.md > release_notes.md
+
+          if [ ! -s release_notes.md ]; then
+            echo "::error::CHANGELOG.md has no '## [${version}]' section. Add the entry, then re-tag."
+            exit 1
+          fi
+
+          printf '\n---\n\n한국어 릴리스 노트: [CHANGELOG_ko.md](https://github.com/%s/blob/%s/CHANGELOG_ko.md)\n' \
+            "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" >> release_notes.md
+
+          echo "--- release_notes.md ---"
+          cat release_notes.md
+
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          generate_release_notes: true
