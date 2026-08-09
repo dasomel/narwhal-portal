@@ -392,10 +392,17 @@ export async function getInfraAuditList(): Promise<InfraAuditRow[]> {
   if (cached) return cached
 
   try {
-    const list = await complianceK8sFetch<RawAuditList>(
-      "/apis/aquasecurity.github.io/v1alpha1/infraassessmentreports",
-    )
-    const rows: InfraAuditRow[] = (list.items ?? []).map((item) => {
+    const [namespaced, clustered] = await Promise.all([
+      complianceK8sFetch<RawAuditList>(
+        "/apis/aquasecurity.github.io/v1alpha1/infraassessmentreports",
+      ).catch(() => ({ items: [] as RawAuditReport[] })),
+      complianceK8sFetch<RawAuditList>(
+        "/apis/aquasecurity.github.io/v1alpha1/clusterinfraassessmentreports",
+      ).catch(() => ({ items: [] as RawAuditReport[] })),
+    ])
+
+    const allItems = [...(namespaced.items ?? []), ...(clustered.items ?? [])]
+    const rows: InfraAuditRow[] = allItems.map((item) => {
       const labels = item.metadata.labels ?? {}
       const node = labels["trivy-operator.resource.name"] ?? item.metadata.name
       return {
@@ -419,10 +426,17 @@ export async function getInfraAuditDetail(node: string): Promise<InfraAuditDetai
   if (cached) return cached
 
   try {
-    const list = await complianceK8sFetch<RawAuditList>(
-      "/apis/aquasecurity.github.io/v1alpha1/infraassessmentreports",
-    )
-    const item = (list.items ?? []).find((i) => {
+    const [namespaced, clustered] = await Promise.all([
+      complianceK8sFetch<RawAuditList>(
+        "/apis/aquasecurity.github.io/v1alpha1/infraassessmentreports",
+      ).catch(() => ({ items: [] as RawAuditReport[] })),
+      complianceK8sFetch<RawAuditList>(
+        "/apis/aquasecurity.github.io/v1alpha1/clusterinfraassessmentreports",
+      ).catch(() => ({ items: [] as RawAuditReport[] })),
+    ])
+
+    const allItems = [...(namespaced.items ?? []), ...(clustered.items ?? [])]
+    const item = allItems.find((i) => {
       const labels = i.metadata.labels ?? {}
       const rName = labels["trivy-operator.resource.name"] ?? i.metadata.name
       return rName === node
@@ -606,18 +620,20 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
     // Derive lastUpdated from K8s timestamps via a separate fetch
     let lastUpdated = new Date().toISOString()
     try {
-      const [configList, rbacNs, rbacCluster, infraList, ccList] = await Promise.all([
+      const [configList, rbacNs, rbacCluster, infraNs, infraCluster, ccList] = await Promise.all([
         complianceK8sFetch<RawAuditList>("/apis/aquasecurity.github.io/v1alpha1/configauditreports").catch(() => ({ items: [] as RawAuditReport[] })),
         complianceK8sFetch<RawAuditList>("/apis/aquasecurity.github.io/v1alpha1/rbacassessmentreports").catch(() => ({ items: [] as RawAuditReport[] })),
         complianceK8sFetch<RawAuditList>("/apis/aquasecurity.github.io/v1alpha1/clusterrbacassessmentreports").catch(() => ({ items: [] as RawAuditReport[] })),
         complianceK8sFetch<RawAuditList>("/apis/aquasecurity.github.io/v1alpha1/infraassessmentreports").catch(() => ({ items: [] as RawAuditReport[] })),
+        complianceK8sFetch<RawAuditList>("/apis/aquasecurity.github.io/v1alpha1/clusterinfraassessmentreports").catch(() => ({ items: [] as RawAuditReport[] })),
         complianceK8sFetch<RawComplianceList>("/apis/aquasecurity.github.io/v1alpha1/clustercompliancereports").catch(() => ({ items: [] as RawComplianceReport[] })),
       ])
       const allTs = [
         ...(configList.items ?? []),
         ...(rbacNs.items ?? []),
         ...(rbacCluster.items ?? []),
-        ...(infraList.items ?? []),
+        ...(infraNs.items ?? []),
+        ...(infraCluster.items ?? []),
       ]
         .map((i) => i.metadata.creationTimestamp ?? "")
         .concat((ccList.items ?? []).map((i) => i.metadata.creationTimestamp ?? ""))
