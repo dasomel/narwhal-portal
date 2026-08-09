@@ -51,8 +51,9 @@ export interface NodeMetric {
 }
 
 export async function getNodeMetrics(): Promise<NodeMetric[]> {
-  const [nodeInfo, cpuCores, cpuUsage, memTotal, memUsage, diskTotal, diskUsage] = await Promise.allSettled([
+  const [nodeInfo, nodeRoles, cpuCores, cpuUsage, memTotal, memUsage, diskTotal, diskUsage] = await Promise.allSettled([
     queryVector('kube_node_info'),
+    queryVector('kube_node_role'),
     queryVector('kube_node_status_capacity{resource="cpu"}'),
     queryVector('100 - (avg by(instance)(irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)'),
     queryVector('node_memory_MemTotal_bytes'),
@@ -62,6 +63,7 @@ export async function getNodeMetrics(): Promise<NodeMetric[]> {
   ])
 
   const nodes = nodeInfo.status === "fulfilled" ? nodeInfo.value : []
+  const roleResults = nodeRoles.status === "fulfilled" ? nodeRoles.value : []
 
   function findByNode(results: VectorResult[] | undefined, nodeName: string, nodeIp?: string): number | null {
     if (!results) return null
@@ -77,13 +79,14 @@ export async function getNodeMetrics(): Promise<NodeMetric[]> {
   return nodes.map((n) => {
     const nodeName = n.metric.node ?? "unknown"
     const nodeIp = n.metric.internal_ip
-    const roles = Object.keys(n.metric)
-      .filter((k) => k.startsWith("label_node_role_kubernetes_io_"))
-      .map((k) => k.replace("label_node_role_kubernetes_io_", ""))
+    const roles = roleResults
+      .filter((r) => r.metric.node === nodeName)
+      .map((r) => r.metric.role)
+      .filter(Boolean)
     const isControlPlane = roles.some(
-      (r) => r === "control_plane" || r === "control-plane" || r === "master"
+      (r) => r === "control-plane" || r === "master"
     )
-    const role = isControlPlane ? "control-plane" : (roles[0]?.replace(/_/g, "-") ?? "worker")
+    const role = isControlPlane ? "control-plane" : (roles[0] ?? "worker")
 
     const cores = findByNode(cpuCores.status === "fulfilled" ? cpuCores.value : undefined, nodeName, nodeIp)
     const cpuPct = findByNode(cpuUsage.status === "fulfilled" ? cpuUsage.value : undefined, nodeName, nodeIp)
