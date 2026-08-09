@@ -85,7 +85,7 @@ export async function GET() {
     for (const node of nodes) {
       const name = node.metadata.name
       const labels = node.metadata.labels ?? {}
-      if ("node-role.kubernetes.io/control-plane" in labels) {
+      if ("node-role.kubernetes.io/control-plane" in labels || "node-role.kubernetes.io/master" in labels) {
         controlPlaneNodes.add(name)
       } else {
         workerNodesList.push(name)

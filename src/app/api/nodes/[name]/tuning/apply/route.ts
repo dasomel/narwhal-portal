@@ -17,6 +17,7 @@ const VALID_KINDS = new Set([
 ])
 
 const CONTROL_PLANE_TAINT = "node-role.kubernetes.io/control-plane"
+const MASTER_TAINT = "node-role.kubernetes.io/master"
 
 function validateBody(body: unknown): ApplyBody | { error: string } {
   if (!body || typeof body !== "object") return { error: "invalid body" }
@@ -58,8 +59,9 @@ export async function POST(
     return NextResponse.json({ error: "Node not found" }, { status: 404 })
   }
   const isControlPlane =
-    (detail.taints ?? []).some((t) => t.key === CONTROL_PLANE_TAINT) ||
-    detail.labels?.[CONTROL_PLANE_TAINT] !== undefined
+    (detail.taints ?? []).some((t) => t.key === CONTROL_PLANE_TAINT || t.key === MASTER_TAINT) ||
+    detail.labels?.[CONTROL_PLANE_TAINT] !== undefined ||
+    detail.labels?.[MASTER_TAINT] !== undefined
   if (isControlPlane) {
     return NextResponse.json(
       { error: "Forbidden", message: "Tuning Apply is not allowed on control-plane nodes" },

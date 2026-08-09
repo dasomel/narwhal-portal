@@ -142,9 +142,11 @@ export async function GET() {
 
     const nodes: ClusterInfra["nodes"] = rawNodes.map((n) => {
       const isReady = n.status.conditions.some((c) => c.type === "Ready" && c.status === "True")
-      const roles = Object.keys(n.metadata.labels ?? {})
+      const rawRoles = Object.keys(n.metadata.labels ?? {})
         .filter((l) => l.startsWith("node-role.kubernetes.io/"))
         .map((l) => l.replace("node-role.kubernetes.io/", ""))
+        .map((r) => (r === "master" ? "control-plane" : r))
+      const roles = Array.from(new Set(rawRoles))
       if (roles.length === 0) roles.push("worker")
 
       const totalCpu = parseCpuCores(n.status.allocatable.cpu ?? "0")

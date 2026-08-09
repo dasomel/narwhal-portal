@@ -1033,7 +1033,7 @@ export async function getNodeDetail(name: string): Promise<NodeDetail | null> {
         ],
         labels: {
           "kubernetes.io/hostname": name,
-          ...(name.includes("master") ? { "node-role.kubernetes.io/control-plane": "true" } : { "node-role.kubernetes.io/worker": "true" }),
+          ...(name.includes("master") ? { "node-role.kubernetes.io/control-plane": "" } : { "node-role.kubernetes.io/worker": "" }),
         },
         taints: name.includes("master") ? [{ key: "node-role.kubernetes.io/control-plane", effect: "NoSchedule" }] : [],
         capacity: { cpu: "8", memory: "16384Ki", pods: "110" },
@@ -1791,7 +1791,7 @@ export async function getAllNodesForDistribution(): Promise<K8sNodeForDistributi
     console.warn("[k8s] Failed to fetch all nodes for distribution:", (err as Error).message)
     if (process.env.NODE_ENV === "development") {
       return [
-        { metadata: { name: "node-master-1", labels: { "node-role.kubernetes.io/control-plane": "true" } } },
+        { metadata: { name: "node-master-1", labels: { "node-role.kubernetes.io/control-plane": "" } } },
         { metadata: { name: "node-worker-1", labels: { "kubernetes.io/hostname": "node-worker-1" } } },
         { metadata: { name: "node-worker-2", labels: { "kubernetes.io/hostname": "node-worker-2" } } },
         { metadata: { name: "node-worker-3", labels: { "kubernetes.io/hostname": "node-worker-3" } } },

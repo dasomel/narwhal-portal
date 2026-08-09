@@ -80,7 +80,10 @@ export async function getNodeMetrics(): Promise<NodeMetric[]> {
     const roles = Object.keys(n.metric)
       .filter((k) => k.startsWith("label_node_role_kubernetes_io_"))
       .map((k) => k.replace("label_node_role_kubernetes_io_", ""))
-    const role = roles.includes("control-plane") ? "control-plane" : roles[0] ?? "worker"
+    const isControlPlane = roles.some(
+      (r) => r === "control_plane" || r === "control-plane" || r === "master"
+    )
+    const role = isControlPlane ? "control-plane" : (roles[0]?.replace(/_/g, "-") ?? "worker")
 
     const cores = findByNode(cpuCores.status === "fulfilled" ? cpuCores.value : undefined, nodeName, nodeIp)
     const cpuPct = findByNode(cpuUsage.status === "fulfilled" ? cpuUsage.value : undefined, nodeName, nodeIp)
