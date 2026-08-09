@@ -183,24 +183,29 @@ const icons = {
 //   APISIX가 같은 오리진에 서빙하는 /sso 부트스트랩 페이지로 제로클릭 처리
 //   (narwhal gitops/resources/apisix-routes.yaml openbao-sso / velero-ui-sso 참고).
 //   velero-ui 백엔드 토큰 교환은 velero-ui.yaml의 NODE_EXTRA_CA_CERTS로 사설 CA 신뢰.
+const CLUSTER_BASE_DOMAIN =
+  process.env.CLUSTER_BASE_DOMAIN ??
+  process.env.NEXT_PUBLIC_CLUSTER_BASE_DOMAIN ??
+  "local.narwhal.internal"
+
 export const PLATFORM_TOOLS: PlatformTool[] = [
-  { id: "argocd", name: "ArgoCD", description: "GitOps deployment management", url: "https://argocd.local.narwhal.internal/auth/login", category: "gitops", icon: icons.argocd, roles: ["cluster-admin", "developer"] },
-  { id: "gitea", name: "Gitea", description: "Git source code repository", url: "https://gitea.local.narwhal.internal/gitea-admin/narwhal-gitops", category: "source", icon: icons.gitea, roles: ["cluster-admin", "developer"] },
-  { id: "harbor", name: "Harbor", description: "Container image registry", url: "https://harbor.local.narwhal.internal/c/oidc/login", category: "registry", icon: icons.harbor, roles: ["cluster-admin", "developer"] },
-  { id: "grafana", name: "Grafana", description: "Metrics dashboard", url: "https://grafana.local.narwhal.internal/login/generic_oauth", category: "monitoring", icon: icons.grafana, roles: ["cluster-admin", "developer", "viewer"] },
-  { id: "prometheus", name: "Prometheus", description: "Metrics collection", url: "https://prometheus.local.narwhal.internal", category: "monitoring", icon: icons.prometheus, roles: ["cluster-admin"] },
-  { id: "alertmanager", name: "Alertmanager", description: "Alert management", url: "https://alertmanager.local.narwhal.internal", category: "monitoring", icon: icons.alertmanager, roles: ["cluster-admin"] },
-  { id: "headlamp", name: "Headlamp", description: "Kubernetes dashboard", url: "https://headlamp.local.narwhal.internal/oidc?cluster=main", category: "infra", icon: icons.headlamp, roles: ["cluster-admin", "developer"] },
+  { id: "argocd", name: "ArgoCD", description: "GitOps deployment management", url: `https://argocd.${CLUSTER_BASE_DOMAIN}/auth/login`, category: "gitops", icon: icons.argocd, roles: ["cluster-admin", "developer"] },
+  { id: "gitea", name: "Gitea", description: "Git source code repository", url: `https://gitea.${CLUSTER_BASE_DOMAIN}/gitea-admin/narwhal-gitops`, category: "source", icon: icons.gitea, roles: ["cluster-admin", "developer"] },
+  { id: "harbor", name: "Harbor", description: "Container image registry", url: `https://harbor.${CLUSTER_BASE_DOMAIN}/c/oidc/login`, category: "registry", icon: icons.harbor, roles: ["cluster-admin", "developer"] },
+  { id: "grafana", name: "Grafana", description: "Metrics dashboard", url: `https://grafana.${CLUSTER_BASE_DOMAIN}/login/generic_oauth`, category: "monitoring", icon: icons.grafana, roles: ["cluster-admin", "developer", "viewer"] },
+  { id: "prometheus", name: "Prometheus", description: "Metrics collection", url: `https://prometheus.${CLUSTER_BASE_DOMAIN}`, category: "monitoring", icon: icons.prometheus, roles: ["cluster-admin"] },
+  { id: "alertmanager", name: "Alertmanager", description: "Alert management", url: `https://alertmanager.${CLUSTER_BASE_DOMAIN}`, category: "monitoring", icon: icons.alertmanager, roles: ["cluster-admin"] },
+  { id: "headlamp", name: "Headlamp", description: "Kubernetes dashboard", url: `https://headlamp.${CLUSTER_BASE_DOMAIN}/oidc?cluster=main`, category: "infra", icon: icons.headlamp, roles: ["cluster-admin", "developer"] },
   // 제로클릭 SSO: /sso 부트스트랩 페이지(APISIX serverless-pre-function)가 Keycloak
   // PKCE 로그인 → id_token(aud에 kubernetes) → Dashboard /api/v1/login → token 쿠키
   // 를 자동 처리 (narwhal gitops apisix-routes.yaml kubernetes-dashboard-sso 참고).
-  { id: "kubernetes-dashboard", name: "Kubernetes Dashboard", description: "Official Kubernetes workloads dashboard", url: "https://dashboard.local.narwhal.internal/sso", category: "infra", icon: icons.kubernetesDashboard, roles: ["cluster-admin", "developer"] },
+  { id: "kubernetes-dashboard", name: "Kubernetes Dashboard", description: "Official Kubernetes workloads dashboard", url: `https://dashboard.${CLUSTER_BASE_DOMAIN}/sso`, category: "infra", icon: icons.kubernetesDashboard, roles: ["cluster-admin", "developer"] },
   // SSO is enforced at the gateway (openid-connect plugin on the ApisixRoute), so a
   // plain URL is already zero-click once a Keycloak session exists.
-  { id: "nfs-quota", name: "NFS Quota", description: "NFS storage quota dashboard", url: "https://nfs-quota.local.narwhal.internal/", category: "infra", icon: icons.nfsQuota, roles: ["cluster-admin"] },
-  { id: "hubble", name: "Hubble UI", description: "Cilium network visualization", url: "https://hubble.local.narwhal.internal", category: "infra", icon: icons.hubble, roles: ["cluster-admin"] },
-  { id: "openbao", name: "OpenBao", description: "Secret management", url: "https://openbao.local.narwhal.internal/sso", category: "security", icon: icons.openbao, roles: ["cluster-admin"] },
-  { id: "velero-ui", name: "Velero UI", description: "Backup/restore management", url: "https://velero-ui.local.narwhal.internal/sso", category: "backup", icon: icons.velero, roles: ["cluster-admin"] },
+  { id: "nfs-quota", name: "NFS Quota", description: "NFS storage quota dashboard", url: `https://nfs-quota.${CLUSTER_BASE_DOMAIN}/`, category: "infra", icon: icons.nfsQuota, roles: ["cluster-admin"] },
+  { id: "hubble", name: "Hubble UI", description: "Cilium network visualization", url: `https://hubble.${CLUSTER_BASE_DOMAIN}`, category: "infra", icon: icons.hubble, roles: ["cluster-admin"] },
+  { id: "openbao", name: "OpenBao", description: "Secret management", url: `https://openbao.${CLUSTER_BASE_DOMAIN}/sso`, category: "security", icon: icons.openbao, roles: ["cluster-admin"] },
+  { id: "velero-ui", name: "Velero UI", description: "Backup/restore management", url: `https://velero-ui.${CLUSTER_BASE_DOMAIN}/sso`, category: "backup", icon: icons.velero, roles: ["cluster-admin"] },
 ]
 
 export function getToolsForRole(role: UserRole): PlatformTool[] {
