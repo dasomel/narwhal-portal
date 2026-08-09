@@ -9,6 +9,19 @@ English | [한국어](CHANGELOG_ko.md)
 
 ## [Unreleased]
 
+## [1.0.17] - 2026-08-09
+
+Fixes platform tool health checks, node role detection, compliance reporting metrics, and node infrastructure audit queries, while introducing an automated release notes workflow for version tags.
+
+### Added
+- **Automated GitHub Release workflow**: Added `.github/workflows/release.yml` to publish release notes from `CHANGELOG.md` on `v*` tag pushes, failing the job if the version section is missing.
+
+### Fixed
+- **Configurable platform tool base domain**: Added `CLUSTER_BASE_DOMAIN` (and `NEXT_PUBLIC_CLUSTER_BASE_DOMAIN`) environment variable support (defaulting to `local.narwhal.internal`) to resolve tile URLs on custom cluster domains without in-pod NXDOMAIN health check failures.
+- **Node role derivation via Prometheus and K8s labels**: Derived node roles using the `kube_node_role` metric joined on node labels in Prometheus queries, and recognized both `control-plane` and legacy `master` label/taint keys in K8s API responses.
+- **Compliance framework pass rate percentage scaling**: Scaled average framework pass rate by multiplying by 100 before rounding, preventing 0-1 pass rate ratios from rendering as 1%.
+- **Cluster-scoped node infrastructure audit report querying**: Queried and merged cluster-scoped `clusterinfraassessmentreports` alongside namespaced `infraassessmentreports` so trivy-operator node security audit findings are properly reflected.
+
 ## [1.0.16] - 2026-07-25
 
 Introduces a dependency-aware Platform Status page for real-time component health tracking
@@ -159,7 +172,8 @@ management dashboard built with Next.js 16 and React 19.
   - Skaffold development profile configured for live Hot Module Replacement (HMR) and container
     file syncing.
 
-[Unreleased]: https://github.com/dasomel/narwhal-portal/compare/v1.0.16...HEAD
+[Unreleased]: https://github.com/dasomel/narwhal-portal/compare/v1.0.17...HEAD
+[1.0.17]: https://github.com/dasomel/narwhal-portal/compare/v1.0.16...v1.0.17
 [1.0.16]: https://github.com/dasomel/narwhal-portal/compare/v1.0.15...v1.0.16
 [1.0.15]: https://github.com/dasomel/narwhal-portal/compare/v1.0.4...v1.0.15
 [1.0.4]: https://github.com/dasomel/narwhal-portal/compare/v1.0.3...v1.0.4

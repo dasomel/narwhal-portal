@@ -9,6 +9,28 @@
 
 ## [Unreleased]
 
+## [1.0.17] - 2026-08-09
+
+플랫폼 도구 헬스 체크, 노드 역할 감지, 컴플라이언스 리포팅 지표 및 노드 인프라 감사 쿼리를 수정하고
+버전 태그에 대한 자동화된 릴리스 노트 워크플로를 도입함.
+
+### 추가
+- **자동화된 GitHub Release 워크플로**: `v*` 태그 푸시 시 `CHANGELOG.md`에서 릴리스 노트를 추출하여
+  게시하고, 버전 섹션이 누락되면 작업을 실패 처리하는 `.github/workflows/release.yml` 워크플로 추가.
+
+### 수정
+- **구성 가능한 플랫폼 도구 기본 도메인**: 인팟(in-pod) 헬스 체크의 NXDOMAIN 실패를 방지하고 커스텀
+  클러스터 도메인을 지원하기 위해 `CLUSTER_BASE_DOMAIN`(및 `NEXT_PUBLIC_CLUSTER_BASE_DOMAIN`) 환경 변수 지원
+  추가(기본값 `local.narwhal.internal`).
+- **Prometheus 및 K8s 라벨 기반 노드 역할 도출**: Prometheus 쿼리에서 노드 라벨에 조인된 `kube_node_role`
+  메트릭을 사용하고, K8s API 응답에서 `control-plane` 및 기존 `master` 라벨/테인트 키를 모두 인식하여 노드가
+  'worker'로 잘못 표시되던 문제 수정.
+- **컴플라이언스 프레임워크 통과율 스케일링**: 평균 프레임워크 통과율 비율(0-1)에 100을 곱한 뒤 반올림하도록
+  수정하여 0.77과 같은 비율이 1%로 표시되던 오류 해결.
+- **클러스터 범위 노드 인프라 감사 리포트 쿼리**: trivy-operator의 노드 보안 감사 발견 사항이 올바르게
+  반영되도록 네임스페이스 범위의 `infraassessmentreports`와 함께 클러스터 범위의
+  `clusterinfraassessmentreports`를 조회하여 병합.
+
 ## [1.0.16] - 2026-07-25
 
 실시간 컴포넌트 상태 추적을 위한 종속성 인지 플랫폼 상태(Platform Status) 페이지를 도입하고
@@ -157,7 +179,8 @@ Portal의 첫 번째 공개 릴리스.
     매니페스트(`deploy/kaniko-build-job.yaml`).
   - 실시간 핫 모듈 교체(HMR) 및 컨테이너 파일 동기화를 위해 구성된 Skaffold 개발 프로필.
 
-[Unreleased]: https://github.com/dasomel/narwhal-portal/compare/v1.0.16...HEAD
+[Unreleased]: https://github.com/dasomel/narwhal-portal/compare/v1.0.17...HEAD
+[1.0.17]: https://github.com/dasomel/narwhal-portal/compare/v1.0.16...v1.0.17
 [1.0.16]: https://github.com/dasomel/narwhal-portal/compare/v1.0.15...v1.0.16
 [1.0.15]: https://github.com/dasomel/narwhal-portal/compare/v1.0.4...v1.0.15
 [1.0.4]: https://github.com/dasomel/narwhal-portal/compare/v1.0.3...v1.0.4
