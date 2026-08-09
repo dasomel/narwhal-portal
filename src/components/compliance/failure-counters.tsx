@@ -21,7 +21,7 @@ function relativeTime(iso: string, locale: Locale): string {
 function avgPassRate(frameworks: ComplianceSummary["frameworks"]): number {
   if (!frameworks.length) return 0
   const sum = frameworks.reduce((acc, f) => acc + f.passRate, 0)
-  return Math.round(sum / frameworks.length)
+  return Math.round((sum / frameworks.length) * 100)
 }
 
 const counterConfig = [
