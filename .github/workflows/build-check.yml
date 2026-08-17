@@ -1,0 +1,73 @@
+name: Build Check
+
+# Type-check and build whenever the dependency set changes.
+#
+# WHY THIS EXISTS: every other workflow here is filtered to src/**, DESIGN.md or a
+# v*.*.* tag, so a change to package.json or pnpm-lock.yaml ran NO checks at all. The
+# Next.js 16.2.6 -> 16.3.0 bump (7fb1b16) went to main with nothing verifying it in CI;
+# it was only known-good because it was built by hand first. The next one might not be,
+# and Dependabot raises exactly this kind of PR.
+#
+# Also runs on changes to the build inputs themselves — a tsconfig or next.config change
+# can break the build just as effectively as a dependency can, and was equally unwatched.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "next.config.ts"
+      - "tsconfig.json"
+      - "Dockerfile"
+      - ".github/workflows/build-check.yml"
+  pull_request:
+    paths:
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "next.config.ts"
+      - "tsconfig.json"
+      - "Dockerfile"
+
+# Read-only: this job inspects the checkout and produces no artifact.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Type-check and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      # Version comes from package.json "packageManager"; keep the runtime aligned with
+      # the container base image (node:22-alpine) so CI cannot pass on a Node the
+      # published image never runs.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # --frozen-lockfile is the point, not a detail: it fails when package.json and
+      # pnpm-lock.yaml disagree, which is the most common way a dependency change breaks.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      # The published image runs the standalone output, so a build that succeeds without
+      # producing it would still be broken at deploy time.
+      - name: Build
+        run: pnpm build
+
+      - name: Assert standalone output exists
+        run: |
+          set -euo pipefail
+          if [ ! -d .next/standalone ]; then
+            echo "::error::.next/standalone missing — the Dockerfile copies it, so the image would not run"
+            exit 1
+          fi
+          echo "standalone output present"
