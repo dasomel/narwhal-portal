@@ -1,0 +1,59 @@
+version: 2
+
+updates:
+  # Actions are pinned to commit SHAs so a moved tag cannot change what runs in CI. A SHA
+  # pin only stays current if something updates it, which is this entry's job — pinning
+  # without Dependabot freezes CI on old actions, and Dependabot without pinning has
+  # nothing to pin.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+      include: scope
+    labels:
+      - dependencies
+      - github-actions
+
+  # npm updates are validated by the Build Check workflow, which runs on every change to
+  # package.json or pnpm-lock.yaml: frozen-lockfile install, tsc, build, and an assertion
+  # that the standalone output the Dockerfile copies still exists.
+  #
+  # Grouped rather than one PR per package: this is a Next.js app, so next, react and
+  # react-dom move together and reviewing them apart wastes the reviewer's time and can
+  # produce a peer-dependency state that never existed upstream.
+  #
+  # Majors are deliberately excluded. A React or Next major here is a migration — the 15→16
+  # upgrade needed the bundled guide under node_modules/next/dist/docs — and it should be
+  # planned, not opened as a routine PR that CI can green-light. Run it by hand, verify the
+  # Keycloak round trip against a live cluster, then ship it.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    commit-message:
+      prefix: chore
+      include: scope
+    labels:
+      - dependencies
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
+    groups:
+      next-react:
+        patterns:
+          - next
+          - react
+          - react-dom
+          - "@types/react"
+          - "@types/react-dom"
+          - eslint-config-next
+      opentelemetry:
+        patterns:
+          - "@opentelemetry/*"
+      dev-tooling:
+        dependency-type: development

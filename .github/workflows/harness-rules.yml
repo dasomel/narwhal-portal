@@ -17,11 +17,15 @@ on:
       - "src/**"
       - "scripts/harness-rules.sh"
 
+# Least privilege: this workflow only reads the checkout.
+permissions:
+  contents: read
+
 jobs:
   ratchet:
     name: CLAUDE.md rule ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Check rule baselines
         run: bash scripts/harness-rules.sh
