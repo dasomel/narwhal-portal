@@ -14,6 +14,9 @@ node_modules
 
 # 문서 (빌드 불필요)
 *.md
+# 단, 라이선스 고지는 이미지에 들어가야 한다 — Dockerfile runner 스테이지가 COPY 한다.
+# 이 예외가 없으면 *.md에 걸려 THIRD-PARTY-NOTICES.md가 컨텍스트에서 빠지고 빌드가 깨진다.
+!THIRD-PARTY-NOTICES.md
 
 # Skaffold / dev tooling
 skaffold.yaml

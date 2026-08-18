@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2025 dasomel
 # =============================================================================
 # harness-rules.sh — make the countable CLAUDE.md "Critical Rules" actually block.
 #

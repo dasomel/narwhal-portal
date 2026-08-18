@@ -2,6 +2,8 @@
 
 English | [한국어](README_ko.md)
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 Management portal (Next.js) for the **Narwhal Kubernetes Internal Developer Platform (IDP)**
 cluster. Sibling repo `../narwhal` provisions the cluster itself (GitOps, SSO, monitoring,
 storage); this repo is the web UI operators and developers use to observe and operate it.
@@ -112,3 +114,28 @@ npx shadcn@latest add {component}  # add a shadcn/ui component
 - [docs/security-clean-install.md](./docs/security-clean-install.md) — clean-install secrets and
   security hardening checklist
 - `CLAUDE.md` — architecture, agent harness, and conventions for AI-assisted development
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
+
+This repository vendors no dependency, but the published container image
+`ghcr.io/dasomel/narwhal-portal` redistributes its production npm packages, which carries their
+attribution obligations. Two files satisfy them and both are copied into the image:
+
+| File | What it is |
+|---|---|
+| [`NOTICE`](NOTICE) | Human-readable summary — principal components, what is redistributed where, trademarks |
+| [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) | Generated per-package record with the verbatim license text of every production dependency |
+
+`THIRD-PARTY-NOTICES.md` is generated, never hand-edited:
+
+```bash
+pnpm run notices    # regenerate; CI fails if the committed file is stale
+```
+
+The generator exists because `next build` cannot be relied on to carry license files — its file
+tracing keeps only what the server loads, so a 1.0.17 build had 631 `LICENSE` files under
+`node_modules` and 3 under `.next/standalone`. Image optimization is disabled and `sharp` is
+excluded from tracing so the image does not redistribute LGPL-licensed libvips for an optimizer
+the portal never calls; see [`NOTICE`](NOTICE).

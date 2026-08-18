@@ -48,6 +48,12 @@ not pulling a moving tag.
   the `Dockerfile`.
 - **No credential is committed.** Runtime configuration arrives from the `narwhal-portal-secrets`
   Secret; `.env*` files are for local development and must never carry a real secret.
+- **The dependency graph is inventoried and its licenses are gated.** `license-and-sbom.yml`
+  regenerates `THIRD-PARTY-NOTICES.md` and fails on a stale file, stops CI on a license that is
+  neither permissive nor explicitly accepted, and publishes CycloneDX and SPDX SBOMs of the
+  dependency tree; each release attaches the CycloneDX document alongside `LICENSE` and `NOTICE`.
+  This is a supply-chain control as much as a legal one — an unexpected package shows up as a
+  diff in a reviewed file.
 
 ## Known and accepted
 

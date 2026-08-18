@@ -1,0 +1,129 @@
+name: License & SBOM
+
+# Keeps the redistribution paperwork honest, and produces the dependency SBOM.
+#
+# WHY: the published image redistributes ~660 npm packages, and MIT/BSD/ISC all
+# require the copyright and permission notice to travel with the copy. Next.js
+# file tracing strips LICENSE files out of the build output — a 1.0.17 build had
+# 631 under node_modules and 3 under .next/standalone — so THIRD-PARTY-NOTICES.md
+# is generated instead and copied into the image by the Dockerfile. A generated
+# file that nothing checks goes stale, which is what this workflow prevents.
+#
+# The strict gate is the other half: a new dependency arriving under a copyleft
+# license should stop CI and get a decision, not land as one more table row.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "THIRD-PARTY-NOTICES.md"
+      - "NOTICE"
+      - "LICENSE"
+      - "scripts/generate-third-party-notices.mjs"
+      - ".github/workflows/license-and-sbom.yml"
+  pull_request:
+    paths:
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "THIRD-PARTY-NOTICES.md"
+      - "NOTICE"
+      - "LICENSE"
+      - "scripts/generate-third-party-notices.mjs"
+  workflow_dispatch:
+
+# Read-only: both jobs inspect the checkout. The SBOM leaves as a build artifact,
+# not as a commit.
+permissions:
+  contents: read
+
+jobs:
+  notices:
+    name: Third-party notices are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The generator reads license text out of node_modules, so the tree has to
+      # be the exact one the lockfile describes — a drifting install would produce
+      # a diff that has nothing to do with the change under review.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # --strict fails on a license that is neither permissive nor listed in the
+      # generator's ACCEPTED map. Widening PERMISSIVE to silence it defeats the check.
+      - name: Regenerate notices
+        run: node scripts/generate-third-party-notices.mjs --strict
+
+      - name: Assert the committed file matches
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- THIRD-PARTY-NOTICES.md; then
+            echo "::error::THIRD-PARTY-NOTICES.md is stale. Run 'pnpm run notices' and commit the result."
+            git diff --stat -- THIRD-PARTY-NOTICES.md
+            exit 1
+          fi
+          echo "notices are current"
+
+      # The image ships these three. A COPY of a missing file fails the docker
+      # build, but it fails at release time; catching it here is cheaper.
+      - name: Assert the files the image copies exist
+        run: |
+          set -euo pipefail
+          for f in LICENSE NOTICE THIRD-PARTY-NOTICES.md; do
+            [ -s "$f" ] || { echo "::error::$f is missing or empty"; exit 1; }
+          done
+          grep -q '^!THIRD-PARTY-NOTICES.md' .dockerignore \
+            || { echo "::error::.dockerignore excludes *.md without re-including THIRD-PARTY-NOTICES.md"; exit 1; }
+          echo "license files present and reachable from the build context"
+
+  sbom:
+    name: Dependency SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Filesystem scan of the lockfile, not an image scan: the image already
+      # carries an SPDX attestation from buildx (docker-publish.yml), and this
+      # covers the dependency graph before it is built. Same tool the cluster
+      # runs for vulnerability reports, so the outputs are comparable.
+      - name: CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: sbom-cyclonedx.json
+
+      - name: SPDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: spdx-json
+          output: sbom-spdx.json
+
+      - name: Summarize
+        run: |
+          set -euo pipefail
+          for f in sbom-cyclonedx.json sbom-spdx.json; do
+            [ -s "$f" ] || { echo "::error::$f was not produced"; exit 1; }
+            echo "$f: $(wc -c < "$f") bytes"
+          done
+          echo "components: $(python3 -c "import json;print(len(json.load(open('sbom-cyclonedx.json')).get('components',[])))")"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: |
+            sbom-cyclonedx.json
+            sbom-spdx.json
+          retention-days: 90

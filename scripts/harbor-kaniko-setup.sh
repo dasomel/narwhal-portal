@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2025 dasomel
 # Kaniko in-cluster 빌드 1회 설정 (Narwhal IDP Portal)
 #
 # 동작:

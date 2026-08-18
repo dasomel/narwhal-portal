@@ -63,7 +63,26 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/service-graph/stream": ["./protos/**/*"],
   },
+  // sharp/libvips를 standalone 산출물에서 제외 — 아래 images.unoptimized 주석 참고.
+  // unoptimized만으로는 빠지지 않는다(Next가 optimizer 사용 여부와 무관하게 추적함).
+  // 제외 후 standalone 서버를 실제로 기동해 라우트 응답까지 확인했다.
+  outputFileTracingExcludes: {
+    "*": ["node_modules/sharp/**", "node_modules/@img/**", "node_modules/.pnpm/@img+*/**", "node_modules/.pnpm/sharp@*/**"],
+  },
   images: {
+    // 최적화 비활성 — libvips(LGPL-3.0-or-later) 재배포를 피하기 위함.
+    //
+    // Next는 image optimizer용으로 sharp를 standalone 추적에 자동 포함한다.
+    // sharp의 네이티브 백엔드 @img/sharp-libvips-*는 LGPL-3.0-or-later라서
+    // 이미지에 담기는 순간 전문 첨부 + 소스 입수 경로 + 재링크 고지 의무가
+    // 붙는다. 그런데 src 전체에 next/image import가 0건이라 optimizer는
+    // 한 번도 쓰인 적이 없다. 쓰지도 않는 기능 때문에 copyleft 의무를 지는
+    // 상황이므로 끈다.
+    //
+    // 되돌리려면: 이 줄을 지우고 THIRD-PARTY-NOTICES.md를 재생성한 뒤,
+    // NOTICE의 sharp/libvips 항목을 "제외됨"에서 실제 고지로 바꿔야 한다.
+    // remotePatterns는 그때를 위해 남겨둔다 (unoptimized일 때는 무시됨).
+    unoptimized: true,
     remotePatterns: imageDomains.map(({ protocol, hostname, port }) => ({
       protocol: protocol.replace(":", "") as "http" | "https",
       hostname,

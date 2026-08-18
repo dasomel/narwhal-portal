@@ -71,3 +71,53 @@ jobs:
             exit 1
           fi
           echo "standalone output present"
+
+      # next/image is unused and sharp is excluded from tracing so the image does
+      # not redistribute LGPL-licensed libvips (see NOTICE). Config alone does not
+      # do it — `images.unoptimized` leaves sharp in the trace — so the exclusion
+      # is asserted against the actual output rather than trusted.
+      - name: Assert libvips is not in the output
+        run: |
+          set -euo pipefail
+          found=$(find .next/standalone -ipath '*libvips*' -type f | head -5)
+          if [ -n "$found" ]; then
+            echo "::error::libvips (LGPL-3.0-or-later) is in the standalone output"
+            echo "$found"
+            exit 1
+          fi
+          echo "no libvips in output"
+
+  image:
+    name: Container image builds
+    runs-on: ubuntu-latest
+    # WHY THIS EXISTS: docker-publish.yml only runs on a v*.*.* tag, so a broken
+    # Dockerfile was first discovered at release time. The runner stage now copies
+    # LICENSE, NOTICE and THIRD-PARTY-NOTICES.md, and .dockerignore excludes *.md
+    # with a re-include for the last of those — exactly the kind of interaction
+    # that fails silently in review and loudly during a release.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build (no push)
+        run: docker build -t narwhal-portal:ci .
+
+      - name: Assert the license files are in the image
+        run: |
+          set -euo pipefail
+          for f in LICENSE NOTICE THIRD-PARTY-NOTICES.md; do
+            docker run --rm --entrypoint sh narwhal-portal:ci -c "[ -s /app/$f ]" \
+              || { echo "::error::/app/$f missing from the image"; exit 1; }
+            echo "/app/$f present"
+          done
+
+      - name: Assert libvips is not in the image
+        run: |
+          set -euo pipefail
+          hits=$(docker run --rm --entrypoint sh narwhal-portal:ci \
+            -c "find / -ipath '*libvips*' -type f 2>/dev/null | head -5")
+          if [ -n "$hits" ]; then
+            echo "::error::libvips (LGPL-3.0-or-later) is present in the published image"
+            echo "$hits"
+            exit 1
+          fi
+          echo "no libvips in the image"

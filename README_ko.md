@@ -2,6 +2,8 @@
 
 [English](README.md) | 한국어
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 **Narwhal Kubernetes Internal Developer Platform (IDP)** 클러스터용 관리 포탈(Next.js)입니다.
 형제 레포지토리인 `../narwhal`이 클러스터 자체(GitOps, SSO, 모니터링, 스토리지)를 프로비저닝하며,
 이 레포지토리는 운영자와 개발자가 클러스터를 관찰하고 운영하는 데 사용하는 웹 UI입니다.
@@ -112,3 +114,28 @@ npx shadcn@latest add {component}  # add a shadcn/ui component
 - [docs/security-clean-install.md](./docs/security-clean-install.md) — 클린 설치 시크릿 및
   보안 강화 체크리스트
 - `CLAUDE.md` — AI 지원 개발을 위한 아키텍처, 에이전트 하네스 및 컨벤션
+
+## 라이선스
+
+Apache License 2.0 — [LICENSE](LICENSE) 참고.
+
+이 레포지토리는 의존성을 vendoring 하지 않지만, 발행되는 컨테이너 이미지
+`ghcr.io/dasomel/narwhal-portal`는 프로덕션 npm 패키지를 **재배포**하므로 그 고지 의무를 그대로
+집니다. 아래 두 파일이 그 의무를 충족하며, 둘 다 이미지 안에 복사됩니다.
+
+| 파일 | 내용 |
+|---|---|
+| [`NOTICE`](NOTICE) | 사람이 읽는 요약 — 주요 구성 요소, 무엇이 어디로 재배포되는지, 상표 고지 |
+| [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) | 자동 생성 기록 — 프로덕션 의존성 전체의 라이선스 원문 |
+
+`THIRD-PARTY-NOTICES.md`는 생성물이므로 직접 편집하지 않습니다.
+
+```bash
+pnpm run notices    # 재생성. 커밋된 파일이 낡으면 CI가 실패시킨다
+```
+
+생성기가 필요한 이유는 `next build`가 라이선스 파일을 옮겨주지 않기 때문입니다. 파일 트레이싱이
+서버가 실제로 로드하는 것만 남기는 탓에, 1.0.17 빌드 기준 `node_modules`에 631개였던 `LICENSE`가
+`.next/standalone`에는 3개만 남았습니다. 또한 포털이 한 번도 호출하지 않는 이미지 최적화 때문에
+LGPL 라이선스인 libvips를 재배포하지 않도록, 이미지 최적화를 끄고 `sharp`를 트레이싱에서
+제외했습니다 — [`NOTICE`](NOTICE) 참고.

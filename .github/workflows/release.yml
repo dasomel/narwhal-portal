@@ -72,8 +72,29 @@ jobs:
           echo "--- release_notes.md ---"
           cat release_notes.md
 
+      # The SBOM rides with the release rather than being published separately.
+      # The image already carries an SPDX attestation from buildx, but that is
+      # only reachable with a registry client; a file on the release page is what
+      # someone auditing the tag can actually download. Generated here rather than
+      # in license-and-sbom.yml because a release must have exactly one creator —
+      # two workflows racing to create the same release is a flaky release.
+      - name: Dependency SBOM for this tag
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: sbom-cyclonedx.json
+
       - name: Create the GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           body_path: release_notes.md
           generate_release_notes: true
+          # Attribution and provenance travel with the artifact, not just with the
+          # repository — someone holding the tag should not have to clone to get them.
+          files: |
+            sbom-cyclonedx.json
+            THIRD-PARTY-NOTICES.md
+            NOTICE
+            LICENSE

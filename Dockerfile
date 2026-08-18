@@ -51,6 +51,14 @@ RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# 라이선스 고지 — 선택이 아니라 재배포 의무다.
+# MIT/BSD/ISC는 "all copies or substantial portions"에 저작권·허가 고지를 포함할 것을
+# 요구하고 Apache-2.0 §4(d)는 NOTICE 전파를 요구하는데, 이 이미지가 바로 그 copy다.
+# 그런데 Next의 파일 트레이싱은 런타임에 필요한 파일만 복사하면서 LICENSE를 걷어낸다
+# (1.0.17 빌드 기준 node_modules 631개 -> .next/standalone 3개). 그래서 빌드 산출물에
+# 기대지 않고 여기서 명시적으로 넣는다. THIRD-PARTY-NOTICES.md는 pnpm run notices로 생성.
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md ./
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000

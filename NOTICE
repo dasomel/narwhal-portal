@@ -1,0 +1,117 @@
+Narwhal IDP Portal
+Copyright 2025 dasomel
+
+Source: https://github.com/dasomel/narwhal-portal
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE) and
+redistributes third-party open source software.
+
+The per-package copyright and permission notices required by those licenses are
+reproduced in THIRD-PARTY-NOTICES.md, which is generated from the production
+dependency tree and is copied into the published container image at
+/app/THIRD-PARTY-NOTICES.md. This file is the human-readable summary; that one is
+the complete record.
+
+================================================================================
+What is redistributed, and where
+================================================================================
+
+Two artifacts leave this repository, and they carry different obligations.
+
+1. The source repository itself vendors no dependency. Cloning it and running
+   `pnpm install` fetches packages from the npm registry under their own terms.
+
+2. The container image ghcr.io/dasomel/narwhal-portal DOES redistribute them.
+   `next build` produces a standalone server that bundles its runtime
+   dependencies, and the Dockerfile copies that output into the image. Every
+   attribution obligation therefore attaches to the image.
+
+Next.js file tracing copies only the files the server needs, which strips
+LICENSE files out of the output — a build of 1.0.17 had 631 LICENSE files under
+node_modules and 3 under .next/standalone. THIRD-PARTY-NOTICES.md exists because
+the build cannot be relied on to carry them.
+
+================================================================================
+Principal components
+================================================================================
+
+Next.js
+  Source:    https://github.com/vercel/next.js
+  Copyright: Vercel, Inc.
+  License:   MIT
+
+React / React DOM
+  Source:    https://github.com/facebook/react
+  Copyright: Meta Platforms, Inc. and affiliates
+  License:   MIT
+
+Auth.js (next-auth, @auth/core)
+  Source:    https://github.com/nextauthjs/next-auth
+  Copyright: Balázs Orbán and contributors
+  License:   ISC
+  Note:      pinned to the 5.0 beta line; see SECURITY.md.
+
+Kubernetes JavaScript client (@kubernetes/client-node)
+  Source:    https://github.com/kubernetes-client/javascript
+  Copyright: The Kubernetes Authors
+  License:   Apache-2.0
+
+OpenTelemetry JS (@opentelemetry/*)
+  Source:    https://github.com/open-telemetry/opentelemetry-js
+  Copyright: The OpenTelemetry Authors
+  License:   Apache-2.0
+
+gRPC for Node (@grpc/grpc-js, @grpc/proto-loader)
+  Source:    https://github.com/grpc/grpc-node
+  Copyright: gRPC authors
+  License:   Apache-2.0
+
+shadcn/ui, Radix UI, Base UI, Tailwind CSS
+  Licenses:  MIT
+  Note:      shadcn/ui components are copied into src/components/ui rather than
+             installed, so they are part of this repository's source and are
+             covered by the MIT terms reproduced in THIRD-PARTY-NOTICES.md.
+
+Node.js base image (node:22-alpine)
+  Source:    https://github.com/nodejs/docker-node
+  License:   MIT (image definition); Node.js itself MIT; Alpine base packages
+             carry their own licenses, listed in the SPDX SBOM attached to each
+             published image.
+
+================================================================================
+Deliberately NOT redistributed
+================================================================================
+
+sharp / libvips (@img/sharp-libvips-*, LGPL-3.0-or-later)
+
+  Next.js pulls sharp into the standalone trace for its image optimizer. Its
+  native backend libvips is LGPL-3.0-or-later, which would attach relinking and
+  source-availability obligations to the image.
+
+  The portal imports next/image nowhere, so the optimizer was never used. Image
+  optimization is disabled and sharp is excluded from file tracing in
+  next.config.ts; a standalone server built with those settings boots and serves
+  routes with no module error. Verify a build with:
+
+      find .next/standalone -ipath '*libvips*' -type f     # expect: no output
+
+  If image optimization is ever enabled, sharp returns and this section must be
+  replaced by a real LGPL notice.
+
+================================================================================
+Trademarks
+================================================================================
+
+Kubernetes is a registered trademark of The Linux Foundation. Next.js and Vercel
+are trademarks of Vercel, Inc. Keycloak, Argo CD, Prometheus, Grafana, Harbor and
+OpenTelemetry are projects of their respective owners and, where applicable, of
+the Cloud Native Computing Foundation or the Linux Foundation. All trademarks are
+the property of their respective owners and are used here for identification only.
+This project is not affiliated with or endorsed by any of them.
+
+================================================================================
+Reporting a licensing problem
+================================================================================
+
+Open an issue at https://github.com/dasomel/narwhal-portal/issues. A missing or
+wrong attribution is a defect and is treated as one.

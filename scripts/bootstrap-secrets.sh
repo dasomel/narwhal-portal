@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2025 dasomel
 # bootstrap-secrets.sh — 클린 설치용 시크릿 초기화
 # 멱등성: 이미 존재하는 키는 덮어쓰지 않음. 새 키만 추가.
 # 사용법: bash scripts/bootstrap-secrets.sh
