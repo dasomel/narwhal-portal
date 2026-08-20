@@ -20,7 +20,10 @@ export function NamespaceForm() {
   const [name, setName] = useState("")
   const [team, setTeam] = useState("")
   const [validationError, setValidationError] = useState<string | null>(null)
-  const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null)
+  // prUrl rides along with the success message: a request that produced no link is
+  // indistinguishable from one that silently did nothing, and the reviewer needs
+  // somewhere to go.
+  const [feedback, setFeedback] = useState<{ ok: boolean; msg: string; prUrl?: string } | null>(null)
 
   const { data: namespaces = [], isLoading } = useQuery<Namespace[]>({
     queryKey: ["namespaces"],
@@ -37,11 +40,13 @@ export function NamespaceForm() {
         if (!r.ok) throw new Error(r.statusText)
         return r.json()
       }),
-    onSuccess: () => {
-      setFeedback({ ok: true, msg: t("ns.createOk") })
+    onSuccess: (data: { pullRequestUrl?: string }) => {
+      setFeedback({ ok: true, msg: t("ns.createOk"), prUrl: data?.pullRequestUrl })
       setName("")
       setTeam("")
-      queryClient.invalidateQueries({ queryKey: ["namespaces"] })
+      // Not invalidated: nothing exists yet. The namespace appears in the list after
+      // the pull request is merged and ArgoCD syncs it, which is minutes away and
+      // not something a refetch here can hurry.
     },
     onError: () => setFeedback({ ok: false, msg: t("ns.createError") }),
   })
@@ -104,6 +109,16 @@ export function NamespaceForm() {
               <Badge className={feedback.ok ? "bg-narwhal-success/15 text-narwhal-success" : "bg-narwhal-danger/15 text-narwhal-danger"}>
                 {feedback.msg}
               </Badge>
+            )}
+            {feedback?.prUrl && (
+              <a
+                href={feedback.prUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium text-blue-600 underline underline-offset-2 hover:text-blue-700"
+              >
+                {t("ns.createPr")}
+              </a>
             )}
           </div>
         </form>

@@ -316,7 +316,7 @@ const ko = {
 
   // namespace form
   "ns.title": "개발 네임스페이스",
-  "ns.create": "네임스페이스 생성",
+  "ns.create": "네임스페이스 요청",
   "ns.namePlaceholder": "dev-my-service",
   "ns.teamPlaceholder": "팀명 (선택)",
   "ns.nameLabel": "네임스페이스 이름",
@@ -325,8 +325,10 @@ const ko = {
   "ns.nameError": "dev-[소문자/숫자/-] 형식이어야 합니다",
   "ns.submit": "생성",
   "ns.creating": "생성 중...",
-  "ns.createOk": "네임스페이스가 생성되었습니다.",
-  "ns.createError": "생성 실패",
+  "ns.createOk": "요청이 열렸습니다. 승인되면 생성됩니다.",
+  "ns.createPr": "요청 보기",
+  "ns.createPending": "승인 대기 중",
+  "ns.createError": "요청 실패",
   "ns.existing": "기존 네임스페이스",
   "ns.empty": "네임스페이스 없음",
 
@@ -1415,7 +1417,7 @@ const en: Record<keyof typeof ko, string> = {
 
   // namespace form
   "ns.title": "Dev Namespaces",
-  "ns.create": "Create Namespace",
+  "ns.create": "Request Namespace",
   "ns.namePlaceholder": "dev-my-service",
   "ns.teamPlaceholder": "Team name (optional)",
   "ns.nameLabel": "Namespace Name",
@@ -1424,8 +1426,10 @@ const en: Record<keyof typeof ko, string> = {
   "ns.nameError": "Must match dev-[lowercase/digits/-] format",
   "ns.submit": "Create",
   "ns.creating": "Creating...",
-  "ns.createOk": "Namespace created.",
-  "ns.createError": "Creation failed",
+  "ns.createOk": "Request opened. The namespace is created once it is approved.",
+  "ns.createPr": "View request",
+  "ns.createPending": "Awaiting approval",
+  "ns.createError": "Request failed",
   "ns.existing": "Existing Namespaces",
   "ns.empty": "No namespaces",
 

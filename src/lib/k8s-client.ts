@@ -179,22 +179,13 @@ export async function getNamespaces(): Promise<NamespaceInfo[]> {
   }
 }
 
-export async function createNamespace(name: string, labels: Record<string, string> = {}): Promise<boolean> {
-  try {
-    assertK8sNamespace(name)
-    await k8sFetch("/api/v1/namespaces", {
-      method: "POST",
-      body: JSON.stringify({
-        apiVersion: "v1",
-        kind: "Namespace",
-        metadata: { name, labels: { ...labels, "managed-by": "idp-portal" } },
-      }),
-    })
-    return true
-  } catch {
-    return false
-  }
-}
+// createNamespace was removed with the switch to the pull-request flow.
+//
+// It POSTed to /api/v1/namespaces with the portal's ServiceAccount, which has
+// `namespaces: [get, list, watch]` — so it returned 403 in every deployed cluster and
+// the self-service form had never worked. Requests now go through Gitea
+// (src/lib/gitea.ts) and a reviewed merge. Do not reinstate this: the 403 is the
+// permission set behaving correctly, not a bug to widen around.
 
 // --- RBAC operations ---
 
