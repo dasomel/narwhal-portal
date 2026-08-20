@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoApps } from "@/lib/argocd"
 import { getAlerts } from "@/lib/alertmanager"
 import { cacheGet, cacheSet } from "@/lib/valkey"
-import { getVisibilityScope, namespaceMatchesScope } from "@/lib/role-filter"
+import { alertMatchesScope, appMatchesScope, getVisibilityScope, scopeFingerprint } from "@/lib/role-filter"
 import type { ArgoCDApp, HeroIncident, HeroAction, HeroMode, MascotState } from "@/types/api"
 import type { TimelineEvent } from "@/app/api/events/route"
 import type { MyAppsResponse, MyAppsAlert } from "@/types/my-apps"
@@ -13,15 +13,6 @@ export const dynamic = "force-dynamic"
 // ---------------------------------------------------------------------------
 // Simple hash for group list (cache key component)
 // ---------------------------------------------------------------------------
-
-function hashGroups(groups: string[]): string {
-  const sorted = [...groups].sort().join(",")
-  let h = 0
-  for (let i = 0; i < sorted.length; i++) {
-    h = (h * 31 + sorted.charCodeAt(i)) >>> 0
-  }
-  return h.toString(36)
-}
 
 // ---------------------------------------------------------------------------
 // Scoped hero builder — pure function, no external fetches
@@ -190,10 +181,7 @@ function buildScopedEvents(
   for (const app of rawApps) {
     const proj = app.spec.project ?? "default"
     const ns = app.spec.destination?.namespace ?? app.metadata.namespace ?? "default"
-    const inScope =
-      scope.argocdProjects.includes(proj) ||
-      namespaceMatchesScope(ns, scope.namespaces)
-    if (!inScope) continue
+    if (!appMatchesScope(proj, ns, scope)) continue
 
     for (const h of app.status.history ?? []) {
       events.push({
@@ -249,8 +237,7 @@ export async function GET(): Promise<NextResponse<MyAppsResponse | { error: stri
     "unknown"
   const sessionGroups: string[] = session.groups ?? []
   const sessionTeams: string[] = session.teams ?? []
-  const groupsHash = hashGroups([...sessionGroups, ...sessionTeams.map((t) => `team:${t}`)])
-  const cacheKey = `my-apps:${userSub}:${groupsHash}`
+  const cacheKey = `my-apps:${userSub}:${scopeFingerprint(sessionGroups, sessionTeams)}`
 
   // Try cache first
   const cached = await cacheGet<MyAppsResponse>(cacheKey)
@@ -295,10 +282,7 @@ export async function GET(): Promise<NextResponse<MyAppsResponse | { error: stri
       .filter((a) => {
         const proj = a.spec.project ?? "default"
         const ns = a.spec.destination?.namespace ?? a.metadata.namespace ?? "default"
-        return (
-          scope.argocdProjects.includes(proj) ||
-          namespaceMatchesScope(ns, scope.namespaces)
-        )
+        return appMatchesScope(proj, ns, scope)
       })
       .map((a) => ({
         name: a.metadata.name,
@@ -318,11 +302,7 @@ export async function GET(): Promise<NextResponse<MyAppsResponse | { error: stri
 
     // Filter alerts to scope namespaces
     const scopedAlerts: MyAppsAlert[] = rawAlerts
-      .filter((a) => {
-        const ns = a.labels.namespace ?? a.labels.exported_namespace ?? ""
-        // Include if no namespace label (cluster-wide) or namespace matches scope
-        return !ns || namespaceMatchesScope(ns, scope.namespaces)
-      })
+      .filter((a) => alertMatchesScope(a.labels, scope))
       .map((a) => ({
         labels: a.labels,
         annotations: a.annotations,

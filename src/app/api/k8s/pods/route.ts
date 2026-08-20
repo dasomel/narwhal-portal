@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { getPodsList, PodSummary } from "@/lib/k8s-client"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import { ValidationError, toValidationErrorBody } from "@/lib/validation"
+import { getVisibilityScope, namespaceMatchesScope } from "@/lib/role-filter"
 
 export const dynamic = "force-dynamic"
 
@@ -25,6 +26,19 @@ export async function GET(req: NextRequest) {
       { error: "ValidationError", message: "namespace is required", field: "namespace" },
       { status: 400 }
     )
+  }
+
+  // The namespace is a caller-supplied parameter, and nothing checked whether the
+  // caller may read it. Any session could name `iam`, `database` or
+  // `platform-system` and read what runs there — pod details carry images, nodes,
+  // env var names and container state. The namespace list itself is scoped now
+  // (/api/namespaces), so leaving this open would just mean guessing a name.
+  //
+  // The cache keys here are already namespace-scoped, so this is purely a missing
+  // authorization check, not a leak between callers.
+  const scope = getVisibilityScope(session.groups ?? [], session.teams ?? [])
+  if (!namespaceMatchesScope(namespace, scope.namespaces)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
   const cacheKey = `k8s:pods:${namespace}:${app ?? "all"}`

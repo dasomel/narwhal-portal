@@ -55,6 +55,60 @@ export function namespaceMatchesScope(namespace: string, patterns: string[]): bo
   return patterns.some((p) => matchesNamespacePattern(p, namespace))
 }
 
+export function projectMatchesScope(project: string, patterns: string[]): boolean {
+  return patterns.includes("*") || patterns.includes(project)
+}
+
+// One predicate for "may this caller see this ArgoCD application", so the routes
+// that answer it cannot drift apart. /api/my-apps, /api/catalog and /api/events all
+// decide the same question and used to each decide it in their own inline
+// expression — which is how /api/catalog ended up not deciding it at all.
+//
+// An app is visible when EITHER its project or its destination namespace is in
+// scope. Either alone is sufficient because the two mappings describe the same
+// tenancy from different directions: a team owns namespaces, and ArgoCD projects
+// are scoped to namespaces. Requiring both would hide an app from the team that
+// owns it whenever only one of the two was configured.
+// Alerts carry their namespace in a label, or carry none at all when they are
+// cluster-wide. A namespace-less alert is currently shown to everyone with any
+// scope — that is a deliberate fail-open, because node and control-plane alerts
+// have no namespace and hiding them from every scoped user would leave the
+// timeline blind to exactly the failures that matter most.
+//
+// It is also the weakest point in the scoping story, and it lives here rather than
+// inline in each route so the default-deny decision tracked on #12 can be made in
+// one place instead of three.
+export function alertMatchesScope(
+  labels: Record<string, string | undefined>,
+  scope: Pick<UserScope, "namespaces">,
+): boolean {
+  const ns = labels.namespace ?? labels.exported_namespace ?? ""
+  return !ns || namespaceMatchesScope(ns, scope.namespaces)
+}
+
+// Stable fingerprint of a caller's effective scope, for cache keys.
+//
+// A route that caches a SCOPED result must key on the scope, or the first caller's
+// view is served to everyone after them. /api/events cached its fully-rendered
+// timeline under the single key "events:timeline", which is that bug in the form
+// it takes when the filtering is added later and the cache is not revisited.
+export function scopeFingerprint(groups: string[], teams: string[]): string {
+  const sorted = [...groups, ...teams.map((t) => `team:${t}`)].sort().join(",")
+  let h = 0
+  for (let i = 0; i < sorted.length; i++) {
+    h = (h * 31 + sorted.charCodeAt(i)) >>> 0
+  }
+  return h.toString(36)
+}
+
+export function appMatchesScope(
+  project: string,
+  namespace: string,
+  scope: Pick<UserScope, "namespaces" | "argocdProjects">,
+): boolean {
+  return projectMatchesScope(project, scope.argocdProjects) || namespaceMatchesScope(namespace, scope.namespaces)
+}
+
 // STRICT authz scope (ArgoCD project authorization via argocd.ts).
 // Mapping-only; NO role defaults. Behavior is unchanged from the original getUserScope
 // except the config key was renamed groupMappings -> teamMappings (legacy still read).

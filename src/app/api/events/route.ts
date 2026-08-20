@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoApps } from "@/lib/argocd"
 import { getAlerts } from "@/lib/alertmanager"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { alertMatchesScope, appMatchesScope, getVisibilityScope, scopeFingerprint } from "@/lib/role-filter"
 
 export const dynamic = "force-dynamic"
 
@@ -35,8 +36,17 @@ export async function GET(request: Request) {
     sinceDate = parsed
   }
 
-  // Only use cache when no filter is applied
-  const cacheKey = "events:timeline"
+  // The timeline was assembled from EVERY ArgoCD application and EVERY alert, and
+  // handed to anyone with a session. Deploy history names services, revisions and
+  // when they last changed; alerts name what is failing and where. Both are scoped
+  // in /api/my-apps already, so this route was the way around that.
+  const scope = getVisibilityScope(session.groups ?? [], session.teams ?? [])
+
+  // The cache key has to carry the scope. It was the single literal
+  // "events:timeline" holding a fully-rendered result, so once filtering exists,
+  // whoever warmed the cache would be serving their view to everyone behind them —
+  // a narrower defect than no filtering at all, and a much harder one to notice.
+  const cacheKey = `events:timeline:${scopeFingerprint(session.groups ?? [], session.teams ?? [])}`
   if (!sinceDate) {
     const cached = await cacheGet<TimelineEvent[]>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -49,6 +59,13 @@ export async function GET(request: Request) {
 
     // ArgoCD deploy history
     for (const app of apps) {
+      const inScope = appMatchesScope(
+        app.spec.project ?? "default",
+        app.spec.destination?.namespace ?? app.metadata.namespace ?? "default",
+        scope,
+      )
+      if (!inScope) continue
+
       for (const h of app.status.history ?? []) {
         events.push({
           id: `deploy-${app.metadata.name}-${h.id}`,
@@ -75,15 +92,17 @@ export async function GET(request: Request) {
     }
 
     // Alertmanager alerts
-    alerts.forEach((alert, idx) => {
-      events.push({
-        id: `alert-${alert.labels.alertname}-${alert.startsAt}-${idx}`,
-        type: "alert",
-        title: alert.labels.alertname ?? "Alert",
-        description: alert.annotations.summary ?? alert.annotations.description ?? "",
-        timestamp: alert.startsAt,
-        severity: alert.labels.severity === "critical" ? "error" : "warning",
-      })
+    alerts
+      .filter((alert) => alertMatchesScope(alert.labels, scope))
+      .forEach((alert, idx) => {
+        events.push({
+          id: `alert-${alert.labels.alertname}-${alert.startsAt}-${idx}`,
+          type: "alert",
+          title: alert.labels.alertname ?? "Alert",
+          description: alert.annotations.summary ?? alert.annotations.description ?? "",
+          timestamp: alert.startsAt,
+          severity: alert.labels.severity === "critical" ? "error" : "warning",
+        })
     })
 
     // Sort descending by timestamp
