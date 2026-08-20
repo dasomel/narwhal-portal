@@ -67,8 +67,12 @@ const noteFor = (name) => PACKAGE_NOTES.find((n) => n.match.test(name))?.note
 // land quietly as one more row in a 600-line table.
 const ACCEPTED = new Map([
   [
+    // Unreachable in practice now: @img/sharp-libvips-* is platform-gated, so it is
+    // excluded before the license is ever counted. Kept so that a NON-platform-gated
+    // LGPL dependency arriving later is recognised as reviewed rather than novel —
+    // and so the reason survives if the platform-gated rule is ever relaxed.
     "LGPL-3.0-or-later",
-    "sharp/libvips only; excluded from the image via next.config.ts — see NOTICE",
+    "sharp/libvips only; not redistributed — excluded from the image via next.config.ts, see NOTICE",
   ],
   ["CC-BY-4.0", "caniuse-lite data tables; attribution-only, satisfied by this file"],
   ["MIT AND ISC", "victory-vendor; both halves permissive"],
@@ -76,6 +80,45 @@ const ACCEPTED = new Map([
 ])
 
 const STRICT = process.argv.includes("--strict")
+
+// Platform-gated packages: those npm installs only on a matching OS/CPU/libc.
+// Including them would make this file depend on WHERE it was generated — the CI check
+// then fails on every run for a macOS author and vice versa. It did, on the first run.
+//
+// The set comes from the LOCKFILE'S OWN `os` / `cpu` / `libc` constraints, not from a
+// name pattern. A name rule looks sufficient — @img/sharp-linux-x64, @next/swc-darwin-arm64
+// — and then misses `fsevents`, which is macOS-only and named like anything else. pnpm
+// already records the real answer; ask it instead of guessing at the naming convention.
+//
+// They are excluded rather than normalized because they are genuinely not redistributed:
+// `next build` ships no native binary at all. Verified against the output, and asserted
+// in build-check.yml so the claim cannot rot:
+//
+//     find .next/standalone -name '*.node' -type f     # expect: no output
+
+/** Package names the lockfile marks as OS/CPU/libc specific. */
+function platformGatedNames() {
+  let lock
+  try {
+    lock = readFileSync("pnpm-lock.yaml", "utf8")
+  } catch {
+    return new Set()
+  }
+  const names = new Set()
+  let current = null
+  for (const line of lock.split("\n")) {
+    const pkg = /^\s{2}'?((?:@[^/'@\s]+\/)?[^'@\s]+)@[^:']+'?:/.exec(line)
+    if (pkg) {
+      current = pkg[1]
+      continue
+    }
+    if (current && /^\s+(os|cpu|libc):/.test(line)) {
+      names.add(current)
+      current = null
+    }
+  }
+  return names
+}
 
 const LICENSE_FILE = /^(LICEN[CS]E|COPYING|LICENCE)(\.|$)/i
 const NOTICE_FILE = /^NOTICE(\.|$)/i
@@ -126,6 +169,11 @@ for (const [license, entries] of Object.entries(JSON.parse(raw))) {
     }
   }
 }
+const gated = platformGatedNames()
+const platformGated = pkgs.filter((p) => gated.has(p.name)).map((p) => p.name)
+for (let i = pkgs.length - 1; i >= 0; i--) {
+  if (gated.has(pkgs[i].name)) pkgs.splice(i, 1)
+}
 pkgs.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
 
 const byLicense = new Map()
@@ -151,6 +199,7 @@ md.push("```")
 md.push("")
 md.push(`Scope: production dependencies only (\`pnpm licenses list --prod\`) — ${pkgs.length} packages.`)
 md.push("Development-only tooling is not redistributed and is therefore out of scope.")
+md.push(`Platform-gated native packages are excluded and listed separately (${platformGated.length} skipped here).`)
 md.push("")
 md.push(
   "This is a **superset** of what any single image ships. Platform-specific optional binaries",
@@ -158,6 +207,30 @@ md.push(
   "never loads. Over-attribution is harmless; under-attribution is not, so the list is not pruned.",
 )
 md.push("")
+const lockPlatform = [...gated].sort()
+if (lockPlatform.length) {
+  md.push("## Excluded: platform-gated native packages")
+  md.push("")
+  md.push(
+    "npm installs only the variant matching the build host, so listing whichever one is",
+    "present would make this document depend on where it was generated. They are excluded",
+    "because they are not redistributed either: `next build` ships no native binary — CI",
+    "asserts `find .next/standalone -name '*.node' -type f` is empty on every dependency",
+    "change. Membership is the lockfile's own `os` / `cpu` / `libc` constraint rather than a",
+    "name pattern, so the list is identical on every platform and catches packages a naming",
+    "rule misses — `fsevents` is macOS-only and named like any other package. It therefore",
+    "also covers dev-only build tooling that was never in scope for attribution.",
+  )
+  md.push("")
+  for (const name of lockPlatform) md.push(`- \`${name}\``)
+  md.push("")
+  md.push(
+    "If a native binary ever does ship, build-check.yml fails and this exclusion must be",
+    "revisited — starting with `@img/sharp-libvips-*`, which is LGPL-3.0-or-later.",
+  )
+  md.push("")
+}
+
 md.push("## License summary")
 md.push("")
 md.push("| License | Packages |")

@@ -87,6 +87,21 @@ jobs:
           fi
           echo "no libvips in output"
 
+      # THIRD-PARTY-NOTICES.md excludes platform-gated native packages — @img/sharp-*,
+      # @next/swc-* and friends — on the grounds that the build ships no native binary.
+      # That is a claim about the output, so the output is what checks it. Without this,
+      # a future change could start shipping one and the notices would silently omit it.
+      - name: Assert no native binary ships
+        run: |
+          set -euo pipefail
+          found=$(find .next/standalone -name '*.node' -type f | head -5)
+          if [ -n "$found" ]; then
+            echo "::error::a native binary is in the standalone output; THIRD-PARTY-NOTICES.md excludes platform-gated packages and would now be incomplete"
+            echo "$found"
+            exit 1
+          fi
+          echo "no native binaries in output"
+
   image:
     name: Container image builds
     runs-on: ubuntu-latest
