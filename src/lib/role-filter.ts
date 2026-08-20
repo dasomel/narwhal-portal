@@ -1,5 +1,6 @@
 import { readFileSync } from "fs"
 import { join } from "path"
+import { createHash } from "node:crypto"
 
 interface TeamMapping {
   group: string
@@ -89,16 +90,27 @@ export function alertMatchesScope(
 // Stable fingerprint of a caller's effective scope, for cache keys.
 //
 // A route that caches a SCOPED result must key on the scope, or the first caller's
-// view is served to everyone after them. /api/events cached its fully-rendered
-// timeline under the single key "events:timeline", which is that bug in the form
-// it takes when the filtering is added later and the cache is not revisited.
+// view is served to everyone behind them. /api/events cached its fully-rendered
+// timeline under the single key "events:timeline", which is that bug in the form it
+// takes when the filtering is added later and the cache is not revisited.
+//
+// TWO THINGS THIS GETS RIGHT that the version it replaces did not — it was lifted
+// from a private hashGroups in /api/my-apps, where it keyed a per-user cache and the
+// stakes were lower:
+//
+//  1. It is SHA-256, not a 32-bit rolling hash. A 32-bit digest collides by birthday
+//     at a few tens of thousands of distinct scopes, and a collision here hands one
+//     tenant another tenant's cached timeline. The hash is not a security primitive
+//     on its own, but the consequence of a collision is a cross-tenant read, so the
+//     cost of a real digest is worth paying.
+//  2. The two lists are separated structurally, not by a prefix. The old form
+//     flattened teams as `team:<name>` into one sorted list, so a GROUP literally
+//     named "team:platform" produced the same digest as membership in the TEAM
+//     "platform" — verified, not hypothetical. JSON-encoding two sorted arrays
+//     cannot express one as the other.
 export function scopeFingerprint(groups: string[], teams: string[]): string {
-  const sorted = [...groups, ...teams.map((t) => `team:${t}`)].sort().join(",")
-  let h = 0
-  for (let i = 0; i < sorted.length; i++) {
-    h = (h * 31 + sorted.charCodeAt(i)) >>> 0
-  }
-  return h.toString(36)
+  const canonical = JSON.stringify([[...groups].sort(), [...teams].sort()])
+  return createHash("sha256").update(canonical).digest("hex").slice(0, 32)
 }
 
 export function appMatchesScope(

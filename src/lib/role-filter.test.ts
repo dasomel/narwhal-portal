@@ -42,4 +42,17 @@ describe("scopeFingerprint", () => {
     expect(scopeFingerprint(["developer"], ["platform-team"])).not.toBe(scopeFingerprint(["developer"], ["frontend-team"])))
   it("does not confuse a group with a team of the same name", () =>
     expect(scopeFingerprint(["platform-team"], [])).not.toBe(scopeFingerprint([], ["platform-team"])))
+
+  // Regression: the previous implementation flattened teams into one sorted list as
+  // `team:<name>`, so a group literally called "team:platform" hashed identically to
+  // membership in the team "platform" — a cross-tenant cache hit. Verified colliding
+  // before the fix.
+  it("does not confuse a group named 'team:x' with membership in team x", () =>
+    expect(scopeFingerprint(["team:platform"], [])).not.toBe(scopeFingerprint([], ["platform"])))
+
+  it("does not let a comma in a name forge another scope", () =>
+    expect(scopeFingerprint(["a,b"], [])).not.toBe(scopeFingerprint(["a", "b"], [])))
+
+  it("is a sha256 prefix, not a 32-bit rolling hash", () =>
+    expect(scopeFingerprint(["developer"], [])).toMatch(/^[0-9a-f]{32}$/))
 })
