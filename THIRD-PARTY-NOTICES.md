@@ -11,7 +11,7 @@ reproduced below as those licenses require. The portal's own code is Apache-2.0;
 pnpm run notices
 ```
 
-Scope: production dependencies only (`pnpm licenses list --prod`) — 655 packages.
+Scope: production dependencies only (`pnpm licenses list --prod`) — 653 packages.
 Development-only tooling is not redistributed and is therefore out of scope.
 Platform-gated native packages are excluded and listed separately (72 in the lockfile).
 
@@ -63,6 +63,7 @@ also covers dev-only build tooling that was never in scope for attribution.
 - `@next/swc-linux-x64-musl`
 - `@next/swc-win32-arm64-msvc`
 - `@next/swc-win32-x64-msvc`
+- `@rolldown/binding-android-arm-eabi`
 - `@rolldown/binding-android-arm64`
 - `@rolldown/binding-darwin-arm64`
 - `@rolldown/binding-darwin-x64`
@@ -75,7 +76,6 @@ also covers dev-only build tooling that was never in scope for attribution.
 - `@rolldown/binding-linux-x64-gnu`
 - `@rolldown/binding-linux-x64-musl`
 - `@rolldown/binding-openharmony-arm64`
-- `@rolldown/binding-wasm32-wasi`
 - `@rolldown/binding-win32-arm64-msvc`
 - `@rolldown/binding-win32-x64-msvc`
 - `@tailwindcss/oxide-android-arm64`
@@ -110,7 +110,7 @@ revisited — starting with `@img/sharp-libvips-*`, which is LGPL-3.0-or-later.
 
 | License | Packages |
 |---|---:|
-| MIT | 478 |
+| MIT | 476 |
 | Apache-2.0 | 107 |
 | ISC | 48 |
 | BSD-3-Clause | 9 |
@@ -1191,7 +1191,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
-### @base-ui/react@1.3.0
+### @base-ui/react@1.7.0
 
 - License: `MIT`
 - Author: MUI Team
@@ -1200,7 +1200,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 <details><summary>LICENSE</summary>
 
 ```
-The MIT License (MIT)
+MIT License
 
 Copyright (c) 2019 Material-UI SAS
 
@@ -1225,15 +1225,16 @@ SOFTWARE.
 
 </details>
 
-### @base-ui/utils@0.2.6
+### @base-ui/utils@0.3.2
 
 - License: `MIT`
+- Author: MUI Team
 - Homepage: https://github.com/mui/base-ui#readme
 
 <details><summary>LICENSE</summary>
 
 ```
-The MIT License (MIT)
+MIT License
 
 Copyright (c) 2019 Material-UI SAS
 
@@ -1333,7 +1334,7 @@ SOFTWARE.
 
 </details>
 
-### @floating-ui/core@1.7.5
+### @floating-ui/core@1.8.0
 
 - License: `MIT`
 - Author: atomiks
@@ -1366,7 +1367,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
-### @floating-ui/dom@1.7.6
+### @floating-ui/dom@1.8.0
 
 - License: `MIT`
 - Author: atomiks
@@ -1399,7 +1400,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
-### @floating-ui/react-dom@2.1.8
+### @floating-ui/react-dom@2.1.9
 
 - License: `MIT`
 - Author: atomiks
@@ -1432,7 +1433,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
-### @floating-ui/utils@0.2.11
+### @floating-ui/utils@0.2.12
 
 - License: `MIT`
 - Author: atomiks
@@ -2761,7 +2762,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 </details>
 
-### @next/env@16.3.0
+### @next/env@16.3.1
 
 - License: `MIT`
 - Author: Next.js Team
@@ -19547,7 +19548,7 @@ SOFTWARE.
 
 </details>
 
-### @playwright/test@1.58.2
+### @playwright/test@1.62.1
 
 - License: `Apache-2.0`
 - Author: Microsoft Corporation
@@ -20601,7 +20602,7 @@ SOFTWARE.
 
 </details>
 
-### @swc/helpers@0.5.15
+### @swc/helpers@0.5.23
 
 - License: `Apache-2.0`
 - Author: 강동윤
@@ -22204,7 +22205,7 @@ MIT License
 
 </details>
 
-### @types/node@22.19.18
+### @types/node@22.20.1
 
 - License: `MIT`
 - Homepage: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node
@@ -22402,7 +22403,7 @@ MIT License
 
 </details>
 
-### @types/react@19.2.14
+### @types/react@19.2.18
 
 - License: `MIT`
 - Homepage: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react
@@ -22435,7 +22436,7 @@ MIT License
 
 </details>
 
-### @types/react-dom@19.2.3
+### @types/react-dom@19.2.4
 
 - License: `MIT`
 - Homepage: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react-dom
@@ -31302,41 +31303,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 _No license file shipped with the package; the SPDX identifier above is its declaration._
 
-### immer@10.2.0
-
-- License: `MIT`
-- Author: Michel Weststrate
-- Homepage: https://github.com/immerjs/immer#readme
-
-<details><summary>LICENSE</summary>
-
-```
-MIT License
-
-Copyright (c) 2017 Michel Weststrate
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-</details>
-
-### immer@11.1.4
+### immer@11.1.18
 
 - License: `MIT`
 - Author: Michel Weststrate
@@ -34116,7 +34083,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
-### next@16.3.0
+### next@16.3.1
 
 - License: `MIT`
 - Homepage: https://nextjs.org
@@ -35108,7 +35075,7 @@ SOFTWARE.
 
 </details>
 
-### playwright@1.58.2
+### playwright@1.62.1
 
 - License: `Apache-2.0`
 - Author: Microsoft Corporation
@@ -35335,7 +35302,7 @@ available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/b
 
 </details>
 
-### playwright-core@1.58.2
+### playwright-core@1.62.1
 
 - License: `Apache-2.0`
 - Author: Microsoft Corporation
@@ -36244,7 +36211,7 @@ THE SOFTWARE.
 
 </details>
 
-### react@19.2.4
+### react@19.2.8
 
 - License: `MIT`
 - Homepage: https://react.dev/
@@ -36277,7 +36244,7 @@ SOFTWARE.
 
 </details>
 
-### react-dom@19.2.4
+### react-dom@19.2.8
 
 - License: `MIT`
 - Homepage: https://react.dev/
@@ -36519,7 +36486,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
-### recharts@3.8.1
+### recharts@3.10.1
 
 - License: `MIT`
 - Author: recharts group
@@ -36793,7 +36760,7 @@ SOFTWARE.
 
 </details>
 
-### reselect@5.1.1
+### reselect@5.2.0
 
 - License: `MIT`
 - Homepage: https://github.com/reduxjs/reselect#readme
@@ -38335,40 +38302,6 @@ SOFTWARE.
 
 </details>
 
-### tabbable@6.4.0
-
-- License: `MIT`
-- Author: David Clark
-- Homepage: https://github.com/focus-trap/tabbable#readme
-
-<details><summary>LICENSE</summary>
-
-```
-The MIT License (MIT)
-
-Copyright (c) 2015 David Clark
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-</details>
-
 ### tagged-tag@1.0.0
 
 - License: `MIT`
@@ -39098,7 +39031,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
-### typescript@6.0.2
+### typescript@6.0.3
 
 - License: `Apache-2.0`
 - Author: Microsoft Corp.
