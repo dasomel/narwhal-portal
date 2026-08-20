@@ -13,7 +13,7 @@ pnpm run notices
 
 Scope: production dependencies only (`pnpm licenses list --prod`) — 655 packages.
 Development-only tooling is not redistributed and is therefore out of scope.
-Platform-gated native packages are excluded and listed separately (4 skipped here).
+Platform-gated native packages are excluded and listed separately (72 in the lockfile).
 
 This is a **superset** of what any single image ships. Platform-specific optional binaries
 resolve for the build host's architecture, and Next.js file tracing drops packages the server

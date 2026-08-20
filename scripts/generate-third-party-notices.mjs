@@ -199,7 +199,11 @@ md.push("```")
 md.push("")
 md.push(`Scope: production dependencies only (\`pnpm licenses list --prod\`) — ${pkgs.length} packages.`)
 md.push("Development-only tooling is not redistributed and is therefore out of scope.")
-md.push(`Platform-gated native packages are excluded and listed separately (${platformGated.length} skipped here).`)
+// Count from the lockfile, never from what is installed. `platformGated.length` is
+// how many gated packages this HOST resolved — 3 on macOS, 5 on Linux — and putting
+// that in the document reintroduces exactly the platform dependence this section
+// exists to remove. It cost one more red CI run to notice.
+md.push(`Platform-gated native packages are excluded and listed separately (${gated.size} in the lockfile).`)
 md.push("")
 md.push(
   "This is a **superset** of what any single image ships. Platform-specific optional binaries",
