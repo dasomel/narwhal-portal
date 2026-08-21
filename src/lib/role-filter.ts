@@ -185,6 +185,61 @@ export function appMatchesScope(
 // STRICT authz scope (ArgoCD project authorization via argocd.ts).
 // Mapping-only; NO role defaults. Behavior is unchanged from the original getUserScope
 // except the config key was renamed groupMappings -> teamMappings (legacy still read).
+/** What the configuration knows about, for the diagnostic surface. */
+export interface ConfiguredMappings {
+  teams: string[]
+  roleDefaults: Record<string, RoleDefault>
+}
+
+export function configuredMappings(): ConfiguredMappings {
+  const config = loadConfig()
+  return {
+    teams: teamMappingsOf(config).map((m) => m.group),
+    roleDefaults: config.roleDefaults ?? {},
+  }
+}
+
+export interface ClaimDiagnosis {
+  /** Group claims that matched a portal RBAC role. */
+  roles: string[]
+  /** Non-role claims that a team mapping recognises. */
+  mappedTeams: string[]
+  /**
+   * Non-role claims nothing recognises — no RBAC role, no team mapping, and no
+   * namespace carrying them as an owner label.
+   *
+   * These are the failure this exists to surface. A Keycloak group named
+   * `cluster-admins` (plural, a typo) is dropped by the RBAC allowlist, kept as a
+   * "team", matched by no mapping, and the user silently lands on guest seeing an
+   * empty portal. Nothing anywhere said the claim was unrecognised, so the symptom
+   * reads as "the portal is broken" rather than "the group name is wrong".
+   */
+  unmappedClaims: string[]
+  /** True when no role claim arrived at all and the session fell back to guest. */
+  fellBackToGuest: boolean
+}
+
+const PORTAL_ROLES = ["cluster-admin", "developer", "viewer", "guest"]
+
+export function diagnoseClaims(
+  groups: string[],
+  teams: string[],
+  namespaces: LabelledNamespace[] = [],
+): ClaimDiagnosis {
+  const { teams: configuredTeams } = configuredMappings()
+  const owners = new Set(
+    namespaces.map((n) => n.labels?.[TEAM_LABEL]).filter((v): v is string => Boolean(v)),
+  )
+  const roles = groups.filter((g) => PORTAL_ROLES.includes(g) && g !== "guest")
+  const mappedTeams = teams.filter((t) => configuredTeams.includes(t) || owners.has(t))
+  return {
+    roles,
+    mappedTeams,
+    unmappedClaims: teams.filter((t) => !configuredTeams.includes(t) && !owners.has(t)),
+    fellBackToGuest: roles.length === 0,
+  }
+}
+
 export function getUserScope(groups: string[]): UserScope & { hasMapping: boolean } {
   const config = loadConfig()
   const matchedGroups: string[] = []

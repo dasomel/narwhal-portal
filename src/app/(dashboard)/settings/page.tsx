@@ -5,6 +5,7 @@ import { UsersTable } from "@/components/settings/users-table"
 import { RoutesTable } from "@/components/settings/routes-table"
 import { CertsTable } from "@/components/settings/certs-table"
 import { PoliciesTable } from "@/components/settings/policies-table"
+import { EffectivePermissions } from "@/components/settings/effective-permissions"
 import { GroupsTable } from "@/components/settings/groups-table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { t } from "@/lib/i18n"
@@ -75,12 +76,14 @@ export default async function SettingsPage() {
           <TabsTrigger value="groups">{t(locale, "settings.tabGroups")}</TabsTrigger>
           <TabsTrigger value="certs">{t(locale, "settings.tabCerts")}</TabsTrigger>
           <TabsTrigger value="policies">{t(locale, "settings.tabPolicies")}</TabsTrigger>
+          <TabsTrigger value="permissions">{t(locale, "settings.tabPermissions")}</TabsTrigger>
         </TabsList>
         <TabsContent value="routes" className="mt-4"><RoutesTable /></TabsContent>
         <TabsContent value="users" className="mt-4"><UsersTable /></TabsContent>
         <TabsContent value="groups" className="mt-4"><GroupsTable /></TabsContent>
         <TabsContent value="certs" className="mt-4"><CertsTable /></TabsContent>
         <TabsContent value="policies" className="mt-4"><PoliciesTable /></TabsContent>
+        <TabsContent value="permissions" className="mt-4"><EffectivePermissions /></TabsContent>
       </Tabs>
     </div>
   )

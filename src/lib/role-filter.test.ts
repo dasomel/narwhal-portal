@@ -8,6 +8,7 @@ import {
   resolveNamespaceScope,
   scopeFingerprint,
   TEAM_LABEL,
+  diagnoseClaims,
   type LabelledNamespace,
 } from "./role-filter"
 
@@ -120,4 +121,38 @@ describe("resolveNamespaceScope", () => {
     expect(r.all).toBe(false)
     expect(r.names.size).toBe(0)
   })
+})
+
+// The failure this surfaces: a Keycloak group named `cluster-admins` is dropped by the
+// RBAC allowlist, kept as a "team", matched by no mapping, and the session lands on
+// guest — with nothing anywhere saying the claim was unrecognised.
+describe("diagnoseClaims", () => {
+  const owned = [ns("dev-a", "team-a")]
+
+  it("a typo'd role claim is reported, not silently dropped", () => {
+    const d = diagnoseClaims(["guest"], ["cluster-admins"], owned)
+    expect(d.unmappedClaims).toEqual(["cluster-admins"])
+    expect(d.fellBackToGuest).toBe(true)
+  })
+
+  it("a team that owns a namespace by label counts as mapped, with no config entry", () => {
+    const d = diagnoseClaims(["developer"], ["team-a"], owned)
+    expect(d.mappedTeams).toEqual(["team-a"])
+    expect(d.unmappedClaims).toEqual([])
+    expect(d.fellBackToGuest).toBe(false)
+  })
+
+  it("a team configured in role-filter.json counts as mapped", () => {
+    const d = diagnoseClaims(["developer"], ["platform-team"], [])
+    expect(d.mappedTeams).toEqual(["platform-team"])
+    expect(d.unmappedClaims).toEqual([])
+  })
+
+  // guest is a real role but not one that grants anything; treating it as "has a role"
+  // would report the fallback state as healthy, which is exactly what hides the bug.
+  it("guest alone still counts as the fallback", () =>
+    expect(diagnoseClaims(["guest"], [], []).fellBackToGuest).toBe(true))
+
+  it("a real role claim is not the fallback", () =>
+    expect(diagnoseClaims(["viewer"], [], []).fellBackToGuest).toBe(false))
 })
