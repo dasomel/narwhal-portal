@@ -1,0 +1,81 @@
+#!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2025 dasomel
+//
+// Asserts the build-time dependency trust boundary is still in place.
+//
+// Every control here is one line in a config file, which is exactly why it needs a
+// check: `pnpm approve-builds` appends to onlyBuiltDependencies, a new workflow copies
+// an install step without --frozen-lockfile, someone deletes .npmrc while cleaning up.
+// None of those look like a security change in review.
+
+import { readFileSync, readdirSync } from "node:fs"
+import { join } from "node:path"
+
+const problems = []
+const read = (p) => {
+  try {
+    return readFileSync(p, "utf8")
+  } catch {
+    return null
+  }
+}
+
+// 1. No dependency may run an install script.
+const ws = read("pnpm-workspace.yaml")
+if (ws === null) {
+  problems.push("pnpm-workspace.yaml is missing — the build-script policy lives there")
+} else {
+  if (!/^onlyBuiltDependencies:\s*\[\]\s*$/m.test(ws)) {
+    problems.push(
+      "pnpm-workspace.yaml: onlyBuiltDependencies must be an explicit empty list.\n" +
+        "    A non-empty allowlist means some package runs code at install time; if that is\n" +
+        "    intended, say so here and in the issue, do not just let approve-builds write it.",
+    )
+  }
+  const age = /^minimumReleaseAge:\s*(\d+)\s*$/m.exec(ws)
+  if (!age) {
+    problems.push("pnpm-workspace.yaml: minimumReleaseAge (cooling window, minutes) is not set")
+  } else if (Number(age[1]) < 4320) {
+    problems.push(`pnpm-workspace.yaml: minimumReleaseAge is ${age[1]} minutes, below the 3-day floor`)
+  }
+}
+
+// 2. The lockfile is authoritative even when a flag is forgotten.
+//    In pnpm-workspace.yaml rather than .npmrc: npm does not know the key and warns on
+//    every npx invocation that it "will stop working", which trains people to ignore
+//    warnings.
+if (ws !== null && !/^frozenLockfile:\s*true\s*$/m.test(ws)) {
+  problems.push("pnpm-workspace.yaml: frozenLockfile: true is missing")
+}
+
+// 3. Every install in CI and in the image is frozen. A bun install must additionally
+//    pass --ignore-scripts, because bun does not block them the way pnpm 10 does.
+const installers = /(pnpm|npm|bun)\s+(install|ci|add)\b[^\n]*/g
+for (const file of [
+  ...readdirSync(".github/workflows").map((f) => join(".github/workflows", f)),
+  "Dockerfile",
+  "Dockerfile.dev",
+]) {
+  const body = read(file)
+  if (!body) continue
+  for (const line of body.match(installers) ?? []) {
+    if (/\bnpm\s+(install|add)\b/.test(line) && !/--frozen-lockfile|npm\s+ci\b/.test(line)) {
+      problems.push(`${file}: unpinned install — ${line.trim()}`)
+      continue
+    }
+    if (/\b(pnpm|bun)\s+install\b/.test(line) && !line.includes("--frozen-lockfile")) {
+      problems.push(`${file}: install without --frozen-lockfile — ${line.trim()}`)
+    }
+    if (/\bbun\s+install\b/.test(line) && !line.includes("--ignore-scripts")) {
+      problems.push(`${file}: bun install without --ignore-scripts — ${line.trim()}`)
+    }
+  }
+}
+
+if (problems.length) {
+  console.error("supply-chain policy violations:\n")
+  for (const p of problems) console.error(`  - ${p}`)
+  process.exit(1)
+}
+console.error("supply-chain policy intact")

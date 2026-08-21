@@ -1,3 +1,39 @@
+# Install-time and build-time dependencies are executable inputs, not just data.
+#
+# A dependency's install script runs with the privileges of whoever ran `pnpm install`
+# — a developer's laptop, or a CI job holding a registry token. It runs whether or not
+# application code ever imports the package, and a transitive dependency is enough.
+# That is the shape of the Rust incident #66 references, and npm has the same shape.
+
+# NOTHING may run an install script. pnpm 10 already defaults to blocking them, but a
+# default is not a policy: it can change between majors, and `pnpm approve-builds`
+# writes exceptions into this same file. An explicit empty allowlist states the intent,
+# so adding an exception is a visible diff someone has to justify rather than a config
+# drift nobody notices.
+onlyBuiltDependencies: []
+
+# Kept for the record: these two ASK to run build scripts and are denied. sharp is
+# excluded from the image entirely (next.config.ts), and unrs-resolver is dev tooling.
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
+
+# Cooling window, in minutes: 7 days. A version published less than this ago is not
+# resolvable, so the window where a compromised release is newest — which is when it
+# gets pulled in and when it gets yanked — is one this project sits out.
+#
+# It applies at RESOLUTION time. `--frozen-lockfile` installs an already-pinned graph
+# and is unaffected, so CI and the container build do not slow down or fail; what it
+# constrains is `pnpm add` and `pnpm update`, which is exactly where a new version
+# enters.
+minimumReleaseAge: 10080
+
+# The lockfile is authoritative even when the flag is forgotten. It is passed
+# everywhere today, but a flag has to be remembered and a config does not — a new
+# workflow that copies an install step without it would silently resolve fresh
+# versions and rewrite the graph CI reviewed.
+#
+# Set here rather than in .npmrc: npm does not know this key and warns on every `npx`
+# invocation that it "will stop working", which is noise that trains people to ignore
+# warnings. pnpm reads its own config from this file.
+frozenLockfile: true

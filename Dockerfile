@@ -29,8 +29,14 @@ FROM base AS deps
 WORKDIR /app
 COPY --from=bun-source /usr/local/bin/bun /usr/local/bin/bun
 COPY package.json bun.lock* pnpm-lock.yaml* ./
+# --ignore-scripts on the bun path is not optional. pnpm 10 blocks dependency install
+# scripts by default and pnpm-workspace.yaml pins that with an empty
+# onlyBuiltDependencies; bun does NOT, so the two branches would apply different trust
+# policies to the same dependency graph. There is no bun.lock in the repo today, which
+# makes this the dangerous kind of gap: nothing exercises the branch, so nothing would
+# notice when someone adds one.
 RUN if [ -f bun.lock ]; then \
-      echo "==> bun install" && bun install --frozen-lockfile; \
+      echo "==> bun install" && bun install --frozen-lockfile --ignore-scripts; \
     else \
       echo "==> pnpm install (fallback)" && pnpm install --frozen-lockfile; \
     fi

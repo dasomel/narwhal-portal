@@ -33,6 +33,13 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Do not adopt a version on the day it is published. A compromised release is at
+    # its most dangerous while it is the newest one — that is when it gets pulled in,
+    # and it is usually yanked within days. pnpm-workspace.yaml sets the same window
+    # at resolution time (minimumReleaseAge); this stops Dependabot from opening the
+    # PR in the first place, so the two agree instead of one of them losing.
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     versioning-strategy: increase
     commit-message:

@@ -18,6 +18,9 @@ on:
     paths:
       - "package.json"
       - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "Dockerfile"
+      - "scripts/check-supply-chain-policy.mjs"
       - "THIRD-PARTY-NOTICES.md"
       - "NOTICE"
       - "LICENSE"
@@ -27,6 +30,9 @@ on:
     paths:
       - "package.json"
       - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "Dockerfile"
+      - "scripts/check-supply-chain-policy.mjs"
       - "THIRD-PARTY-NOTICES.md"
       - "NOTICE"
       - "LICENSE"
@@ -60,6 +66,12 @@ jobs:
 
       # --strict fails on a license that is neither permissive nor listed in the
       # generator's ACCEPTED map. Widening PERMISSIVE to silence it defeats the check.
+      # Runs before the notices, because a broken trust boundary makes the
+      # attribution question moot: if a dependency can execute at install time, what
+      # it is licensed under is not the pressing problem.
+      - name: Supply-chain policy
+        run: node scripts/check-supply-chain-policy.mjs
+
       - name: Regenerate notices
         run: node scripts/generate-third-party-notices.mjs --strict
 
