@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth"
 import { getPodsList, PodSummary } from "@/lib/k8s-client"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import { ValidationError, toValidationErrorBody, assertK8sNamespace } from "@/lib/validation"
-import { getVisibilityScope, namespaceMatchesScope } from "@/lib/role-filter"
+import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
 
@@ -53,8 +53,8 @@ export async function GET(req: NextRequest) {
     throw err
   }
 
-  const scope = getVisibilityScope(session.groups ?? [], session.teams ?? [])
-  if (!namespaceMatchesScope(namespace, scope.namespaces)) {
+  const scope = await getEffectiveScope(session)
+  if (!namespaceVisible(namespace, scope)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

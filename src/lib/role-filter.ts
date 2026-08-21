@@ -52,6 +52,67 @@ function matchesNamespacePattern(pattern: string, namespace: string): boolean {
   return pattern === namespace
 }
 
+// The label a Namespace carries to say who owns it. This is the source of truth for
+// tenancy: the portal reads it here, the cluster reads it in the RoleBinding that a
+// tenant file ships (see narwhal resources/tenants/), and the portal writes it when it
+// opens a namespace request. One fact on the governed object, rather than a list in a
+// config file that drifts from the cluster it describes.
+export const TEAM_LABEL = "narwhal.io/team"
+
+export interface LabelledNamespace {
+  name: string
+  labels: Record<string, string>
+}
+
+export function namespaceOwnedBy(ns: LabelledNamespace, teams: string[]): boolean {
+  const owner = ns.labels?.[TEAM_LABEL]
+  return Boolean(owner) && teams.includes(owner)
+}
+
+export interface ResolvedNamespaceScope {
+  /** Every namespace, present and future — cluster-admin, or a roleDefault of ["*"]. */
+  all: boolean
+  names: Set<string>
+  /** How each name got in, for the "why can I see this" question. */
+  byLabel: Set<string>
+  byPattern: Set<string>
+}
+
+/**
+ * Turns a scope into the concrete namespaces a caller may see.
+ *
+ * Takes the namespace list as an argument rather than fetching it, so this stays pure
+ * and testable and role-filter.ts keeps its zero dependencies on the Kubernetes client.
+ * Callers already hold the list — getNamespaces() is cached — so this costs nothing.
+ *
+ * BOTH sources count, deliberately. Label ownership is where this is going, but every
+ * namespace that predates the tenant flow carries no narwhal.io/team label, and a pure
+ * label model would show existing team members nothing on the day it shipped. The
+ * config patterns stay as the migration path and can be emptied per team once its
+ * namespaces are labelled — at which point this function keeps working unchanged.
+ */
+export function resolveNamespaceScope(
+  namespaces: LabelledNamespace[],
+  scope: Pick<UserScope, "namespaces">,
+  teams: string[],
+): ResolvedNamespaceScope {
+  if (scope.namespaces.includes("*")) {
+    return {
+      all: true,
+      names: new Set(namespaces.map((n) => n.name)),
+      byLabel: new Set(),
+      byPattern: new Set(namespaces.map((n) => n.name)),
+    }
+  }
+  const byLabel = new Set<string>()
+  const byPattern = new Set<string>()
+  for (const ns of namespaces) {
+    if (namespaceOwnedBy(ns, teams)) byLabel.add(ns.name)
+    else if (namespaceMatchesScope(ns.name, scope.namespaces)) byPattern.add(ns.name)
+  }
+  return { all: false, names: new Set([...byLabel, ...byPattern]), byLabel, byPattern }
+}
+
 export function namespaceMatchesScope(namespace: string, patterns: string[]): boolean {
   return patterns.some((p) => matchesNamespacePattern(p, namespace))
 }

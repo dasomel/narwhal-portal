@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { getArgoApps, appToCatalogService } from "@/lib/argocd"
-import { appMatchesScope, getVisibilityScope } from "@/lib/role-filter"
+import { appVisible, getEffectiveScope } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
 
@@ -15,13 +15,13 @@ export async function GET() {
   // routes answered the same question and only one of them asked who was asking.
   //
   // Same predicate as my-apps now, from role-filter.ts, so they cannot drift again.
-  const scope = getVisibilityScope(session.groups ?? [], session.teams ?? [])
+  const scope = await getEffectiveScope(session)
 
   try {
     const apps = await getArgoApps()
     const services = apps
       .filter((a) =>
-        appMatchesScope(
+        appVisible(
           a.spec.project ?? "default",
           a.spec.destination?.namespace ?? a.metadata.namespace ?? "default",
           scope,

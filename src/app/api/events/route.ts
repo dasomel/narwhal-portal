@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoApps } from "@/lib/argocd"
 import { getAlerts } from "@/lib/alertmanager"
 import { cacheGet, cacheSet } from "@/lib/valkey"
-import { alertMatchesScope, appMatchesScope, getVisibilityScope, scopeFingerprint } from "@/lib/role-filter"
+import { alertVisible, appVisible, getEffectiveScope } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
 
@@ -40,13 +40,13 @@ export async function GET(request: Request) {
   // handed to anyone with a session. Deploy history names services, revisions and
   // when they last changed; alerts name what is failing and where. Both are scoped
   // in /api/my-apps already, so this route was the way around that.
-  const scope = getVisibilityScope(session.groups ?? [], session.teams ?? [])
+  const scope = await getEffectiveScope(session)
 
   // The cache key has to carry the scope. It was the single literal
   // "events:timeline" holding a fully-rendered result, so once filtering exists,
   // whoever warmed the cache would be serving their view to everyone behind them —
   // a narrower defect than no filtering at all, and a much harder one to notice.
-  const cacheKey = `events:timeline:${scopeFingerprint(session.groups ?? [], session.teams ?? [])}`
+  const cacheKey = `events:timeline:${scope.fingerprint}`
   if (!sinceDate) {
     const cached = await cacheGet<TimelineEvent[]>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
 
     // ArgoCD deploy history
     for (const app of apps) {
-      const inScope = appMatchesScope(
+      const inScope = appVisible(
         app.spec.project ?? "default",
         app.spec.destination?.namespace ?? app.metadata.namespace ?? "default",
         scope,
@@ -93,7 +93,7 @@ export async function GET(request: Request) {
 
     // Alertmanager alerts
     alerts
-      .filter((alert) => alertMatchesScope(alert.labels, scope))
+      .filter((alert) => alertVisible(alert.labels, scope))
       .forEach((alert, idx) => {
         events.push({
           id: `alert-${alert.labels.alertname}-${alert.startsAt}-${idx}`,

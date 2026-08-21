@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { alertMatchesScope, appMatchesScope, namespaceMatchesScope, projectMatchesScope, scopeFingerprint } from "./role-filter"
+import {
+  alertMatchesScope,
+  appMatchesScope,
+  namespaceMatchesScope,
+  namespaceOwnedBy,
+  projectMatchesScope,
+  resolveNamespaceScope,
+  scopeFingerprint,
+  TEAM_LABEL,
+  type LabelledNamespace,
+} from "./role-filter"
 
 const admin = { namespaces: ["*"], argocdProjects: ["*"] }
 const team = { namespaces: ["platform-*", "monitoring"], argocdProjects: ["platform"] }
@@ -55,4 +65,59 @@ describe("scopeFingerprint", () => {
 
   it("is a sha256 prefix, not a 32-bit rolling hash", () =>
     expect(scopeFingerprint(["developer"], [])).toMatch(/^[0-9a-f]{32}$/))
+})
+
+const ns = (name: string, team?: string): LabelledNamespace => ({
+  name,
+  labels: team ? { [TEAM_LABEL]: team } : {},
+})
+
+describe("namespaceOwnedBy", () => {
+  it("matches on the team label", () => expect(namespaceOwnedBy(ns("dev-a", "team-a"), ["team-a"])).toBe(true))
+  it("rejects another team's namespace", () => expect(namespaceOwnedBy(ns("dev-a", "team-b"), ["team-a"])).toBe(false))
+  it("an unlabelled namespace is owned by nobody", () => expect(namespaceOwnedBy(ns("iam"), ["team-a"])).toBe(false))
+  // An empty label must not be treated as "owned by the team with an empty name".
+  it("an empty label is not ownership", () =>
+    expect(namespaceOwnedBy({ name: "x", labels: { [TEAM_LABEL]: "" } }, [""])).toBe(false))
+})
+
+describe("resolveNamespaceScope", () => {
+  const all = [ns("dev-a", "team-a"), ns("dev-b", "team-b"), ns("iam"), ns("legacy-a")]
+
+  it('["*"] resolves to every namespace', () => {
+    const r = resolveNamespaceScope(all, { namespaces: ["*"] }, [])
+    expect(r.all).toBe(true)
+    expect(r.names.size).toBe(4)
+  })
+
+  it("a team sees the namespaces its label owns, and nothing else", () => {
+    const r = resolveNamespaceScope(all, { namespaces: [] }, ["team-a"])
+    expect([...r.names]).toEqual(["dev-a"])
+    expect([...r.byLabel]).toEqual(["dev-a"])
+    expect(r.byPattern.size).toBe(0)
+  })
+
+  // The migration path: namespaces created before the tenant flow carry no label, so
+  // the config patterns still resolve them. Dropping this would empty every existing
+  // team's view on the day the label model shipped.
+  it("config patterns still resolve unlabelled namespaces", () => {
+    const r = resolveNamespaceScope(all, { namespaces: ["legacy-*"] }, ["team-a"])
+    expect([...r.names].sort()).toEqual(["dev-a", "legacy-a"])
+    expect([...r.byLabel]).toEqual(["dev-a"])
+    expect([...r.byPattern]).toEqual(["legacy-a"])
+  })
+
+  it("a pattern does not grant another team's labelled namespace by accident", () => {
+    const r = resolveNamespaceScope(all, { namespaces: ["dev-*"] }, ["team-a"])
+    // dev-b matches the pattern, so it is in scope — the pattern is an explicit grant.
+    // What matters is that the label attribution stays truthful about why.
+    expect(r.byLabel.has("dev-b")).toBe(false)
+    expect(r.byPattern.has("dev-b")).toBe(true)
+  })
+
+  it("no teams and no patterns resolves to nothing", () => {
+    const r = resolveNamespaceScope(all, { namespaces: [] }, [])
+    expect(r.all).toBe(false)
+    expect(r.names.size).toBe(0)
+  })
 })

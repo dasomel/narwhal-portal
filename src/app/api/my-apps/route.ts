@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoApps } from "@/lib/argocd"
 import { getAlerts } from "@/lib/alertmanager"
 import { cacheGet, cacheSet } from "@/lib/valkey"
-import { alertMatchesScope, appMatchesScope, getVisibilityScope, scopeFingerprint } from "@/lib/role-filter"
+import { alertVisible, appVisible, getEffectiveScope, type EffectiveScope } from "@/lib/scope"
 import type { ArgoCDApp, HeroIncident, HeroAction, HeroMode, MascotState } from "@/types/api"
 import type { TimelineEvent } from "@/app/api/events/route"
 import type { MyAppsResponse, MyAppsAlert } from "@/types/my-apps"
@@ -174,14 +174,14 @@ function appToIncident(app: ArgoCDApp, severity: "warning" | "critical"): HeroIn
 function buildScopedEvents(
   rawApps: Awaited<ReturnType<typeof getArgoApps>>,
   alerts: MyAppsAlert[],
-  scope: { namespaces: string[]; argocdProjects: string[] }
+  scope: EffectiveScope
 ): TimelineEvent[] {
   const events: TimelineEvent[] = []
 
   for (const app of rawApps) {
     const proj = app.spec.project ?? "default"
     const ns = app.spec.destination?.namespace ?? app.metadata.namespace ?? "default"
-    if (!appMatchesScope(proj, ns, scope)) continue
+    if (!appVisible(proj, ns, scope)) continue
 
     for (const h of app.status.history ?? []) {
       events.push({
@@ -237,26 +237,33 @@ export async function GET(): Promise<NextResponse<MyAppsResponse | { error: stri
     "unknown"
   const sessionGroups: string[] = session.groups ?? []
   const sessionTeams: string[] = session.teams ?? []
-  const cacheKey = `my-apps:${userSub}:${scopeFingerprint(sessionGroups, sessionTeams)}`
+  const scope = await getEffectiveScope({ groups: sessionGroups, teams: sessionTeams })
+  const cacheKey = `my-apps:${userSub}:${scope.fingerprint}`
 
   // Try cache first
   const cached = await cacheGet<MyAppsResponse>(cacheKey)
   if (cached) return NextResponse.json(cached)
 
-  // Resolve scope
-  const scopeResult = getVisibilityScope(sessionGroups, sessionTeams)
-  const scope = {
-    groups: scopeResult.groups,
-    namespaces: scopeResult.namespaces,
-    argocdProjects: scopeResult.argocdProjects,
-    hasMapping: scopeResult.hasMapping,
+  // What the client gets. namespaces is now the RESOLVED list rather than the config
+  // patterns — concrete names are what a "why can I see this" question needs, and a
+  // Set does not survive JSON.
+  //
+  // hasMapping means "has any scope at all", not "has a config entry". Under the label
+  // model a team can own namespaces through narwhal.io/team while having no entry in
+  // role-filter.json, and keying the early return on the config alone would have shown
+  // those users an empty page while their namespaces sat right there.
+  const responseScope = {
+    groups: sessionGroups,
+    namespaces: [...scope.namespaces].sort(),
+    argocdProjects: scope.argocdProjects,
+    hasMapping: scope.hasMapping,
   }
 
   // Empty scope — return minimal response immediately
-  if (!scope.hasMapping) {
+  if (!responseScope.hasMapping) {
     const emptyHero = buildScopedHero([], [])
     const response: MyAppsResponse = {
-      scope,
+      scope: responseScope,
       scopedApps: [],
       scopedAlerts: [],
       scopedEvents: [],
@@ -282,7 +289,7 @@ export async function GET(): Promise<NextResponse<MyAppsResponse | { error: stri
       .filter((a) => {
         const proj = a.spec.project ?? "default"
         const ns = a.spec.destination?.namespace ?? a.metadata.namespace ?? "default"
-        return appMatchesScope(proj, ns, scope)
+        return appVisible(proj, ns, scope)
       })
       .map((a) => ({
         name: a.metadata.name,
@@ -302,7 +309,7 @@ export async function GET(): Promise<NextResponse<MyAppsResponse | { error: stri
 
     // Filter alerts to scope namespaces
     const scopedAlerts: MyAppsAlert[] = rawAlerts
-      .filter((a) => alertMatchesScope(a.labels, scope))
+      .filter((a) => alertVisible(a.labels, scope))
       .map((a) => ({
         labels: a.labels,
         annotations: a.annotations,
@@ -316,7 +323,7 @@ export async function GET(): Promise<NextResponse<MyAppsResponse | { error: stri
     const hero = buildScopedHero(scopedApps, scopedAlerts)
 
     const response: MyAppsResponse = {
-      scope,
+      scope: responseScope,
       scopedApps,
       scopedAlerts,
       scopedEvents,

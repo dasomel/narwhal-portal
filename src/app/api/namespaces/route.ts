@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { getNamespaces } from "@/lib/k8s-client"
 import { GiteaError, giteaConfigured, requestTenantNamespace } from "@/lib/gitea"
-import { getVisibilityScope, namespaceMatchesScope } from "@/lib/role-filter"
+import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
 
@@ -18,9 +18,12 @@ export async function GET() {
   // getNamespaces() is cached under one global key on purpose. The cache holds the
   // UPSTREAM answer and the filter runs per request, so callers never share a
   // filtered result. Caching post-filter would be the bug this shape avoids.
-  const scope = getVisibilityScope(session.groups ?? [], session.teams ?? [])
+  // Ownership now comes from the namespace's own narwhal.io/team label, with the
+  // config patterns still honoured for namespaces that predate the tenant flow —
+  // see resolveNamespaceScope. A caller sees a namespace when their team owns it.
+  const scope = await getEffectiveScope(session)
   const namespaces = await getNamespaces()
-  return NextResponse.json(namespaces.filter((ns) => namespaceMatchesScope(ns.name, scope.namespaces)))
+  return NextResponse.json(namespaces.filter((ns) => namespaceVisible(ns.name, scope)))
 }
 
 export async function POST(req: Request) {

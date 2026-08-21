@@ -1,10 +1,10 @@
 import { auth } from "@/lib/auth"
 import { getRecentEvents, subscribeLive } from "@/lib/live-stream"
-import { getVisibilityScope, namespaceMatchesScope } from "@/lib/role-filter"
+import { getEffectiveScope, namespaceVisible, type EffectiveScope } from "@/lib/scope"
 import type { LiveEvent } from "@/types/live"
 import type { UserRole } from "@/lib/auth"
 
-type Scope = ReturnType<typeof getVisibilityScope>
+type Scope = EffectiveScope
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -31,7 +31,7 @@ function isFiltered(event: LiveEvent, role: UserRole, scope: Scope): boolean {
   if (ns === null) return false
 
   if (!scope.hasMapping) return true
-  return !namespaceMatchesScope(ns, scope.namespaces)
+  return !namespaceVisible(ns, scope)
 }
 
 function formatSSE(event: LiveEvent): string {
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
   const role: UserRole = session.user.role ?? "guest"
   const groups: string[] = session.groups ?? []
   const teams: string[] = session.teams ?? []
-  const scope = getVisibilityScope(groups, teams)
+  const scope = await getEffectiveScope({ groups, teams })
   const lastEventId = request.headers.get("Last-Event-ID") ?? null
 
   const stream = new ReadableStream({
