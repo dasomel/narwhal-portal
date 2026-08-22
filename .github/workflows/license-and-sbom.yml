@@ -21,6 +21,7 @@ on:
       - "pnpm-workspace.yaml"
       - "Dockerfile"
       - "scripts/check-supply-chain-policy.mjs"
+      - "scripts/check-lockfile-cooling.mjs"
       - "THIRD-PARTY-NOTICES.md"
       - "NOTICE"
       - "LICENSE"
@@ -33,6 +34,7 @@ on:
       - "pnpm-workspace.yaml"
       - "Dockerfile"
       - "scripts/check-supply-chain-policy.mjs"
+      - "scripts/check-lockfile-cooling.mjs"
       - "THIRD-PARTY-NOTICES.md"
       - "NOTICE"
       - "LICENSE"
@@ -96,6 +98,36 @@ jobs:
           grep -q '^!THIRD-PARTY-NOTICES.md' .dockerignore \
             || { echo "::error::.dockerignore excludes *.md without re-including THIRD-PARTY-NOTICES.md"; exit 1; }
           echo "license files present and reachable from the build context"
+
+  cooling:
+    name: New lockfile entries have matured
+    runs-on: ubuntu-latest
+    steps:
+      # The check compares the lockfile against its state at the base of the change, so
+      # the default depth-1 checkout is not enough — there would be nothing to diff.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # No install: the script reads the two lockfiles through git and asks the registry
+      # when each new version was published. Nothing from node_modules is involved, which
+      # is deliberate — this gate has to be able to run on a lockfile it refuses to install.
+      - name: Cooling window on the lockfile delta
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          base="$BASE_SHA"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base=$(git rev-parse --verify HEAD~1 2>/dev/null || true)
+          fi
+          if [ -z "$base" ]; then
+            echo "no base commit to compare against, nothing to gate"
+            exit 0
+          fi
+          echo "base: $base"
+          node scripts/check-lockfile-cooling.mjs "$base"
 
   sbom:
     name: Dependency SBOM

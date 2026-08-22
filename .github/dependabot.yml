@@ -35,9 +35,11 @@ updates:
       interval: weekly
     # Do not adopt a version on the day it is published. A compromised release is at
     # its most dangerous while it is the newest one — that is when it gets pulled in,
-    # and it is usually yanked within days. pnpm-workspace.yaml sets the same window
-    # at resolution time (minimumReleaseAge); this stops Dependabot from opening the
-    # PR in the first place, so the two agree instead of one of them losing.
+    # and it is usually yanked within days. This stops the PR from being opened;
+    # scripts/check-lockfile-cooling.mjs is the backstop that checks what the lockfile
+    # delta actually contains, including transitive versions Dependabot never named.
+    # The window is deliberately NOT enforced through pnpm's minimumReleaseAge — that
+    # gates the whole graph at resolution time and made every update here fail.
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5

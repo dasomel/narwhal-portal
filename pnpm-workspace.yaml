@@ -18,15 +18,19 @@ ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
 
-# Cooling window, in minutes: 7 days. A version published less than this ago is not
-# resolvable, so the window where a compromised release is newest — which is when it
-# gets pulled in and when it gets yanked — is one this project sits out.
+# The cooling window is NOT set here, deliberately. pnpm's `minimumReleaseAge` applies to
+# the whole graph at resolution time, not to the versions a change actually introduces, so
+# one young transitive dependency blocks every lockfile operation until it matures:
 #
-# It applies at RESOLUTION time. `--frozen-lockfile` installs an already-pinned graph
-# and is unaffected, so CI and the container build do not slow down or fail; what it
-# constrains is `pnpm add` and `pnpm update`, which is exactly where a new version
-# enters.
-minimumReleaseAge: 10080
+#   ERR_PNPM_NO_MATURE_MATCHING_VERSION  Version 1.2.5 (released 3 days ago) of rolldown
+#   does not meet the minimumReleaseAge constraint
+#   This error happened while installing the dependencies of vite@8.2.1
+#
+# rolldown was already in this lockfile and already reviewed; pnpm still refused. With it
+# set, every Dependabot update failed — including the security ones, which is the opposite
+# of the intent. `scripts/check-lockfile-cooling.mjs` enforces the same 7 days on the
+# lockfile delta instead: a version that is new to the graph must have matured, one that is
+# already in it re-resolves freely.
 
 # The lockfile is authoritative even when the flag is forgotten. It is passed
 # everywhere today, but a flag has to be remembered and a config does not — a new

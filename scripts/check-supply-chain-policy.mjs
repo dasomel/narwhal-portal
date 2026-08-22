@@ -33,11 +33,37 @@ if (ws === null) {
         "    intended, say so here and in the issue, do not just let approve-builds write it.",
     )
   }
-  const age = /^minimumReleaseAge:\s*(\d+)\s*$/m.exec(ws)
-  if (!age) {
-    problems.push("pnpm-workspace.yaml: minimumReleaseAge (cooling window, minutes) is not set")
-  } else if (Number(age[1]) < 4320) {
-    problems.push(`pnpm-workspace.yaml: minimumReleaseAge is ${age[1]} minutes, below the 3-day floor`)
+  // The cooling window must NOT be set here. pnpm applies minimumReleaseAge to the whole
+  // graph at resolution time, so one young transitive dependency blocks every lockfile
+  // operation — with it set, every Dependabot update failed, security ones included. The
+  // window is enforced on the lockfile delta instead; re-adding this key silently
+  // re-breaks dependency updates and looks like a hardening change while doing it.
+  if (/^minimumReleaseAge:\s*\d+\s*$/m.test(ws)) {
+    problems.push(
+      "pnpm-workspace.yaml: minimumReleaseAge is set again.\n" +
+        "    It gates resolution of the whole graph, not the versions a change introduces, so it\n" +
+        "    blocks every dependency update until the youngest package already in the lockfile\n" +
+        "    matures. scripts/check-lockfile-cooling.mjs enforces the same window on the delta.",
+    )
+  }
+}
+
+// 1b. ...and the delta gate that replaced it is still there and still runs in CI.
+const cooling = read("scripts/check-lockfile-cooling.mjs")
+if (cooling === null) {
+  problems.push("scripts/check-lockfile-cooling.mjs is missing — nothing enforces the cooling window")
+} else {
+  const days = /^const COOLING_DAYS = [^\n]*?: (\d+)\s*$/m.exec(cooling)
+  if (!days) {
+    problems.push("scripts/check-lockfile-cooling.mjs: cannot read the default COOLING_DAYS")
+  } else if (Number(days[1]) < 3) {
+    problems.push(`scripts/check-lockfile-cooling.mjs: cooling window is ${days[1]} days, below the 3-day floor`)
+  }
+  const wiredIn = readdirSync(".github/workflows")
+    .map((f) => read(join(".github/workflows", f)) ?? "")
+    .some((body) => body.includes("check-lockfile-cooling.mjs"))
+  if (!wiredIn) {
+    problems.push("no workflow runs scripts/check-lockfile-cooling.mjs — the gate exists but never fires")
   }
 }
 
