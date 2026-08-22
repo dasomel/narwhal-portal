@@ -48,6 +48,19 @@ if (ws === null) {
   }
 }
 
+// 1a. Dependabot's own `cooldown` reaches pnpm as the same graph-wide flag
+//     (`--config.minimumReleaseAge=10080`), so setting it there re-breaks every update
+//     exactly the way setting it in pnpm-workspace.yaml did. It reads as a hardening
+//     change, which is why it needs a check rather than a comment.
+const dependabot = read(".github/dependabot.yml")
+if (dependabot !== null && /^\s*cooldown:/m.test(dependabot)) {
+  problems.push(
+    ".github/dependabot.yml: cooldown is set.\n" +
+      "    Dependabot passes it to pnpm as --config.minimumReleaseAge, which fails on transitive\n" +
+      "    packages already in the lockfile. scripts/check-lockfile-cooling.mjs gates the PR instead.",
+  )
+}
+
 // 1b. ...and the delta gate that replaced it is still there and still runs in CI.
 const cooling = read("scripts/check-lockfile-cooling.mjs")
 if (cooling === null) {

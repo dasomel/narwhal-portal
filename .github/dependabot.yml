@@ -33,15 +33,22 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    # Do not adopt a version on the day it is published. A compromised release is at
-    # its most dangerous while it is the newest one — that is when it gets pulled in,
-    # and it is usually yanked within days. This stops the PR from being opened;
-    # scripts/check-lockfile-cooling.mjs is the backstop that checks what the lockfile
-    # delta actually contains, including transitive versions Dependabot never named.
-    # The window is deliberately NOT enforced through pnpm's minimumReleaseAge — that
-    # gates the whole graph at resolution time and made every update here fail.
-    cooldown:
-      default-days: 7
+    # `cooldown` is deliberately NOT set here. Dependabot implements it for pnpm by
+    # appending `--config.minimumReleaseAge=10080` to the update command, which is the
+    # same graph-wide constraint that pnpm-workspace.yaml explains — so it fails on a
+    # transitive package that is already in the lockfile and has nothing to do with the
+    # update being attempted:
+    #
+    #   corepack pnpm update @opentelemetry/sdk-node@0.221.0 --lockfile-only --no-save -r
+    #     --config.minimumReleaseAge=10080
+    #   ERR_PNPM_NO_MATURE_MATCHING_VERSION  Version 1.2.5 (released 3 days ago) of
+    #   rolldown does not meet the minimumReleaseAge constraint
+    #
+    # Every one of the 13 dependencies failed that way, security updates included, so
+    # the setting cost more than it bought. The window is enforced instead by
+    # scripts/check-lockfile-cooling.mjs, which runs on the PR and fails it if the
+    # lockfile delta introduces a version younger than seven days — including the
+    # transitive ones Dependabot never names in the title.
     open-pull-requests-limit: 5
     versioning-strategy: increase
     commit-message:
