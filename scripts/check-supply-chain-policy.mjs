@@ -80,12 +80,16 @@ if (cooling === null) {
   }
 }
 
-// 2. The lockfile is authoritative even when a flag is forgotten.
-//    In pnpm-workspace.yaml rather than .npmrc: npm does not know the key and warns on
-//    every npx invocation that it "will stop working", which trains people to ignore
-//    warnings.
-if (ws !== null && !/^frozenLockfile:\s*true\s*$/m.test(ws)) {
-  problems.push("pnpm-workspace.yaml: frozenLockfile: true is missing")
+// 2. frozenLockfile must NOT be a config either. It applies to every install, including
+//    the one whose purpose is to rewrite the lockfile, so Dependabot fails on its own
+//    package.json edit with ERR_PNPM_OUTDATED_LOCKFILE. Check 3 below is the control
+//    that matters: it reads the actual install lines.
+if (ws !== null && /^frozenLockfile:\s*true\s*$/m.test(ws)) {
+  problems.push(
+    "pnpm-workspace.yaml: frozenLockfile: true is set.\n" +
+      "    It also blocks the deliberate lockfile regeneration a dependency bump needs.\n" +
+      "    The install lines carry --frozen-lockfile instead, which check 3 enforces.",
+  )
 }
 
 // 3. Every install in CI and in the image is frozen. A bun install must additionally

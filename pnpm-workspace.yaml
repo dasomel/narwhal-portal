@@ -32,12 +32,19 @@ ignoredBuiltDependencies:
 # lockfile delta instead: a version that is new to the graph must have matured, one that is
 # already in it re-resolves freely.
 
-# The lockfile is authoritative even when the flag is forgotten. It is passed
-# everywhere today, but a flag has to be remembered and a config does not — a new
-# workflow that copies an install step without it would silently resolve fresh
-# versions and rewrite the graph CI reviewed.
+# `frozenLockfile` is NOT set here either, for the same class of reason as above: it
+# applies to every install, including the ones whose whole purpose is to rewrite the
+# lockfile. Dependabot bumps package.json and then regenerates the lockfile, so it fails
+# on its own edit:
 #
-# Set here rather than in .npmrc: npm does not know this key and warns on every `npx`
-# invocation that it "will stop working", which is noise that trains people to ignore
-# warnings. pnpm reads its own config from this file.
-frozenLockfile: true
+#   corepack pnpm install --lockfile-only
+#   ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with "frozen-lockfile" because
+#   pnpm-lock.yaml is not up to date with package.json
+#     - @tanstack/react-query (lockfile: ^5.95.2, manifest: ^5.101.4)
+#
+# What actually needs guaranteeing is that no INSTALL in CI or in the image resolves
+# fresh versions, and `scripts/check-supply-chain-policy.mjs` asserts exactly that by
+# reading every install line in .github/workflows/ and the Dockerfiles. A missing
+# `--frozen-lockfile` fails the check at review time, which is earlier and more legible
+# than failing at run time — and it does not also break the one install that is supposed
+# to change the lockfile.
