@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth"
 import { getNamespaces } from "@/lib/k8s-client"
 import { GiteaError, giteaConfigured, requestTenantNamespace } from "@/lib/gitea"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
+import { resolveNamespaceOwner } from "@/lib/namespace-ownership"
+import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 
 export const dynamic = "force-dynamic"
 
@@ -42,26 +44,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Self-service namespaces must start with 'dev-'" }, { status: 400 })
   }
 
-  // The team label is an ownership claim, and ownership is what every downstream
-  // scope check reads. Taking it from the request body unverified let a developer
-  // stamp a new namespace as belonging to a team they are not in — and then, via
-  // the team mappings, see and act on it as that team. A caller may only claim a
-  // team they actually hold; cluster-admin may set any.
   const teams: string[] = session.teams ?? []
   const requested = typeof body.team === "string" ? body.team : null
-  if (requested && session.user.role !== "cluster-admin" && !teams.includes(requested)) {
-    return NextResponse.json(
-      { error: `Cannot create a namespace owned by '${requested}': you are not a member of that team` },
-      { status: 403 },
-    )
+  const ownerVerdict = resolveNamespaceOwner(session.user.role, teams, requested)
+  if (!ownerVerdict.ok) {
+    return NextResponse.json({ error: ownerVerdict.message }, { status: ownerVerdict.status })
   }
-  const team = requested ?? teams[0]
-  if (!team) {
-    return NextResponse.json(
-      { error: "No team to own this namespace: you are not a member of any team" },
-      { status: 400 },
-    )
-  }
+  const team = ownerVerdict.team
 
   // This opens a PULL REQUEST; it does not create the namespace.
   //
@@ -78,12 +67,27 @@ export async function POST(req: Request) {
     )
   }
 
+  const ctx = await beginOperation({
+    request: req,
+    session,
+    operationType: "namespace.create.request",
+    source: "manual",
+    resource: { kind: "Namespace", namespace: name },
+    title: `Namespace request started: ${name}`,
+    description: `team=${team}`,
+  })
+
   try {
     const result = await requestTenantNamespace({
       namespace: name,
       team,
       requestedBy: session.user.email ?? session.user.name ?? "unknown",
     })
+    await completeOperation(
+      ctx,
+      `Namespace request opened: ${name}`,
+      `team=${team}; PR #${result.pullRequestNumber}`,
+    )
     return NextResponse.json({
       success: true,
       namespace: name,
@@ -97,17 +101,13 @@ export async function POST(req: Request) {
       // 409/422 from the contents API means the branch or file is already there —
       // that is a duplicate request, not a server fault, and the caller can act on it.
       const status = err.status === 409 || err.status === 422 ? 409 : 502
-      return NextResponse.json(
-        {
-          error:
-            status === 409
-              ? `A request for '${name}' is already open`
-              : `Could not open the namespace request: ${err.message}`,
-        },
-        { status },
-      )
+      const message =
+        status === 409 ? `A request for '${name}' is already open` : `Could not open the namespace request: ${err.message}`
+      await failOperation(ctx, `Namespace request failed: ${name}`, message)
+      return NextResponse.json({ error: message }, { status })
     }
     console.error("[api/namespaces] request failed", err)
+    await failOperation(ctx, `Namespace request failed: ${name}`, err instanceof Error ? err.message : String(err))
     return NextResponse.json({ error: "Could not open the namespace request" }, { status: 502 })
   }
 }
