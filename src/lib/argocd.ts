@@ -1,5 +1,6 @@
 import { cacheGet, cacheSet } from "./valkey"
 import { getUserScope } from "./role-filter"
+import { getEffectiveScope, namespaceVisible } from "./scope"
 
 const ARGOCD_URL = process.env.ARGOCD_URL ?? "http://localhost:8080"
 const ARGOCD_TOKEN = process.env.ARGOCD_TOKEN ?? ""
@@ -187,6 +188,8 @@ export type ArgoActorRole = "cluster-admin" | "developer" | "viewer" | "guest"
 export interface ArgoActor {
   role: ArgoActorRole
   groups?: string[]
+  /** OIDC team claims — same field getEffectiveScope reads for narwhal.io/team ownership. */
+  teams?: string[]
 }
 
 export class ArgoForbiddenError extends Error {
@@ -224,7 +227,17 @@ export function getAllowedProjects(actor: ArgoActor): Set<string> | null {
 }
 
 /**
- * Asserts that the actor is allowed to operate on the given app's project.
+ * Asserts that the actor is allowed to operate on the given app's project AND its
+ * actual destination namespace.
+ *
+ * #37: the project check alone is not enough. `tenants` is a single ArgoCD project
+ * shared by every team's namespaces (narwhal gitops/resources/argocd-projects.yaml),
+ * so an actor mapped to the `tenants` project would pass the project check for an
+ * Application destined at ANY tenant namespace, including one their team does not
+ * own. This mirrors the read-side check appVisible/namespaceVisible already do in
+ * scope.ts, but as an AND (both project and namespace must be in scope) rather than
+ * appVisible's OR (visibility only needs one) — this gates a write, not a read.
+ *
  * Throws ArgoForbiddenError or ArgoNotFoundError on failure.
  */
 export async function assertAppAccessible(name: string, actor: ArgoActor): Promise<ArgoApp> {
@@ -236,6 +249,14 @@ export async function assertAppAccessible(name: string, actor: ArgoActor): Promi
   if (!allowed.has(project)) {
     throw new ArgoForbiddenError(
       `Forbidden: actor not authorized for ArgoCD project '${project}'`,
+    )
+  }
+
+  const destNamespace = app.spec.destination?.namespace
+  const scope = await getEffectiveScope({ groups: actor.groups ?? [], teams: actor.teams ?? [] })
+  if (!destNamespace || !namespaceVisible(destNamespace, scope)) {
+    throw new ArgoForbiddenError(
+      `Forbidden: actor not authorized for namespace '${destNamespace ?? "unknown"}'`,
     )
   }
   return app

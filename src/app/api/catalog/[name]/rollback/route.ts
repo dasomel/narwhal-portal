@@ -39,6 +39,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
     await assertAppAccessible(name, {
       role: session.user.role,
       groups: session.groups,
+      teams: session.teams,
     })
     const ok = await rollbackArgoApp(name, idRaw)
     if (!ok) return NextResponse.json({ error: "Rollback failed" }, { status: 500 })

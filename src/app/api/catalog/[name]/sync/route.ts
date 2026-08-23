@@ -32,6 +32,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ name: 
     await assertAppAccessible(name, {
       role: session.user.role,
       groups: session.groups,
+      teams: session.teams,
     })
     const result = await syncArgoApp(name)
     console.info("[audit] argocd-sync", {
