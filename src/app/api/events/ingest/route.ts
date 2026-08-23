@@ -5,7 +5,7 @@ import { assertHttpUrl, ValidationError } from "@/lib/validation"
 import { claimIdempotencyKey, getIdempotencyStore } from "@/lib/idempotency"
 import { isValidEventActor, isValidEventResource } from "@/types/event-envelope"
 import type { EventActor, EventResource } from "@/types/event-envelope"
-import type { LiveEventIngest, LiveEventType, LiveSeverity, LiveSource } from "@/types/live"
+import type { LiveEventIngest, LiveEventType, LiveEventVisibility, LiveSeverity, LiveSource } from "@/types/live"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic"
 const VALID_TYPES: LiveEventType[] = ["alert", "deploy", "sync", "node", "custom"]
 const VALID_SEVERITIES: LiveSeverity[] = ["info", "success", "warning", "error"]
 const VALID_SOURCES: LiveSource[] = ["alertmanager", "argocd", "kubernetes", "manual"]
+const VALID_VISIBILITY: LiveEventVisibility[] = ["system", "cluster", "namespace", "team"]
 
 // H-5: ingest-link host allowlist. Defaults cover the in-cluster infra hosts
 // used by Alertmanager/ArgoCD; extend via env var.
@@ -132,6 +133,24 @@ export async function POST(request: Request) {
     actor = raw.actor as EventActor | null
   }
 
+  // portal#12: explicit visibility, required to see a non-admin viewer when
+  // resource.namespace is absent — an unset value now default-denies at the SSE
+  // route rather than being implicitly public.
+  let visibility: LiveEventVisibility | undefined
+  if (raw.visibility !== undefined) {
+    if (!VALID_VISIBILITY.includes(raw.visibility as LiveEventVisibility)) {
+      return NextResponse.json(
+        {
+          error: "ValidationError",
+          message: `visibility must be one of: ${VALID_VISIBILITY.join(", ")}`,
+          field: "visibility",
+        },
+        { status: 400 },
+      )
+    }
+    visibility = raw.visibility as LiveEventVisibility
+  }
+
   const OPTIONAL_STRING_FIELDS = [
     "correlation_id",
     "causation_id",
@@ -210,6 +229,7 @@ export async function POST(request: Request) {
     links: validatedLinks,
     resource,
     actor,
+    visibility,
     correlation_id: optionalStrings.correlation_id,
     causation_id: optionalStrings.causation_id,
     operation_id: optionalStrings.operation_id,

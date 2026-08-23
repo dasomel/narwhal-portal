@@ -10,6 +10,7 @@
 import { K8S_API_SERVER } from "./config"
 import { pushEvent } from "./live-stream"
 import type { LiveEventIngest, LiveEventType, LiveSeverity } from "@/types/live"
+import type { EventResource } from "@/types/event-envelope"
 
 const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
 const USE_BEARER = K8S_API_SERVER.startsWith("https://") && K8S_TOKEN.length > 0
@@ -65,15 +66,22 @@ function toIngest(ev: K8sEvent): LiveEventIngest | null {
     type = "node"
   }
 
-  // Prefix `namespace=<ns>` so the SSE route's role/namespace filter can scope it.
-  const nsTag = io.namespace ? `namespace=${io.namespace} ` : ""
   const objRef = `${io.kind ?? "Object"} ${io.name ?? ""}`.trim()
+
+  // portal#12: structured resource + explicit visibility, not a `namespace=<ns>`
+  // description tag for the SSE route to regex back out. A namespaced involvedObject
+  // (Pod, Deployment, ...) is scoped via resource.namespace like everything else; a
+  // cluster-scoped one (Node, LeaderElection) has no namespace and must declare
+  // visibility explicitly — "cluster" here, not left absent (which now default-denies).
+  const resource: EventResource = { kind: io.kind, name: io.name, namespace: io.namespace }
   return {
     type,
     severity,
     source: "kubernetes",
     title: `${objRef} — ${reason || "Event"}`.slice(0, 200),
-    description: `${nsTag}${ev.message ?? ""}`.slice(0, 500),
+    description: (ev.message ?? "").slice(0, 500),
+    resource,
+    visibility: io.namespace ? "namespace" : "cluster",
   }
 }
 

@@ -37,6 +37,7 @@ export async function pushEvent(ingest: LiveEventIngest): Promise<LiveEvent> {
     idempotency_key: ingest.idempotency_key ?? null,
     source_event_id: ingest.source_event_id ?? null,
     event_type: ingest.event_type ?? null,
+    visibility: ingest.visibility ?? null,
   }
 
   const payload = JSON.stringify(event)

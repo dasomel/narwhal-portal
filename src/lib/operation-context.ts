@@ -103,6 +103,11 @@ async function emitLifecycle(
       source: ctx.source,
       event_type: eventType,
       resource: ctx.resource,
+      // portal#12: an operation on a namespaced resource is namespace-scoped like any
+      // other event; one with no resource.namespace (node tuning, a cluster-scoped
+      // ArgoCD app) is a cluster-level operation the actor themselves triggered —
+      // "cluster" visibility, not left absent (which now default-denies).
+      visibility: ctx.resource.namespace ? "namespace" : "cluster",
       actor: ctx.actor,
       operation_id: ctx.operationId,
       correlation_id: ctx.correlationId,

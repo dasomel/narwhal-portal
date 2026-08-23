@@ -1,10 +1,9 @@
 import { auth } from "@/lib/auth"
 import { getRecentEvents, subscribeLive } from "@/lib/live-stream"
-import { getEffectiveScope, namespaceVisible, type EffectiveScope } from "@/lib/scope"
+import { getEffectiveScope } from "@/lib/scope"
+import { isEventFiltered } from "@/lib/event-visibility"
 import type { LiveEvent } from "@/types/live"
 import type { UserRole } from "@/lib/auth"
-
-type Scope = EffectiveScope
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -12,32 +11,6 @@ export const dynamic = "force-dynamic"
 const HEARTBEAT_MS = 30_000
 const DEFAULT_REPLAY = 50
 const MAX_EVENTS_REPLAY = 1000
-const NS_RE = /(?:namespace|ns)[=:]\s*"?([a-z0-9][-a-z0-9.]{0,253})"?/i
-
-function extractNamespace(event: LiveEvent): string | null {
-  // Primary path (portal#11): a structured resource.namespace, populated by
-  // envelope-aware producers (operation-context, an ingest request that supplies
-  // resource). Fall back to the title/description regex only for events that
-  // predate the envelope and never carried a resource field.
-  if (event.resource?.namespace) return event.resource.namespace
-  const m = NS_RE.exec(event.title) ?? NS_RE.exec(event.description)
-  return m?.[1] ?? null
-}
-
-function isFiltered(event: LiveEvent, role: UserRole, scope: Scope): boolean {
-  if (role === "cluster-admin") return false
-
-  if (role === "viewer" || role === "guest") {
-    if (event.type === "node") return true
-    if (/secret/i.test(event.description)) return true
-  }
-
-  const ns = extractNamespace(event)
-  if (ns === null) return false
-
-  if (!scope.hasMapping) return true
-  return !namespaceVisible(ns, scope)
-}
 
 function formatSSE(event: LiveEvent): string {
   return `id: ${event.id}\nevent: live\ndata: ${JSON.stringify(event)}\n\n`
@@ -90,7 +63,7 @@ export async function GET(request: Request) {
       }
 
       for (const event of replaySlice) {
-        if (!isFiltered(event, role, scope)) {
+        if (!isEventFiltered(event, role, scope)) {
           enqueue(formatSSE(event))
         }
       }
@@ -125,7 +98,7 @@ export async function GET(request: Request) {
         try {
           for await (const event of subscribeLive()) {
             if (request.signal.aborted) break
-            if (!isFiltered(event, role, scope)) {
+            if (!isEventFiltered(event, role, scope)) {
               enqueue(formatSSE(event))
             }
           }
