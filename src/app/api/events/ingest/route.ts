@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server"
-import { timingSafeEqual } from "crypto"
+import { randomUUID, timingSafeEqual } from "crypto"
 import { pushEvent } from "@/lib/live-stream"
 import { assertHttpUrl, ValidationError } from "@/lib/validation"
+import { claimIdempotencyKey, getIdempotencyStore } from "@/lib/idempotency"
+import { isValidEventActor, isValidEventResource } from "@/types/event-envelope"
+import type { EventActor, EventResource } from "@/types/event-envelope"
 import type { LiveEventIngest, LiveEventType, LiveSeverity, LiveSource } from "@/types/live"
 
 export const runtime = "nodejs"
@@ -96,6 +99,59 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "title must be a non-empty string" }, { status: 400 })
   }
 
+  // Canonical-envelope fields (portal#11): optional so legacy producers (K8s
+  // informer, ad-hoc webhook callers) keep working unchanged, but validated when
+  // present.
+  let resource: EventResource | null | undefined
+  if (raw.resource !== undefined) {
+    if (raw.resource !== null && !isValidEventResource(raw.resource)) {
+      return NextResponse.json(
+        {
+          error: "ValidationError",
+          message: "resource must be an object with optional string fields cluster/namespace/kind/name/workload",
+          field: "resource",
+        },
+        { status: 400 },
+      )
+    }
+    resource = raw.resource as EventResource | null
+  }
+
+  let actor: EventActor | null | undefined
+  if (raw.actor !== undefined) {
+    if (raw.actor !== null && !isValidEventActor(raw.actor)) {
+      return NextResponse.json(
+        {
+          error: "ValidationError",
+          message: "actor must be { id: string, type: 'user'|'system'|'service', displayName?: string }",
+          field: "actor",
+        },
+        { status: 400 },
+      )
+    }
+    actor = raw.actor as EventActor | null
+  }
+
+  const OPTIONAL_STRING_FIELDS = [
+    "correlation_id",
+    "causation_id",
+    "operation_id",
+    "idempotency_key",
+    "source_event_id",
+  ] as const
+  const optionalStrings: Partial<Record<(typeof OPTIONAL_STRING_FIELDS)[number], string>> = {}
+  for (const field of OPTIONAL_STRING_FIELDS) {
+    const v = raw[field]
+    if (v === undefined) continue
+    if (typeof v !== "string" || v.length === 0) {
+      return NextResponse.json(
+        { error: "ValidationError", message: `${field} must be a non-empty string when provided`, field },
+        { status: 400 },
+      )
+    }
+    optionalStrings[field] = v
+  }
+
   // H-5: validate link.href against http(s) + host allowlist.
   let validatedLinks: { label: string; href: string }[] | undefined
   if (Array.isArray(raw.links)) {
@@ -124,13 +180,41 @@ export async function POST(request: Request) {
     }
   }
 
+  const source = raw.source as LiveSource
+
+  // Idempotency (portal#11): dedupe on the producer-supplied idempotency_key, or
+  // on source_event_id namespaced by source (a producer's own event id is only
+  // unique within that producer). A duplicate retry short-circuits to the id of
+  // the event that won the original claim instead of pushing a second event.
+  const idempotencyKey =
+    optionalStrings.idempotency_key ??
+    (optionalStrings.source_event_id ? `source-event:${source}:${optionalStrings.source_event_id}` : undefined)
+
+  const eventId = randomUUID()
+  if (idempotencyKey) {
+    const existing = await claimIdempotencyKey(getIdempotencyStore(), idempotencyKey, eventId)
+    if (existing) {
+      return NextResponse.json({ ok: true, id: existing, duplicate: true })
+    }
+  }
+
   const ingest: LiveEventIngest = {
+    // Only pin the id when it's the value we just claimed the idempotency key
+    // with — otherwise let pushEvent mint one, same as before this change.
+    id: idempotencyKey ? eventId : undefined,
     type: raw.type as LiveEventType,
     severity: raw.severity as LiveSeverity,
     title: raw.title as string,
     description: typeof raw.description === "string" ? raw.description : "",
-    source: raw.source as LiveSource,
+    source,
     links: validatedLinks,
+    resource,
+    actor,
+    correlation_id: optionalStrings.correlation_id,
+    causation_id: optionalStrings.causation_id,
+    operation_id: optionalStrings.operation_id,
+    idempotency_key: optionalStrings.idempotency_key,
+    source_event_id: optionalStrings.source_event_id,
   }
 
   try {

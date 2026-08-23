@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { createSilence, deleteSilence, getSilence } from "@/lib/alertmanager"
+import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 
 export const dynamic = "force-dynamic"
 
@@ -82,17 +83,33 @@ export async function POST(req: Request) {
   }
 
   const createdBy = session.user.email ?? session.user.name ?? "unknown"
-  const silenceId = await createSilence(matchers, duration, createdBy, comment)
-  if (!silenceId) return NextResponse.json({ error: "Failed to create silence" }, { status: 500 })
 
-  console.info("[audit] alert-silence-create", {
-    actor: createdBy,
-    role: session.user.role,
-    silenceId,
-    matchers: matchers.map((m) => `${m.name}=${m.value}`),
-    durationMinutes: duration,
-    at: new Date().toISOString(),
+  const matcherSummary = matchers.map((m) => `${m.name}=${m.value}`).join(", ")
+  const ctx = await beginOperation({
+    request: req,
+    session,
+    operationType: "alert.silence.create",
+    source: "alertmanager",
+    resource: {
+      kind: "Silence",
+      namespace: matchers.find((m) => m.name === "namespace")?.value,
+      name: matcherSummary,
+    },
+    title: "Alert silence create started",
+    description: `Matchers: ${matcherSummary}`,
   })
+
+  const silenceId = await createSilence(matchers, duration, createdBy, comment)
+  if (!silenceId) {
+    await failOperation(ctx, "Alert silence create failed", "Alertmanager did not return a silence ID")
+    return NextResponse.json({ error: "Failed to create silence" }, { status: 500 })
+  }
+
+  await completeOperation(
+    ctx,
+    `Alert silence created: ${silenceId}`,
+    `Matchers: ${matcherSummary}; durationMinutes=${duration}`,
+  )
 
   return NextResponse.json({ success: true, silenceId })
 }
@@ -109,6 +126,9 @@ export async function DELETE(req: Request) {
   if (!silenceId) return validationError("id required", "id")
 
   // H-7: ownership check — only cluster-admin or the original creator may delete.
+  // Also the only path with a matchers list at hand, so it doubles as this
+  // operation's resource.namespace source.
+  let namespaceHint: string | undefined
   if (session.user.role !== "cluster-admin") {
     const existing = await getSilence(silenceId)
     if (!existing) return NextResponse.json({ error: "Silence not found" }, { status: 404 })
@@ -116,17 +136,28 @@ export async function DELETE(req: Request) {
     if (existing.createdBy !== me) {
       return NextResponse.json({ error: "Forbidden: not silence owner" }, { status: 403 })
     }
+    namespaceHint = existing.matchers.find((m) => m.name === "namespace")?.value
   }
+  // cluster-admin path skips the ownership fetch above, so resource.namespace
+  // stays undefined there rather than paying an extra Alertmanager round trip
+  // this route doesn't otherwise need.
+
+  const ctx = await beginOperation({
+    request: req,
+    session,
+    operationType: "alert.silence.delete",
+    source: "alertmanager",
+    resource: { kind: "Silence", namespace: namespaceHint, name: silenceId },
+    title: `Alert silence delete started: ${silenceId}`,
+  })
 
   const ok = await deleteSilence(silenceId)
-  if (!ok) return NextResponse.json({ error: "Failed to delete silence" }, { status: 500 })
+  if (!ok) {
+    await failOperation(ctx, `Alert silence delete failed: ${silenceId}`)
+    return NextResponse.json({ error: "Failed to delete silence" }, { status: 500 })
+  }
 
-  console.info("[audit] alert-silence-delete", {
-    actor: session.user.email ?? session.user.name ?? "unknown",
-    role: session.user.role,
-    silenceId,
-    at: new Date().toISOString(),
-  })
+  await completeOperation(ctx, `Alert silence deleted: ${silenceId}`)
 
   return NextResponse.json({ success: true })
 }

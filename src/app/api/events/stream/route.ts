@@ -15,6 +15,11 @@ const MAX_EVENTS_REPLAY = 1000
 const NS_RE = /(?:namespace|ns)[=:]\s*"?([a-z0-9][-a-z0-9.]{0,253})"?/i
 
 function extractNamespace(event: LiveEvent): string | null {
+  // Primary path (portal#11): a structured resource.namespace, populated by
+  // envelope-aware producers (operation-context, an ingest request that supplies
+  // resource). Fall back to the title/description regex only for events that
+  // predate the envelope and never carried a resource field.
+  if (event.resource?.namespace) return event.resource.namespace
   const m = NS_RE.exec(event.title) ?? NS_RE.exec(event.description)
   return m?.[1] ?? null
 }

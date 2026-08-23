@@ -8,6 +8,7 @@ import {
 } from "@/lib/argocd"
 import { cacheDel } from "@/lib/valkey"
 import { assertK8sName, ValidationError } from "@/lib/validation"
+import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 import type { ArgoCDSyncRequest, ArgoCDSyncResponse } from "@/types/api"
 
 export const dynamic = "force-dynamic"
@@ -48,18 +49,41 @@ export async function POST(
 
   try {
     // H-3: project-scope check.
-    await assertAppAccessible(trimmed, {
+    const app = await assertAppAccessible(trimmed, {
       role: session.user.role,
       groups: session.groups,
       teams: session.teams,
     })
-    const result = await syncArgoApp(trimmed)
-    console.info("[audit] argocd-sync", {
-      actor: session.user.email ?? session.user.name ?? "unknown",
-      role: session.user.role,
-      app: trimmed,
-      at: new Date().toISOString(),
+
+    const ctx = await beginOperation({
+      request: req,
+      session,
+      operationType: "argocd.sync",
+      source: "argocd",
+      resource: {
+        kind: "Application",
+        namespace: app.spec.destination?.namespace,
+        name: trimmed,
+      },
+      title: `ArgoCD sync started: ${trimmed}`,
     })
+
+    let result
+    try {
+      result = await syncArgoApp(trimmed)
+    } catch (err) {
+      await failOperation(
+        ctx,
+        `ArgoCD sync failed: ${trimmed}`,
+        err instanceof Error ? err.message : String(err),
+      )
+      throw err
+    }
+    await completeOperation(
+      ctx,
+      `ArgoCD sync completed: ${trimmed}`,
+      `Synced to revision ${result.revision ?? "unknown"}`,
+    )
 
     // Invalidate app-list cache so next GET fetches fresh state
     try {

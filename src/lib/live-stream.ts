@@ -20,7 +20,7 @@ function markDegraded() {
 
 export async function pushEvent(ingest: LiveEventIngest): Promise<LiveEvent> {
   const event: LiveEvent = {
-    id: randomUUID(),
+    id: ingest.id ?? randomUUID(),
     type: ingest.type,
     severity: ingest.severity,
     timestamp: new Date().toISOString(),
@@ -28,6 +28,14 @@ export async function pushEvent(ingest: LiveEventIngest): Promise<LiveEvent> {
     description: ingest.description,
     source: ingest.source,
     links: ingest.links ?? null,
+    resource: ingest.resource ?? null,
+    actor: ingest.actor ?? null,
+    operation_id: ingest.operation_id ?? null,
+    correlation_id: ingest.correlation_id ?? null,
+    causation_id: ingest.causation_id ?? null,
+    idempotency_key: ingest.idempotency_key ?? null,
+    source_event_id: ingest.source_event_id ?? null,
+    event_type: ingest.event_type ?? null,
   }
 
   const payload = JSON.stringify(event)
