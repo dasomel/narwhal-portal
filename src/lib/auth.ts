@@ -8,8 +8,15 @@ if (process.env.NODE_ENV === "production" && process.env.AUTH_MOCK === "true") {
   throw new Error("AUTH_MOCK cannot be enabled in production (NODE_ENV=production)")
 }
 
+// See narwhal/docs/common/oidc-rbac-contract.md for the canonical OIDC groups-claim
+// contract (raw bare-name values, apiserver-side "oidc:" prefixing) this file implements.
 // WO-D16 Role Mapping: UI role 'viewer' maps to OIDC group 'oidc:viewer', which binds to the Kubernetes ClusterRole 'platform-viewer'.
 export type UserRole = "cluster-admin" | "developer" | "viewer" | "guest"
+
+// narwhal#163: distinguishes "no groups claim at all" (legitimate, defaults to guest)
+// from "groups claim present but none matched ALLOWED_GROUPS" (a rejected/unknown
+// claim, still defaults to guest for fail-closed safety, but now surfaced for diagnostics).
+export type GroupClaimStatus = "ok" | "unknown_groups" | "no_groups"
 
 // C-5: RBAC role allowlist (must match nav.tsx menuItems[].roles and tools.ts PLATFORM_TOOLS[].roles)
 const ALLOWED_GROUPS: ReadonlySet<UserRole> = new Set([
@@ -19,8 +26,8 @@ const ALLOWED_GROUPS: ReadonlySet<UserRole> = new Set([
   "guest",
 ])
 
-// C-5: filter incoming group claims through the RBAC allowlist; unknown values are dropped silently.
-function sanitizeGroups(input: unknown): UserRole[] {
+// C-5: filter incoming group claims through the RBAC allowlist; unknown values are dropped.
+export function sanitizeGroups(input: unknown): UserRole[] {
   if (!Array.isArray(input)) return []
   const out: UserRole[] = []
   for (const g of input) {
@@ -29,6 +36,26 @@ function sanitizeGroups(input: unknown): UserRole[] {
     }
   }
   return out
+}
+
+// narwhal#163: raw claim values that were present but rejected by ALLOWED_GROUPS —
+// callers use this to decide whether a guest fallback was legitimate or a silent drop.
+export function unknownGroups(input: unknown): string[] {
+  if (!Array.isArray(input)) return []
+  const out: string[] = []
+  for (const g of input) {
+    if (typeof g === "string" && !ALLOWED_GROUPS.has(g as UserRole)) {
+      out.push(g)
+    }
+  }
+  return out
+}
+
+// narwhal#163: classify a raw groups claim as ok / unknown_groups / no_groups so callers
+// can tell a legitimate no-role user apart from one whose claims were silently rejected.
+export function classifyGroupClaim(input: unknown): GroupClaimStatus {
+  if (!Array.isArray(input) || input.length === 0) return "no_groups"
+  return unknownGroups(input).length > 0 ? "unknown_groups" : "ok"
 }
 
 // Custom team groups for my-apps/events VISIBILITY scoping — kept separate from RBAC roles.
@@ -46,7 +73,7 @@ function sanitizeTeamGroups(input: unknown): string[] {
   return out
 }
 
-function getRoleFromGroups(groups: UserRole[]): UserRole {
+export function getRoleFromGroups(groups: UserRole[]): UserRole {
   if (groups.includes("cluster-admin")) return "cluster-admin"
   if (groups.includes("developer")) return "developer"
   if (groups.includes("viewer")) return "viewer"
@@ -223,12 +250,21 @@ export const config: NextAuthConfig = {
         }
       }
 
-      if (p?.groups !== undefined) {
-        token.groups = sanitizeGroups(p.groups)
-        token.teams = sanitizeTeamGroups(p.groups)
+      const rawGroups = p?.groups !== undefined ? p.groups : u?.groups
+      if (rawGroups !== undefined) {
+        token.groups = sanitizeGroups(rawGroups)
+        token.groupClaimStatus = classifyGroupClaim(rawGroups)
+        // narwhal#163: unknown claims are a diagnostic signal, not a legitimate
+        // no-groups case — log them (with the subject) so drops are no longer silent.
+        if (token.groupClaimStatus === "unknown_groups") {
+          console.warn("[auth/jwt] unrecognized group claims rejected", {
+            sub: (p?.sub as string | undefined) ?? token.sub,
+            rejected: unknownGroups(rawGroups),
+          })
+        }
       }
-      if (u?.groups !== undefined) {
-        token.groups = sanitizeGroups(u.groups)
+      if (p?.groups !== undefined) {
+        token.teams = sanitizeTeamGroups(p.groups)
       }
       if ((u as Record<string, unknown> | undefined)?.teams !== undefined) {
         token.teams = sanitizeTeamGroups((u as Record<string, unknown>).teams)
@@ -236,6 +272,7 @@ export const config: NextAuthConfig = {
       // C-5: ensure token.groups is always a sanitized list; default to guest.
       if (!Array.isArray(token.groups) || token.groups.length === 0) {
         token.groups = ["guest"] satisfies UserRole[]
+        if (!token.groupClaimStatus) token.groupClaimStatus = "no_groups"
       }
       return token
     },
@@ -245,6 +282,7 @@ export const config: NextAuthConfig = {
       session.groups = safeGroups
       session.teams = Array.isArray(token.teams) ? token.teams : []
       session.user.role = getRoleFromGroups(safeGroups)
+      session.groupClaimStatus = token.groupClaimStatus ?? "no_groups"
       session.idToken = token.idToken
       // Surface a refresh failure so the client can force a clean re-login.
       if (token.error) session.error = token.error as string
