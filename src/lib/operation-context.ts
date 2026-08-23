@@ -107,6 +107,7 @@ async function emitLifecycle(
       operation_id: ctx.operationId,
       correlation_id: ctx.correlationId,
       causation_id: ctx.causationId,
+      request_id: ctx.requestId,
     })
   } catch (err) {
     // Lifecycle emission is best-effort — never let an event-pipeline hiccup fail

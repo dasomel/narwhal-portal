@@ -15,6 +15,7 @@ interface EventEnvelopeFields {
   operation_id?: string | null
   correlation_id?: string | null
   causation_id?: string | null
+  request_id?: string | null
   idempotency_key?: string | null
   source_event_id?: string | null
   // Fine-grained event type, e.g. "operation.started" — distinct from the coarse

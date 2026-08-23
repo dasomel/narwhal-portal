@@ -20,6 +20,7 @@ vi.mock("next-auth/providers/credentials", () => ({
 vi.mock("./live-stream", () => ({ pushEvent: vi.fn().mockResolvedValue(undefined) }))
 
 const { beginOperation, completeOperation, failOperation } = await import("./operation-context")
+const { pushEvent } = await import("./live-stream")
 
 function fakeSession(overrides: Partial<Session["user"]> = {}): Session {
   return {
@@ -72,6 +73,19 @@ describe("beginOperation", () => {
       title: "test",
     })
     expect(ctx.requestId).toBe("req-456")
+  })
+
+  it("threads request_id through to the emitted operation.started event", async () => {
+    vi.mocked(pushEvent).mockClear()
+    await beginOperation({
+      request: fakeRequest({ "x-request-id": "req-789" }),
+      session: fakeSession(),
+      operationType: "node.tuning.apply",
+      source: "kubernetes",
+      resource: {},
+      title: "test",
+    })
+    expect(pushEvent).toHaveBeenCalledWith(expect.objectContaining({ request_id: "req-789" }))
   })
 
   it("derives the actor from the session, preferring email as the stable id", async () => {
