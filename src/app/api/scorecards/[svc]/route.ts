@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { getArgoApp, appToCatalogService } from "@/lib/argocd"
 import { evaluateService, loadRules } from "@/lib/scorecard"
+import { appVisible, getEffectiveScope } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
 
@@ -63,6 +64,13 @@ export async function GET(
     ])
 
     if (!app) {
+      return NextResponse.json({ error: "Service not found" }, { status: 404 })
+    }
+
+    // portal#31: same by-name scope bypass as /api/catalog/[name] — a guessed
+    // service id returned full scorecard detail regardless of team ownership.
+    const scope = await getEffectiveScope(gate.session)
+    if (!appVisible(app.spec.project ?? "default", app.spec.destination?.namespace ?? app.metadata.namespace ?? "default", scope)) {
       return NextResponse.json({ error: "Service not found" }, { status: 404 })
     }
 

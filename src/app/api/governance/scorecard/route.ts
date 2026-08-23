@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoAppsOrThrow } from "@/lib/argocd"
 import { getAlerts } from "@/lib/alertmanager"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { appVisible, getEffectiveScope } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
 
@@ -23,12 +24,21 @@ export async function GET() {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const cacheKey = "governance:scorecard"
+  // portal#31: this held a fully-rendered, unfiltered result under one literal cache
+  // key — the same class of bug the 2026-08-20 events:timeline fix already
+  // documented: caching a scope-filtered response under a single key leaks the
+  // first requester's (or here, an entirely unfiltered) result to everyone after.
+  // Scoping the key, not just the response, is what makes this safe to cache at all.
+  const scope = await getEffectiveScope(session)
+  const cacheKey = `governance:scorecard:${scope.fingerprint}`
   const cached = await cacheGet<ScorecardItem[]>(cacheKey)
   if (cached) return NextResponse.json(cached)
 
   try {
-    const [apps, alerts] = await Promise.all([getArgoAppsOrThrow(), getAlerts()])
+    const [allApps, alerts] = await Promise.all([getArgoAppsOrThrow(), getAlerts()])
+    const apps = allApps.filter((app) =>
+      appVisible(app.spec.project ?? "default", app.spec.destination?.namespace ?? app.metadata.namespace ?? "default", scope),
+    )
 
     const scorecards: ScorecardItem[] = apps.map((app) => {
       const details: string[] = []

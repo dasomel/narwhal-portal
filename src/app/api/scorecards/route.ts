@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { getArgoApps, appToCatalogService } from "@/lib/argocd"
 import { evaluateAll, loadRules } from "@/lib/scorecard"
+import { appVisible, getEffectiveScope } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
 
@@ -57,17 +58,29 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [apps, evals] = await Promise.all([
+    const [apps, evals, scope] = await Promise.all([
       getArgoApps(),
       evaluateAll(ownerFilter, tierFilter),
+      getEffectiveScope(gate.session),
     ])
 
     const serviceMap = new Map(apps.map((a) => [a.metadata.name, appToCatalogService(a)]))
 
-    const tierCounts = { gold: 0, silver: 0, bronze: 0, none: 0 }
-    for (const e of evals) tierCounts[e.tier]++
+    // portal#31: this endpoint returned every service's scorecard to any
+    // developer/viewer regardless of team ownership — filter to the same scope
+    // /api/catalog applies, before computing tierCounts so the aggregate counts
+    // don't leak cross-tenant data either. An app absent from serviceMap (deleted
+    // between fetches, or evaluateAll referencing a stale id) is excluded rather
+    // than assumed visible.
+    const scopedEvals = evals.filter((e) => {
+      const svc = serviceMap.get(e.serviceId)
+      return svc ? appVisible(svc.project, svc.namespace, scope) : false
+    })
 
-    const services = evals.map((e) => {
+    const tierCounts = { gold: 0, silver: 0, bronze: 0, none: 0 }
+    for (const e of scopedEvals) tierCounts[e.tier]++
+
+    const services = scopedEvals.map((e) => {
       const svc = serviceMap.get(e.serviceId)
       return {
         id: e.serviceId,
