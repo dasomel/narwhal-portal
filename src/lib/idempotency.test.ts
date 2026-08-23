@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { claimIdempotencyKey, idempotencyStoreKey, type IdempotencyStore } from "./idempotency"
+import { claimIdempotencyKey, fulfillIdempotencyKey, idempotencyStoreKey, type IdempotencyStore } from "./idempotency"
 
-/** In-memory fake matching the real ValkeyIdempotencyStore's claim semantics. */
+/** In-memory fake matching the real ValkeyIdempotencyStore's claim/fulfill semantics. */
 class FakeIdempotencyStore implements IdempotencyStore {
   private map = new Map<string, string>()
 
@@ -10,6 +10,10 @@ class FakeIdempotencyStore implements IdempotencyStore {
     if (existing !== undefined) return existing
     this.map.set(key, value)
     return null
+  }
+
+  async fulfill(key: string, value: string): Promise<void> {
+    this.map.set(key, value)
   }
 }
 
@@ -32,6 +36,21 @@ describe("claimIdempotencyKey", () => {
     await claimIdempotencyKey(store, "req-1", "event-a", 60)
     const result = await claimIdempotencyKey(store, "req-2", "event-b", 60)
     expect(result).toBeNull()
+  })
+})
+
+describe("fulfillIdempotencyKey", () => {
+  it("overwrites a placeholder claim with the real result — portal#34's claim-then-fulfill flow", async () => {
+    const store = new FakeIdempotencyStore()
+    // Claim with a placeholder before the real id (e.g. an Alertmanager silence id
+    // minted by the downstream call) is known.
+    const first = await claimIdempotencyKey(store, "silence-1", "pending", 60)
+    expect(first).toBeNull()
+
+    await fulfillIdempotencyKey(store, "silence-1", "silence-abc123", 60)
+
+    const duplicate = await claimIdempotencyKey(store, "silence-1", "pending", 60)
+    expect(duplicate).toBe("silence-abc123")
   })
 })
 

@@ -22,6 +22,15 @@ export interface IdempotencyStore {
    * Returns the previously-claimed value if `key` was already claimed (duplicate — short-circuit).
    */
   claim(key: string, value: string, ttlSeconds: number): Promise<string | null>
+  /**
+   * Overwrites `key`'s value after the caller has finished acting on its claim —
+   * for a producer whose real result id (e.g. an Alertmanager silence id) isn't
+   * known until after the claim succeeds, unlike /api/events/ingest which mints its
+   * own id up front and claims with that. Best-effort: a failure here only means a
+   * later duplicate falls through to the placeholder value claim() stored instead
+   * of the real result, not that dedup breaks entirely.
+   */
+  fulfill(key: string, value: string, ttlSeconds: number): Promise<void>
 }
 
 /**
@@ -44,6 +53,15 @@ export class ValkeyIdempotencyStore implements IdempotencyStore {
       return null
     }
   }
+
+  async fulfill(key: string, value: string, ttlSeconds: number): Promise<void> {
+    try {
+      const client = getValkey()
+      await client.set(key, value, "EX", ttlSeconds)
+    } catch {
+      // Fail-open — see interface doc.
+    }
+  }
 }
 
 const defaultStore = new ValkeyIdempotencyStore()
@@ -64,4 +82,17 @@ export async function claimIdempotencyKey(
   ttlSeconds: number = IDEMPOTENCY_TTL_SECONDS,
 ): Promise<string | null> {
   return store.claim(idempotencyStoreKey(key), value, ttlSeconds)
+}
+
+/**
+ * Overwrites a previously-claimed key with its real result — see
+ * IdempotencyStore.fulfill for when this is needed over a plain claim().
+ */
+export async function fulfillIdempotencyKey(
+  store: IdempotencyStore,
+  key: string,
+  value: string,
+  ttlSeconds: number = IDEMPOTENCY_TTL_SECONDS,
+): Promise<void> {
+  return store.fulfill(idempotencyStoreKey(key), value, ttlSeconds)
 }
