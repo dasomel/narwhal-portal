@@ -9,6 +9,7 @@ import {
   scopeFingerprint,
   TEAM_LABEL,
   diagnoseClaims,
+  findOrphanedNamespacePatterns,
   type LabelledNamespace,
 } from "./role-filter"
 
@@ -155,4 +156,37 @@ describe("diagnoseClaims", () => {
 
   it("a real role claim is not the fallback", () =>
     expect(diagnoseClaims(["viewer"], [], []).fellBackToGuest).toBe(false))
+})
+
+// Exercises the real config/role-filter.json (platform-team: platform-*/monitoring/storage,
+// frontend-team: frontend-*), same as diagnoseClaims's "configured in role-filter.json"
+// case above — no mock, this is what's actually deployed.
+describe("findOrphanedNamespacePatterns", () => {
+  it("reports no orphans when every configured pattern matches a real namespace", () => {
+    const namespaces: LabelledNamespace[] = [
+      { name: "platform-system", labels: {} },
+      { name: "monitoring", labels: {} },
+      { name: "storage", labels: {} },
+      { name: "frontend-web", labels: {} },
+    ]
+    expect(findOrphanedNamespacePatterns(namespaces)).toEqual([])
+  })
+
+  it("flags a pattern with zero matching namespaces", () => {
+    const namespaces: LabelledNamespace[] = [
+      { name: "platform-system", labels: {} },
+      { name: "monitoring", labels: {} },
+      // "storage" and "frontend-*" have nothing matching them here.
+    ]
+    const orphans = findOrphanedNamespacePatterns(namespaces)
+    const patterns = orphans.map((o) => `${o.group}:${o.pattern}`)
+    expect(patterns).toContain("platform-team:storage")
+    expect(patterns).toContain("frontend-team:frontend-*")
+    expect(patterns).not.toContain("platform-team:platform-*")
+  })
+
+  it("flags every pattern when no namespaces exist at all", () => {
+    const orphans = findOrphanedNamespacePatterns([])
+    expect(orphans.length).toBeGreaterThan(0)
+  })
 })

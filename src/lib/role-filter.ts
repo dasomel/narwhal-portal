@@ -199,6 +199,37 @@ export function configuredMappings(): ConfiguredMappings {
   }
 }
 
+/** portal#45: a team mapping's namespace pattern that matches no real namespace. */
+export interface OrphanedNamespacePattern {
+  group: string
+  pattern: string
+}
+
+/**
+ * portal#45 preflight: role-filter.json is hand-maintained and can drift from the
+ * cluster it describes — a team renamed, a namespace deleted, a typo in a pattern.
+ * None of that fails loudly: the mapping just silently grants access to nothing,
+ * which reads as "the team has no namespaces" rather than "the config is wrong".
+ * This flags every configured pattern with zero matching namespaces so that
+ * distinction is visible instead of inferred.
+ *
+ * Scoped to namespace patterns only — argocdProjects entries would need an ArgoCD
+ * AppProject-listing capability this codebase doesn't have yet (getArgoApps() only
+ * sees projects that have at least one Application, so a real-but-empty AppProject
+ * would false-positive as orphaned).
+ */
+export function findOrphanedNamespacePatterns(namespaces: LabelledNamespace[]): OrphanedNamespacePattern[] {
+  const config = loadConfig()
+  const orphans: OrphanedNamespacePattern[] = []
+  for (const mapping of teamMappingsOf(config)) {
+    for (const pattern of mapping.namespaces) {
+      const matches = namespaces.some((ns) => matchesNamespacePattern(pattern, ns.name))
+      if (!matches) orphans.push({ group: mapping.group, pattern })
+    }
+  }
+  return orphans
+}
+
 export interface ClaimDiagnosis {
   /** Group claims that matched a portal RBAC role. */
   roles: string[]
