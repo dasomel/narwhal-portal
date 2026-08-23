@@ -119,15 +119,106 @@ export function buildCommands(target: ApplyTarget): string[] {
   }
 }
 
-/** Builds a single shell script that applies all targets in order, failing fast. */
+// ---------------------------------------------------------------------------
+// Post-apply verification (issue #55, item 6) — re-read actual host state
+// instead of trusting the apply command's exit code alone.
+// ---------------------------------------------------------------------------
+
+const VERIFY_MARKER_PREFIX = "NARWHAL_VERIFY_"
+const VERIFY_MARKER_RE = (index: number) => new RegExp(`^${VERIFY_MARKER_PREFIX}${index}=(.*)$`, "m")
+
+/**
+ * Returns a shell command that echoes the *current* host state for a target,
+ * tagged with an index marker the caller can grep out of Job logs. Not all
+ * kinds have a crisp single-value readback (e.g. ethtool ring settings,
+ * tuning-script) — those emit best-effort evidence rather than a strict match.
+ */
+function buildVerifyCommand(target: ApplyTarget, index: number): string {
+  const marker = `${VERIFY_MARKER_PREFIX}${index}`
+  switch (target.kind) {
+    case "kernel-param":
+      return `echo "${marker}=$(sysctl -n ${shellEscape(target.param)} 2>/dev/null || echo __ERR__)"`
+    case "kernel-module":
+      return `echo "${marker}=$(lsmod | awk '{print $1}' | grep -qx ${shellEscape(target.module)} && echo loaded || echo not-loaded)"`
+    case "ulimit": {
+      const grepPattern = shellEscape(`${target.scope} ${target.name} `)
+      return `echo "${marker}=$(grep -F ${grepPattern} /etc/security/limits.d/k8s.conf 2>/dev/null | tail -1)"`
+    }
+    case "package":
+      return `echo "${marker}=$(dpkg -s ${shellEscape(target.name)} >/dev/null 2>&1 && echo installed || echo missing)"`
+    case "swap-off":
+      return `echo "${marker}=$(swapon --show 2>/dev/null | wc -l | tr -d ' ')"`
+    case "service-enable":
+      return `echo "${marker}=$(systemctl is-active ${shellEscape(target.service)} 2>/dev/null || echo inactive)/$(systemctl is-enabled ${shellEscape(target.service)} 2>/dev/null || echo disabled)"`
+    case "ethtool":
+      return `echo "${marker}=$(ethtool -g ${target.iface} 2>/dev/null | tr '\\n' ';' || echo __ERR__)"`
+    case "tuning-script":
+      return `echo "${marker}=executed"`
+  }
+}
+
+/** Builds a single shell script that applies all targets in order, failing fast,
+ *  then re-reads each target's resulting host state via a marker echo. */
 export function buildJobScript(targets: ApplyTarget[]): string {
   const allCmds: string[] = ["set -euo pipefail", "echo '=== narwhal node tuning apply ==='"]
-  for (const t of targets) {
+  targets.forEach((t, i) => {
     allCmds.push(`echo '--- ${t.kind} ---'`)
     for (const cmd of buildCommands(t)) {
       allCmds.push(cmd)
     }
-  }
+    allCmds.push(buildVerifyCommand(t, i))
+  })
   allCmds.push("echo '=== done ==='")
   return allCmds.join("\n")
+}
+
+export interface VerifyResult {
+  index: number
+  kind: ApplyTarget["kind"]
+  /** Whether the re-read state matches what was requested. Kinds without a strict
+   *  single-value match (ethtool, tuning-script) report true once evidence exists. */
+  ok: boolean
+  /** Raw re-read value/evidence, for display in the apply result. */
+  detail: string
+}
+
+/**
+ * Parses NARWHAL_VERIFY_<i>=<value> marker lines out of Job logs and judges
+ * whether the re-read host state matches what was requested — the actual
+ * post-change verification, not just the apply command's exit code.
+ *
+ * A target whose marker never appears (e.g. an earlier target in the same
+ * `set -euo pipefail` script aborted the whole run first) is reported as
+ * ok: false with an empty detail.
+ */
+export function parseVerification(logs: string, targets: ApplyTarget[]): VerifyResult[] {
+  return targets.map((t, i) => {
+    const match = VERIFY_MARKER_RE(i).exec(logs)
+    const detail = match ? match[1] : ""
+    let ok: boolean
+    switch (t.kind) {
+      case "kernel-param":
+        ok = detail.trim() === t.value.trim()
+        break
+      case "kernel-module":
+        ok = detail.trim() === "loaded"
+        break
+      case "swap-off":
+        ok = detail.trim() === "0"
+        break
+      case "service-enable":
+        ok = detail === "active/enabled"
+        break
+      case "package":
+        ok = detail.trim() === "installed"
+        break
+      case "ulimit":
+        ok = detail.includes(`${t.scope} ${t.name} ${t.value}`)
+        break
+      default:
+        // ethtool / tuning-script: no strict single-value contract — evidence-only.
+        ok = detail.length > 0 && detail !== "__ERR__"
+    }
+    return { index: i, kind: t.kind, ok, detail }
+  })
 }

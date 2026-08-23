@@ -4,11 +4,19 @@
 import "server-only"
 import { K8S_API_SERVER } from "./config"
 import { assertK8sNamespace, assertK8sNodeName, safeK8sSegment } from "./validation"
+import { buildJobScript, type ApplyTarget } from "./tuning-commands"
 const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
 const USE_BEARER = K8S_API_SERVER.startsWith("https://") && K8S_TOKEN.length > 0
 
 const TUNING_NAMESPACE = process.env.TUNING_JOB_NAMESPACE ?? "devtools"
 assertK8sNamespace(TUNING_NAMESPACE)
+
+// #55: dedicated, least-privilege identity for the tuning Job pod. It never calls
+// the K8s API from inside the pod (it only nsenters into the host), so it needs no
+// RBAC grants at all — see narwhal gitops/resources/rbac-policies.yaml for the SA
+// definition (zero Role/RoleBinding on purpose) and automountServiceAccountToken
+// below, which additionally suppresses the default token projection.
+const TUNING_SERVICE_ACCOUNT = process.env.TUNING_JOB_SERVICE_ACCOUNT ?? "narwhal-tuning-job"
 
 const DIGEST_IMAGE_RE = /^[^\s@:]+(?::[0-9]+)?\/[a-z0-9._\-/]+@sha256:[0-9a-f]{64}$/i
 
@@ -78,8 +86,14 @@ export interface RunJobResult {
 
 export interface RunJobOptions {
   nodeName: string
-  /** 셸 스크립트 본문. set -euo pipefail은 호출 측에서 포함시킬 것. */
-  script: string
+  /**
+   * #55: allowlisted tuning operations only — NOT a raw shell string. The host
+   * script is always built internally via `buildJobScript` from `tuning-commands.ts`,
+   * so a caller cannot smuggle arbitrary shell through this interface; every
+   * command that ends up running on the host traces back to a reviewed template
+   * in tuning-commands.ts's ApplyTarget switch.
+   */
+  targets: ApplyTarget[]
   /** 식별 라벨용 (예: "tuning"). 영문/숫자/하이픈만. */
   label?: string
   timeoutMs?: number
@@ -101,8 +115,9 @@ export async function runHostJob(opts: RunJobOptions): Promise<RunJobResult> {
   const jobName = `narwhal-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const timeoutMs = opts.timeoutMs ?? 5 * 60_000
 
-  // nsenter -t 1 -m -u -i -n -p sh -c "<script>"
-  const wrapped = ["set -euo pipefail", opts.script].join("\n")
+  // #55: script is built from the allowlisted targets, never accepted as raw
+  // input. buildJobScript already prefixes `set -euo pipefail`.
+  const wrapped = buildJobScript(opts.targets)
 
   const job = {
     apiVersion: "batch/v1",
@@ -133,6 +148,13 @@ export async function runHostJob(opts: RunJobOptions): Promise<RunJobResult> {
           hostPID: true,
           hostNetwork: true,
           nodeName: opts.nodeName,
+          // #55: dedicated least-privilege identity — the pod never calls the K8s
+          // API (it only nsenters into the host), so it needs no ServiceAccount
+          // token at all. automountServiceAccountToken=false additionally
+          // suppresses the default token projection even if TUNING_SERVICE_ACCOUNT
+          // is ever repointed at an SA that does carry grants.
+          serviceAccountName: TUNING_SERVICE_ACCOUNT,
+          automountServiceAccountToken: false,
           tolerations: [
             { operator: "Exists" },
           ],
@@ -142,14 +164,11 @@ export async function runHostJob(opts: RunJobOptions): Promise<RunJobResult> {
               image: getTuningImage(),
               securityContext: { privileged: true },
               command: ["/bin/sh", "-c"],
-              // /host/usr/bin/nsenter 마운트가 안 되니 alpine의 nsenter 사용 (util-linux 포함).
-              // alpine 기본 이미지에는 nsenter가 없으므로 apk add 후 실행.
-              args: [
-                [
-                  "apk add --no-cache util-linux >/dev/null 2>&1 || true",
-                  `nsenter -t 1 -m -u -i -n -p -- sh -c ${JSON.stringify(wrapped)}`,
-                ].join(" && "),
-              ],
+              // #55: TUNING_JOB_IMAGE must be built from deploy/tuning-job.Dockerfile
+              // (or equivalent), which bakes in nsenter/util-linux at build time.
+              // Runtime `apk add` was removed — it fetched unpinned tooling from the
+              // network on every job run, defeating the digest pin on the base image.
+              args: [`nsenter -t 1 -m -u -i -n -p -- sh -c ${JSON.stringify(wrapped)}`],
               resources: {
                 requests: { cpu: "50m", memory: "64Mi" },
                 limits: { cpu: "200m", memory: "128Mi" },

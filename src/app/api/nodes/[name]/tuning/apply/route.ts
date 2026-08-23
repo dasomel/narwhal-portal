@@ -2,8 +2,9 @@ import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { runHostJob } from "@/lib/k8s-job-runner"
 import { getNodeDetail } from "@/lib/k8s-client"
-import { buildJobScript, type ApplyTarget } from "@/lib/tuning-commands"
+import { buildJobScript, parseVerification, type ApplyTarget } from "@/lib/tuning-commands"
 import { assertK8sNodeName, ValidationError, toValidationErrorBody } from "@/lib/validation"
+import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 
 export const dynamic = "force-dynamic"
 
@@ -75,45 +76,59 @@ export async function POST(
     return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
 
-  let script: string
+  // #55: pre-validate the allowlisted targets up front so a bad item still yields a
+  // 400 (buildJobScript throws on anything outside tuning-commands.ts's per-kind
+  // allowlist). The actual script that runs is built again, from these same targets,
+  // inside runHostJob — the raw shell interface it used to accept was removed, so
+  // there is no separate "script" value to smuggle a difference through here.
   try {
-    script = buildJobScript(parsed.items)
+    buildJobScript(parsed.items)
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 })
   }
 
-  // H-4: Audit log — who/when/which node/which kinds.
-  console.info("[audit] tuning-apply", {
-    actor: session.user.email ?? session.user.name ?? "unknown",
-    role: session.user.role,
-    nodeName,
-    itemCount: parsed.items.length,
-    kinds: parsed.items.map((i) => (i as { kind?: string }).kind ?? "?"),
-    requestedAt: new Date().toISOString(),
+  const kinds = parsed.items.map((i) => (i as { kind?: string }).kind ?? "?")
+  const ctx = await beginOperation({
+    request: req,
+    session,
+    operationType: "node.tuning.apply",
+    source: "kubernetes",
+    resource: { kind: "Node", name: nodeName },
+    title: `Node tuning apply started: ${nodeName}`,
+    description: `${parsed.items.length} item(s): ${kinds.join(", ")}`,
   })
 
   try {
     const result = await runHostJob({
       nodeName,
-      script,
+      targets: parsed.items,
       label: "tuning",
       timeoutMs: 5 * 60_000,
     })
-    console.info("[audit] tuning-apply.result", {
-      actor: session.user.email ?? session.user.name ?? "unknown",
-      nodeName,
-      jobName: result.jobName,
-      ok: result.ok,
-      finishedAt: new Date().toISOString(),
-    })
+    // #55 item 6: re-read the actual resulting host state (parsed out of the Job's
+    // own log markers, see buildVerifyCommand/parseVerification in tuning-commands.ts)
+    // instead of trusting the apply command's exit code alone.
+    const verification = parseVerification(result.logs, parsed.items)
+    const verifiedOk = result.ok && verification.every((v) => v.ok)
+    if (verifiedOk) {
+      await completeOperation(ctx, `Node tuning apply completed: ${nodeName}`, `Job ${result.jobName}`)
+    } else {
+      await failOperation(
+        ctx,
+        `Node tuning apply failed: ${nodeName}`,
+        `Job ${result.jobName}${result.ok ? " (post-apply verification mismatch)" : ""}`,
+      )
+    }
     return NextResponse.json({
-      ok: result.ok,
+      ok: verifiedOk,
       jobName: result.jobName,
       logs: result.logs,
+      verification,
       appliedBy: session.user.email ?? session.user.name ?? "unknown",
       appliedAt: new Date().toISOString(),
-    }, { status: result.ok ? 200 : 500 })
+    }, { status: verifiedOk ? 200 : 500 })
   } catch (e) {
+    await failOperation(ctx, `Node tuning apply failed: ${nodeName}`, (e as Error).message)
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
   }
 }
