@@ -39678,7 +39678,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 </details>
 
-### tailwind-merge@3.5.0
+### tailwind-merge@3.6.0
 
 - License: `MIT`
 - Author: Dany Castillo
