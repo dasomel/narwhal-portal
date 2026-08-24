@@ -35,7 +35,7 @@
     "ioredis": "^5.11.1",
     "js-yaml": "^4.3.1",
     "lucide-react": "^1.7.0",
-    "next": "^16.3.1",
+    "next": "^16.3.2",
     "next-auth": "5.0.0-beta.30",
     "react": "19.2.8",
     "react-dom": "19.2.8",
