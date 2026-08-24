@@ -33494,7 +33494,7 @@ THE SOFTWARE.
 
 </details>
 
-### js-yaml@4.1.1
+### js-yaml@4.3.1
 
 - License: `MIT`
 - Author: Vladimir Zapparov
