@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getArgoApps } from "@/lib/argocd"
 import { auth } from "@/lib/auth"
+import { appVisible, getEffectiveScope } from "@/lib/scope"
 import type { ArgoCDResponse, ArgoCDApp } from "@/types/api"
 
 export const dynamic = "force-dynamic"
@@ -11,16 +12,21 @@ export async function GET(): Promise<NextResponse<ArgoCDResponse | { error: stri
 
   try {
     const rawApps = await getArgoApps()
+    const scope = await getEffectiveScope(session)
 
-    const apps: ArgoCDApp[] = rawApps.map((a) => ({
-      name: a.metadata.name,
-      namespace: a.spec.destination?.namespace ?? a.metadata.namespace ?? "default",
-      project: a.spec.project ?? "default",
-      syncStatus: (a.status.sync.status as ArgoCDApp["syncStatus"]) ?? "Unknown",
-      healthStatus: (a.status.health.status as ArgoCDApp["healthStatus"]) ?? "Progressing",
-      revision: a.status.sync.revision?.slice(0, 7) ?? a.status.history?.at(-1)?.revision?.slice(0, 7) ?? null,
-      lastSyncedAt: a.status.operationState?.finishedAt ?? a.status.history?.at(-1)?.deployedAt ?? null,
-    }))
+    const apps: ArgoCDApp[] = rawApps
+      .filter((app) =>
+        appVisible(app.spec.project ?? "default", app.spec.destination?.namespace ?? app.metadata.namespace ?? "default", scope),
+      )
+      .map((a) => ({
+        name: a.metadata.name,
+        namespace: a.spec.destination?.namespace ?? a.metadata.namespace ?? "default",
+        project: a.spec.project ?? "default",
+        syncStatus: (a.status.sync.status as ArgoCDApp["syncStatus"]) ?? "Unknown",
+        healthStatus: (a.status.health.status as ArgoCDApp["healthStatus"]) ?? "Progressing",
+        revision: a.status.sync.revision?.slice(0, 7) ?? a.status.history?.at(-1)?.revision?.slice(0, 7) ?? null,
+        lastSyncedAt: a.status.operationState?.finishedAt ?? a.status.history?.at(-1)?.deployedAt ?? null,
+      }))
 
     const summary = {
       total: apps.length,

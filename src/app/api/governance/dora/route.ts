@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoApps } from "@/lib/argocd"
 import { getCommitTimestamp } from "@/lib/gitea"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { appVisible, getEffectiveScope } from "@/lib/scope"
 import { assertPromQLSafe } from "@/lib/validation"
 
 export const dynamic = "force-dynamic"
@@ -107,7 +108,8 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const cacheKey = "governance:dora:v2"
+  const scope = await getEffectiveScope(session)
+  const cacheKey = `governance:dora:${scope.fingerprint}`
   try {
     const cached = await cacheGet<DoraMetrics>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -116,7 +118,9 @@ export async function GET() {
   }
 
   try {
-    const apps = await getArgoApps()
+    const apps = (await getArgoApps()).filter((app) =>
+      appVisible(app.spec.project ?? "default", app.spec.destination?.namespace ?? app.metadata.namespace ?? "default", scope),
+    )
 
     const now = Date.now()
     const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000
