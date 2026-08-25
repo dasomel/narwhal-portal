@@ -7,10 +7,11 @@ import {
   syncArgoApp,
 } from "@/lib/argocd"
 import { assertK8sName, ValidationError, toValidationErrorBody } from "@/lib/validation"
+import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 
 export const dynamic = "force-dynamic"
 
-export async function POST(_req: Request, { params }: { params: Promise<{ name: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ name: string }> }) {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   if (session.user.role !== "cluster-admin" && session.user.role !== "developer") {
@@ -29,18 +30,42 @@ export async function POST(_req: Request, { params }: { params: Promise<{ name: 
 
   try {
     // H-3: project-scope check.
-    await assertAppAccessible(name, {
+    const app = await assertAppAccessible(name, {
       role: session.user.role,
       groups: session.groups,
       teams: session.teams,
     })
-    const result = await syncArgoApp(name)
-    console.info("[audit] argocd-sync", {
-      actor: session.user.email ?? session.user.name ?? "unknown",
-      role: session.user.role,
-      app: name,
-      at: new Date().toISOString(),
+    const ctx = await beginOperation({
+      request: req,
+      session,
+      operationType: "catalog.sync",
+      source: "argocd",
+      resource: {
+        kind: "Application",
+        namespace: app.spec.destination?.namespace,
+        name,
+      },
+      title: `Catalog sync started: ${name}`,
     })
+
+    let result
+    try {
+      result = await syncArgoApp(name)
+    } catch (err) {
+      await failOperation(
+        ctx,
+        `Catalog sync failed: ${name}`,
+        err instanceof Error ? err.message : String(err),
+      )
+      throw err
+    }
+
+    await completeOperation(
+      ctx,
+      `Catalog sync completed: ${name}`,
+      `Synced to revision ${result.revision ?? "unknown"}`,
+    )
+
     return NextResponse.json({ success: true, message: `Sync triggered for ${name}`, app: result })
   } catch (err) {
     if (err instanceof ArgoNotFoundError) {

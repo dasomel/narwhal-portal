@@ -7,6 +7,7 @@ import {
   rollbackArgoApp,
 } from "@/lib/argocd"
 import { assertK8sName, ValidationError, toValidationErrorBody } from "@/lib/validation"
+import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 
 export const dynamic = "force-dynamic"
 
@@ -36,20 +37,51 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
   }
 
   try {
-    await assertAppAccessible(name, {
+    const app = await assertAppAccessible(name, {
       role: session.user.role,
       groups: session.groups,
       teams: session.teams,
     })
-    const ok = await rollbackArgoApp(name, idRaw)
-    if (!ok) return NextResponse.json({ error: "Rollback failed" }, { status: 500 })
-    console.info("[audit] argocd-rollback", {
-      actor: session.user.email ?? session.user.name ?? "unknown",
-      role: session.user.role,
-      app: name,
-      historyId: idRaw,
-      at: new Date().toISOString(),
+    const ctx = await beginOperation({
+      request: req,
+      session,
+      operationType: "catalog.rollback",
+      source: "argocd",
+      resource: {
+        kind: "Application",
+        namespace: app.spec.destination?.namespace,
+        name,
+      },
+      title: `Catalog rollback started: ${name} to #${idRaw}`,
     })
+
+    let ok = false
+    try {
+      ok = await rollbackArgoApp(name, idRaw)
+    } catch (err) {
+      await failOperation(
+        ctx,
+        `Catalog rollback failed: ${name}`,
+        err instanceof Error ? err.message : String(err),
+      )
+      throw err
+    }
+
+    if (!ok) {
+      await failOperation(
+        ctx,
+        `Catalog rollback failed: ${name}`,
+        `Rollback to #${idRaw} returned false`,
+      )
+      return NextResponse.json({ error: "Rollback failed" }, { status: 500 })
+    }
+
+    await completeOperation(
+      ctx,
+      `Catalog rollback completed: ${name}`,
+      `Rolled back ${name} to revision #${idRaw}`,
+    )
+
     return NextResponse.json({ success: true, message: `Rollback triggered for ${name} to #${idRaw}` })
   } catch (err) {
     if (err instanceof ArgoNotFoundError) {

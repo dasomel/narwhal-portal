@@ -36,6 +36,7 @@
 | Date | Mistake | Fix |
 |------|---------|-----|
 | 2026-08-25 | vitest에 `"@" -> "./src"` alias 해석 설정이 **한 번도 존재한 적이 없었다.** `tsconfig.json`은 `paths: {"@/*": ["./src/*"]}`를 선언하지만 이건 tsc 타입체크와 Next.js 번들러에만 적용되고, vitest(Vite 기반)는 별도의 `resolve.alias` 설정이 필요하다 — 이 레포에는 `vitest.config.ts` 자체가 없었다. 그런데도 148개 기존 테스트는 전부 통과하고 있었다: `src/lib/*.ts`에서 실제로 vitest가 런타임에 실행하는 `@/types/*` 임포트가 우연히 **전부 `import type`**이었기 때문이다 — esbuild가 타입 전용 임포트를 모듈 그래프 해석 전에 지워버려서 alias 미해결이 드러나지 않았다. portal#21에서 `src/lib/role-filter.ts`/`scope.ts`/`operation-context.ts`가 `DEFAULT_CLUSTER_ID`(실제 값, 상수)를 `@/types/cluster`에서 임포트하면서 처음으로 실제(non-type) `@/...` 임포트가 vitest 실행 경로를 탔고, 즉시 `ERR_MODULE_NOT_FOUND: Cannot find package '@/types/cluster'`로 6개 테스트 파일이 한꺼번에 깨졌다 | `vitest.config.ts`에 `resolve.alias: { "@": "./src" }`(tsconfig의 alias와 동일 매핑)를 추가했다. 판별자: **"이 alias가 테스트에서 동작한다"는 그 alias로 값을 임포트한 코드가 실제로 테스트에 물려 실행됐을 때만 검증된 것이다.** `import type`으로만 쓰인 alias는 아무것도 증명하지 않는다 — 새 `@/...` 값 임포트를 lib 모듈에 추가할 때는 관련 테스트를 돌려 alias가 실제로 해석되는지 먼저 확인한다 |
+| 2026-08-26 | SSE stream(`/api/events/stream`) 통합 테스트에서 mutation 라우트 호출 후 이벤트 수신을 검증할 때, `live-stream.ts`는 Valkey 부재 시 degraded in-memory 모드로 잘 전환되었으나 `getEffectiveScope` 내부의 `getNamespaces()`(`@/lib/k8s-client`)가 실측 K8s API 커넥션 시도로 5초 타임아웃을 유발했다 | 테스트 파일에서 `@/lib/k8s-client`의 `getNamespaces`를 `vi.mock`으로 즉시 빈 배열/목록을 반환하도록 스텁 처리했다. 판별자: SSE stream 테스트 타임아웃의 원인은 live stream pub/sub 연결이 아니라, 스코프 인가 판정을 위해 불리는 k8s API fetch 타이머일 수 있다 |
 
 ### Privileged Execution Mistakes
 | Date | Mistake | Fix |
