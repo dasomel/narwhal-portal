@@ -1,6 +1,7 @@
 import { readFileSync } from "fs"
 import { join } from "path"
 import { createHash } from "node:crypto"
+import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 
 interface TeamMapping {
   group: string
@@ -169,8 +170,15 @@ export function alertMatchesScope(
 //     named "team:platform" produced the same digest as membership in the TEAM
 //     "platform" — verified, not hypothetical. JSON-encoding two sorted arrays
 //     cannot express one as the other.
-export function scopeFingerprint(groups: string[], teams: string[]): string {
-  const canonical = JSON.stringify([[...groups].sort(), [...teams].sort()])
+//
+// portal#21: `clusterId` joined the canonical form as a third component, not a
+// prefix/suffix on the existing two — the same reasoning as (2) above applies
+// one level up. It defaults to DEFAULT_CLUSTER_ID so every pre-#21 call site
+// (14 routes, none of which pass a third argument) keeps behaving exactly as
+// before; a route that resolves a real per-request cluster_id can pass it
+// through once one exists to route between.
+export function scopeFingerprint(groups: string[], teams: string[], clusterId: string = DEFAULT_CLUSTER_ID): string {
+  const canonical = JSON.stringify([[...groups].sort(), [...teams].sort(), clusterId])
   return createHash("sha256").update(canonical).digest("hex").slice(0, 32)
 }
 

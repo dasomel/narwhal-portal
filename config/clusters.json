@@ -1,0 +1,24 @@
+{
+  "clusters": [
+    {
+      "id": "primary",
+      "name": "Narwhal (Kakao Cloud)",
+      "environment": "production",
+      "provider": "kakao-cloud",
+      "region": "kr-central-2",
+      "endpointHint": "K8S_API_SERVER env (control-plane VIP :6443)",
+      "credentialRef": { "apiServerEnvVar": "K8S_API_SERVER", "tokenEnvVar": "K8S_SA_TOKEN" },
+      "capabilities": {
+        "argocd": "supported",
+        "metrics": "supported",
+        "events": "supported",
+        "storage": "supported",
+        "rbac": "supported",
+        "logs": "supported"
+      },
+      "status": "offline",
+      "registeredAt": "2026-08-25T00:00:00.000Z",
+      "updatedAt": "2026-08-25T00:00:00.000Z"
+    }
+  ]
+}

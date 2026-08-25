@@ -13,6 +13,7 @@ import {
   projectMatchesScope,
   type ResolvedNamespaceScope,
 } from "./role-filter"
+import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 
 export interface EffectiveScope {
   /** Every namespace — cluster-admin, or a roleDefault of ["*"]. */
@@ -33,6 +34,17 @@ export interface EffectiveScope {
   /** Stable per-scope cache-key component. */
   fingerprint: string
   resolved: ResolvedNamespaceScope
+  /**
+   * portal#21: which cluster this scope was resolved against. Defaults to
+   * DEFAULT_CLUSTER_ID (the one cluster every pre-#21 route implicitly talks
+   * to) so existing callers of getEffectiveScope — none of which pass a
+   * clusterId — see identical `fingerprint`/`hasMapping`/etc. behavior. A
+   * route that resolves a real per-request cluster_id can pass it through;
+   * cluster scope stays ABOVE namespace scope per the issue's requirement —
+   * namespaceVisible/appVisible/alertVisible below don't (yet) consult it
+   * themselves, since there is no second live cluster to authorize against.
+   */
+  clusterId: string
 }
 
 export interface ScopeSession {
@@ -40,7 +52,7 @@ export interface ScopeSession {
   teams?: string[]
 }
 
-export async function getEffectiveScope(session: ScopeSession): Promise<EffectiveScope> {
+export async function getEffectiveScope(session: ScopeSession, clusterId: string = DEFAULT_CLUSTER_ID): Promise<EffectiveScope> {
   const groups = session.groups ?? []
   const teams = session.teams ?? []
   const scope = getVisibilityScope(groups, teams)
@@ -54,8 +66,9 @@ export async function getEffectiveScope(session: ScopeSession): Promise<Effectiv
       namespaces: empty.names,
       argocdProjects: scope.argocdProjects,
       hasMapping: false,
-      fingerprint: scopeFingerprint(groups, teams),
+      fingerprint: scopeFingerprint(groups, teams, clusterId),
       resolved: empty,
+      clusterId,
     }
   }
 
@@ -66,8 +79,9 @@ export async function getEffectiveScope(session: ScopeSession): Promise<Effectiv
     namespaces: resolved.names,
     argocdProjects: scope.argocdProjects,
     hasMapping: resolved.all || resolved.names.size > 0 || scope.argocdProjects.length > 0,
-    fingerprint: scopeFingerprint(groups, teams),
+    fingerprint: scopeFingerprint(groups, teams, clusterId),
     resolved,
+    clusterId,
   }
 }
 

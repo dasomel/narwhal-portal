@@ -18,6 +18,7 @@ vi.mock("./scope", async (importOriginal) => {
 
 import { cacheGet } from "./valkey"
 import { getEffectiveScope, type EffectiveScope } from "./scope"
+import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 import {
   assertAppAccessible,
   ArgoForbiddenError,
@@ -48,6 +49,7 @@ function makeScope(namespaces: string[], argocdProjects: string[] = []): Effecti
     hasMapping: namespaces.length > 0 || argocdProjects.length > 0,
     fingerprint: "test-fingerprint",
     resolved: { all: false, names: new Set(namespaces), byLabel: new Set(namespaces), byPattern: new Set() },
+    clusterId: DEFAULT_CLUSTER_ID,
   }
 }
 

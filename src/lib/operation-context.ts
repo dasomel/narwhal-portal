@@ -14,6 +14,7 @@ import { pushEvent } from "./live-stream"
 import { getActorId } from "./auth"
 import type { LiveSeverity, LiveSource } from "@/types/live"
 import type { EventActor, EventResource } from "@/types/event-envelope"
+import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 
 export interface OperationContext {
   operationId: string
@@ -62,7 +63,13 @@ export async function beginOperation(input: BeginOperationInput): Promise<Operat
       type: "user",
       displayName: input.session.user?.name ?? undefined,
     },
-    resource: input.resource,
+    // portal#21: EventResource.cluster was reserved but never populated (see
+    // src/types/event-envelope.ts). Every operation recorded today runs
+    // against the one implicit cluster, so it's stamped with DEFAULT_CLUSTER_ID
+    // unless the caller already resolved a real one — this makes audit/evidence
+    // records reconstructable by cluster_id from here forward without waiting
+    // for a full per-route cluster_id migration.
+    resource: { ...input.resource, cluster: input.resource.cluster ?? DEFAULT_CLUSTER_ID },
     operationType: input.operationType,
     source: input.source,
   }

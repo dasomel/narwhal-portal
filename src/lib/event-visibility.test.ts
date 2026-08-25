@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { isEventFiltered } from "./event-visibility"
 import type { EffectiveScope } from "./scope"
 import type { LiveEvent } from "@/types/live"
+import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 
 function fakeScope(overrides: Partial<EffectiveScope> = {}): EffectiveScope {
   return {
@@ -11,6 +12,7 @@ function fakeScope(overrides: Partial<EffectiveScope> = {}): EffectiveScope {
     hasMapping: true,
     fingerprint: "test",
     resolved: { all: false, names: new Set(["team-a"]), byLabel: new Set(), byPattern: new Set() },
+    clusterId: DEFAULT_CLUSTER_ID,
     ...overrides,
   }
 }

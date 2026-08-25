@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { getCluster, resolveClusterCredentials, clusterCacheKey, DEFAULT_CLUSTER_ID } from "@/lib/cluster-registry"
 
 export const dynamic = "force-dynamic"
 
@@ -34,13 +35,15 @@ export interface ClusterInfra {
   }
 }
 
-const K8S_API_SERVER = process.env.K8S_API_SERVER ?? "https://192.168.56.100:6443"
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
+// Fallback used only when the DEFAULT_CLUSTER_ID cluster is registered but its
+// credentialRef env vars resolve to nothing (e.g. local dev with no .env) —
+// keeps this route's out-of-the-box behavior identical to before portal#21.
+const LEGACY_API_SERVER_FALLBACK = "https://192.168.56.100:6443"
 
-async function k8sFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${K8S_API_SERVER}${path}`, {
+async function k8sFetch<T>(apiServer: string, token: string, path: string): Promise<T> {
+  const res = await fetch(`${apiServer}${path}`, {
     headers: {
-      Authorization: `Bearer ${K8S_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       Accept: "application/json",
     },
     cache: "no-store",
@@ -69,11 +72,31 @@ function calcAge(creationTimestamp: string): string {
   return `${Math.floor(seconds / 86400)}d`
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const cached = await cacheGet<ClusterInfra>("cluster:infra")
+  // portal#21 pilot: this route now resolves an explicit cluster instead of
+  // reading process-global K8S_API_SERVER/K8S_SA_TOKEN directly. Defaulting to
+  // DEFAULT_CLUSTER_ID and falling back to the legacy env consts keeps
+  // behavior identical to before this change when no ?cluster_id= is given —
+  // the rest of k8s-client.ts's ~30 other functions still read the global env
+  // pair directly and are NOT migrated by this pass (see portal#21 tracking
+  // comment); this route is the one named in the issue's own triage.
+  const clusterId = request.nextUrl.searchParams.get("cluster_id") ?? DEFAULT_CLUSTER_ID
+  const cluster = await getCluster(clusterId)
+  if (!cluster) {
+    return NextResponse.json({ error: "ValidationError", message: `cluster '${clusterId}' is not registered`, field: "cluster_id" }, { status: 400 })
+  }
+  const credentials = resolveClusterCredentials(cluster)
+  const apiServer = credentials?.apiServer ?? (clusterId === DEFAULT_CLUSTER_ID ? LEGACY_API_SERVER_FALLBACK : null)
+  if (!apiServer) {
+    return NextResponse.json({ error: "cluster credentials are not configured", cluster_id: clusterId }, { status: 503 })
+  }
+  const token = credentials?.token ?? ""
+
+  const cacheKey = clusterCacheKey(clusterId, "infra")
+  const cached = await cacheGet<ClusterInfra>(cacheKey)
   if (cached) return NextResponse.json(cached)
 
   try {
@@ -115,11 +138,11 @@ export async function GET() {
 
     const [nodesResult, nodeMetricsResult, controlPlanePodResult, allPodsResult, namespacesResult] =
       await Promise.allSettled([
-        k8sFetch<NodeList>("/api/v1/nodes"),
-        k8sFetch<NodeMetricsList>("/apis/metrics.k8s.io/v1beta1/nodes"),
-        k8sFetch<PodList>("/api/v1/namespaces/kube-system/pods?labelSelector=tier=control-plane"),
-        k8sFetch<PodList>("/api/v1/pods"),
-        k8sFetch<NamespaceList>("/api/v1/namespaces"),
+        k8sFetch<NodeList>(apiServer, token, "/api/v1/nodes"),
+        k8sFetch<NodeMetricsList>(apiServer, token, "/apis/metrics.k8s.io/v1beta1/nodes"),
+        k8sFetch<PodList>(apiServer, token, "/api/v1/namespaces/kube-system/pods?labelSelector=tier=control-plane"),
+        k8sFetch<PodList>(apiServer, token, "/api/v1/pods"),
+        k8sFetch<NamespaceList>(apiServer, token, "/api/v1/namespaces"),
       ])
 
     const rawNodes = nodesResult.status === "fulfilled" ? nodesResult.value.items : []
@@ -221,7 +244,7 @@ export async function GET() {
       },
     }
 
-    await cacheSet("cluster:infra", result, 30)
+    await cacheSet(cacheKey, result, 30)
     return NextResponse.json(result)
   } catch (err) {
     console.error("[api/cluster]", err)
