@@ -10,7 +10,9 @@ import {
   TEAM_LABEL,
   diagnoseClaims,
   findOrphanedNamespacePatterns,
+  findOwnershipMismatch,
   type LabelledNamespace,
+  type TeamMapping,
 } from "./role-filter"
 
 const admin = { namespaces: ["*"], argocdProjects: ["*"] }
@@ -36,6 +38,56 @@ describe("appMatchesScope", () => {
   it("team sees its namespace", () => expect(appMatchesScope("apps", "platform-system", team)).toBe(true))
   it("team sees neither -> hidden", () => expect(appMatchesScope("apps", "iam", team)).toBe(false))
   it("guest sees nothing", () => expect(appMatchesScope("default", "default", guest)).toBe(false))
+})
+
+describe("findOwnershipMismatch", () => {
+  const mappings: TeamMapping[] = [
+    { group: "platform-team", namespaces: ["platform-*", "monitoring", "storage"], argocdProjects: ["platform"] },
+    { group: "frontend-team", namespaces: ["frontend-*"], argocdProjects: ["apps"] },
+  ]
+
+  it("same-team project + namespace -> no mismatch", () =>
+    expect(findOwnershipMismatch("platform", "platform-system", mappings)).toBeNull())
+
+  it("cross-team project vs namespace -> flagged", () =>
+    expect(findOwnershipMismatch("platform", "frontend-prod", mappings)).toEqual({
+      project: "platform",
+      namespace: "frontend-prod",
+      projectOwner: "platform-team",
+      namespaceOwner: "frontend-team",
+    }))
+
+  it("project owned by one team, namespace owned by a different team -> flagged", () =>
+    expect(findOwnershipMismatch("apps", "platform-system", mappings)).toEqual({
+      project: "apps",
+      namespace: "platform-system",
+      projectOwner: "frontend-team",
+      namespaceOwner: "platform-team",
+    }))
+
+  it("unmapped namespace + unmapped project -> not a mismatch, just unscoped", () =>
+    expect(findOwnershipMismatch("default", "kube-system", mappings)).toBeNull())
+
+  // Judgment call: a project a team DOES own, deployed to a namespace mapped to no
+  // team, is still flagged. It's the app leaving that team's declared territory —
+  // the same boundary-crossing concern as the cross-team case, just with one side
+  // unmapped instead of mapped to someone else. Falls out of the same "owners
+  // differ" rule as the cross-team case, no special-casing needed.
+  it("mapped project + unmapped namespace -> flagged (leaving the team's territory)", () =>
+    expect(findOwnershipMismatch("platform", "kube-system", mappings)).toEqual({
+      project: "platform",
+      namespace: "kube-system",
+      projectOwner: "platform-team",
+      namespaceOwner: null,
+    }))
+
+  it("unmapped project + mapped namespace -> flagged symmetrically", () =>
+    expect(findOwnershipMismatch("default", "frontend-prod", mappings)).toEqual({
+      project: "default",
+      namespace: "frontend-prod",
+      projectOwner: null,
+      namespaceOwner: "frontend-team",
+    }))
 })
 
 describe("alertMatchesScope", () => {

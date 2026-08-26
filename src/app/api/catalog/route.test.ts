@@ -101,3 +101,31 @@ describe("GET /api/catalog — scope enforcement", () => {
     expect(res.status).toBe(401)
   })
 })
+
+// portal#31 AC: "ArgoCD project and Kubernetes namespace ownership mismatches are
+// denied or explicitly flagged" — flagged, not denied: a cluster-admin still sees
+// the mismatched app (visibility is unchanged), the response just carries the flag.
+describe("GET /api/catalog — ownership mismatch flag", () => {
+  it("flags an app whose project and namespace belong to different teams", async () => {
+    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    const crossedApp = fakeApp("crossed-app", "platform", "frontend-app")
+    vi.mocked(getArgoApps).mockResolvedValue([crossedApp])
+    const res = await GET()
+    const body = await res.json()
+    const entry = body.find((s: { name: string }) => s.name === "crossed-app")
+    expect(entry.ownershipMismatch).toEqual({
+      project: "platform",
+      namespace: "frontend-app",
+      projectOwner: "platform-team",
+      namespaceOwner: "frontend-team",
+    })
+  })
+
+  it("does not flag an app whose project and namespace belong to the same team", async () => {
+    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    const res = await GET()
+    const body = await res.json()
+    const entry = body.find((s: { name: string }) => s.name === "platform-app")
+    expect(entry.ownershipMismatch).toBeNull()
+  })
+})

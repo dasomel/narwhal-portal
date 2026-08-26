@@ -89,3 +89,31 @@ describe("GET /api/governance/scorecard — scope enforcement", () => {
     expect(res.status).toBe(401)
   })
 })
+
+// portal#31 AC: "ArgoCD project and Kubernetes namespace ownership mismatches are
+// denied or explicitly flagged" — flagged, not denied: appVisible's OR semantics
+// (checked above) are unchanged, this only asserts the new informational field.
+describe("GET /api/governance/scorecard — ownership mismatch flag", () => {
+  it("flags an app whose project and namespace belong to different teams", async () => {
+    vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
+    const crossedApp = fakeApp("crossed-app", "platform", "frontend-app")
+    vi.mocked(getArgoAppsOrThrow).mockResolvedValue([crossedApp])
+    const res = await GET()
+    const body = await res.json()
+    const entry = body.find((s: { service: string }) => s.service === "crossed-app")
+    expect(entry.ownershipMismatch).toEqual({
+      project: "platform",
+      namespace: "frontend-app",
+      projectOwner: "platform-team",
+      namespaceOwner: "frontend-team",
+    })
+  })
+
+  it("does not flag an app whose project and namespace belong to the same team", async () => {
+    vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
+    const res = await GET()
+    const body = await res.json()
+    const entry = body.find((s: { service: string }) => s.service === "platform-app")
+    expect(entry.ownershipMismatch).toBeNull()
+  })
+})

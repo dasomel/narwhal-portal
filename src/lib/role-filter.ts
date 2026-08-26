@@ -3,7 +3,7 @@ import { join } from "path"
 import { createHash } from "node:crypto"
 import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 
-interface TeamMapping {
+export interface TeamMapping {
   group: string
   namespaces: string[]
   argocdProjects: string[]
@@ -188,6 +188,58 @@ export function appMatchesScope(
   scope: Pick<UserScope, "namespaces" | "argocdProjects">,
 ): boolean {
   return projectMatchesScope(project, scope.argocdProjects) || namespaceMatchesScope(namespace, scope.namespaces)
+}
+
+/** The raw team mappings from config/role-filter.json, for callers that need the
+ * full namespace/project shape rather than just the team names configuredMappings()
+ * exposes. */
+export function getTeamMappings(): TeamMapping[] {
+  return teamMappingsOf(loadConfig())
+}
+
+// portal#31 AC: "ArgoCD project and Kubernetes namespace ownership mismatches are
+// denied or explicitly flagged". appVisible/appMatchesScope deliberately use OR
+// semantics (project match OR namespace match) so an app stays visible to the team
+// that owns it even when only one side of role-filter.json is configured for that
+// team. That OR is correct for VISIBILITY, but it also means a misconfigured or
+// malicious Application can declare `project: platform` while its
+// `destination.namespace` is `frontend-prod` and still render normally — silently
+// crossing a team boundary the config otherwise enforces. This is a separate,
+// informational check for exactly that: it does not change what appVisible/
+// appMatchesScope decide, it flags when the two ownership answers disagree.
+export interface OwnershipMismatch {
+  project: string
+  namespace: string
+  /** Team whose argocdProjects includes `project`, or null if no team claims it. */
+  projectOwner: string | null
+  /** Team whose namespaces pattern matches `namespace`, or null if no team claims it. */
+  namespaceOwner: string | null
+}
+
+/**
+ * Compares who owns the app's declared project against who owns its actual
+ * destination namespace. Returns null when they agree — including when NEITHER
+ * side is owned by any team, which is "unscoped", not a mismatch: an app in an
+ * unmapped namespace with an unmapped project hasn't crossed anything.
+ *
+ * A project owned by team A deployed into a namespace owned by team B (or by no
+ * team at all) IS flagged in both directions — a mapped project landing outside
+ * its team's namespaces, or a mapped namespace receiving an app from a project
+ * nobody assigned it, are both the app leaving its team's declared territory.
+ * Both cases, plus the cross-team case, fall out of one rule ("owners differ")
+ * with no special-casing: `null === null` (neither owned) is equality in JS, so
+ * it naturally resolves to "no mismatch", while `"team" === null` does not.
+ */
+export function findOwnershipMismatch(
+  project: string,
+  namespace: string,
+  teamMappings: TeamMapping[],
+): OwnershipMismatch | null {
+  const projectOwner = teamMappings.find((m) => m.argocdProjects.includes(project))?.group ?? null
+  const namespaceOwner =
+    teamMappings.find((m) => m.namespaces.some((p) => matchesNamespacePattern(p, namespace)))?.group ?? null
+  if (projectOwner === namespaceOwner) return null
+  return { project, namespace, projectOwner, namespaceOwner }
 }
 
 // STRICT authz scope (ArgoCD project authorization via argocd.ts).

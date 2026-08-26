@@ -4,6 +4,7 @@ import { getArgoAppsOrThrow } from "@/lib/argocd"
 import { getAlerts } from "@/lib/alertmanager"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import { appVisible, getEffectiveScope } from "@/lib/scope"
+import { findOwnershipMismatch, getTeamMappings, type OwnershipMismatch } from "@/lib/role-filter"
 
 export const dynamic = "force-dynamic"
 
@@ -18,6 +19,10 @@ export interface ScorecardItem {
     overall: number
   }
   details: string[]
+  // portal#31 AC: flag (not deny) when this app's declared ArgoCD project and its
+  // actual destination namespace are owned by different teams per
+  // role-filter.json — null when they agree or neither is mapped.
+  ownershipMismatch: OwnershipMismatch | null
 }
 
 export async function GET() {
@@ -39,6 +44,7 @@ export async function GET() {
     const apps = allApps.filter((app) =>
       appVisible(app.spec.project ?? "default", app.spec.destination?.namespace ?? app.metadata.namespace ?? "default", scope),
     )
+    const teamMappings = getTeamMappings()
 
     const scorecards: ScorecardItem[] = apps.map((app) => {
       const details: string[] = []
@@ -79,11 +85,15 @@ export async function GET() {
 
       const overall = Math.round((gitops + health + alerting + resources) / 4)
 
+      const project = app.spec.project ?? "default"
+      const namespace = app.spec.destination?.namespace ?? "default"
+
       return {
         service: app.metadata.name,
-        namespace: app.spec.destination?.namespace ?? "default",
+        namespace,
         scores: { gitops, health, alerting, resources, overall },
         details,
+        ownershipMismatch: findOwnershipMismatch(project, namespace, teamMappings),
       }
     })
 

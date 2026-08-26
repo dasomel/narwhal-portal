@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { getArgoApps, appToCatalogService } from "@/lib/argocd"
 import { appVisible, getEffectiveScope } from "@/lib/scope"
+import { findOwnershipMismatch, getTeamMappings } from "@/lib/role-filter"
 
 export const dynamic = "force-dynamic"
 
@@ -19,6 +20,7 @@ export async function GET() {
 
   try {
     const apps = await getArgoApps()
+    const teamMappings = getTeamMappings()
     const services = apps
       .filter((a) =>
         appVisible(
@@ -28,6 +30,13 @@ export async function GET() {
         ),
       )
       .map(appToCatalogService)
+      // portal#31 AC: flag (not deny) apps whose declared project and actual
+      // destination namespace belong to different teams per role-filter.json —
+      // visibility above still uses appVisible's OR semantics unchanged.
+      .map((service) => ({
+        ...service,
+        ownershipMismatch: findOwnershipMismatch(service.project, service.namespace, teamMappings),
+      }))
     return NextResponse.json(services)
   } catch (err) {
     console.error("[api/catalog]", err)

@@ -1,5 +1,5 @@
 import { cacheGet, cacheSet } from "./valkey"
-import { getUserScope } from "./role-filter"
+import { getUserScope, type OwnershipMismatch } from "./role-filter"
 import { getEffectiveScope, namespaceVisible } from "./scope"
 
 const ARGOCD_URL = process.env.ARGOCD_URL ?? "http://localhost:8080"
@@ -117,6 +117,11 @@ export interface CatalogService {
   runbookUrl?: string
   scoreTier?: ScoreTier
   scoreValue?: number
+  /** portal#31: set by callers that have team-mapping context (appToCatalogService
+   * itself has none) — null when project/namespace ownership agree or neither is
+   * mapped, otherwise the ownership disagreement. See role-filter.ts's
+   * findOwnershipMismatch. */
+  ownershipMismatch?: OwnershipMismatch | null
 }
 
 export function appToCatalogService(app: ArgoApp): CatalogService {
