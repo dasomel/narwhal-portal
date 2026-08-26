@@ -171,7 +171,11 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
+      # --metadata-file captures the resulting manifest-list digest (containerimage.digest),
+      # the same mechanism docker/build-push-action uses for the per-arch "Export digest"
+      # step above. The sign job below signs this digest, not a mutable tag.
       - name: Create manifest list and push
+        id: create-manifest
         working-directory: ${{ runner.temp }}/digests
         run: |
           set -euo pipefail
@@ -181,8 +185,11 @@ jobs:
           [ "$count" -ge 2 ] || { echo "::error::expected 2 digests, got ${count}"; exit 1; }
           # shellcheck disable=SC2046
           docker buildx imagetools create \
+            --metadata-file "${RUNNER_TEMP}/manifest-metadata.json" \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf "${IMAGE}@sha256:%s " *)
+          digest=$(jq -r '.["containerimage.digest"]' "${RUNNER_TEMP}/manifest-metadata.json")
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Verify both architectures are present
         run: |
@@ -196,3 +203,101 @@ jobs:
               >/dev/null <<< "$raw" \
               || { echo "::error::${arch} missing from ${ref}"; exit 1; }
           done
+    outputs:
+      digest: ${{ steps.create-manifest.outputs.digest }}
+
+  sign:
+    name: Sign published image
+    runs-on: ubuntu-latest
+    needs: merge
+    # WHY THIS EXISTS (narwhal#35): narwhal's Kyverno verify-image-signatures ClusterPolicy
+    # and its air-gap preflight gate (scripts/airgap/10-verify-image-signatures.sh) both
+    # expect a Cosign signature made with a static key pair — narwhal's own docs
+    # (docs/common/supply-chain-policy.md §6) chose key-based verification specifically to
+    # avoid a runtime dependency on the public Sigstore Rekor log in an air-gapped cluster.
+    # narwhal#35 flagged that the signing half belongs here, since narwhal only consumes
+    # images this repo publishes. See docs/cosign-signing-setup.md for the one-time human
+    # setup (key generation + the two secrets below) this step assumes.
+    permissions:
+      contents: read
+      packages: write # cosign pushes the signature as an OCI artifact alongside the image
+    steps:
+      # A v*.*.* tag is a real release — GitOps will pull this image, so it must be signed
+      # or the workflow fails. workflow_dispatch is an ad-hoc/manual build (same distinction
+      # the merge job already draws for the :latest tag at line ~172); it still gets signed
+      # when the secrets are configured, but a missing secret only warns, never fails it.
+      - name: Determine whether signing is mandatory
+        id: gate
+        run: |
+          set -euo pipefail
+          if [[ "${{ startsWith(github.ref, 'refs/tags/v') }}" == "true" ]]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "required=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # GitHub Actions expressions evaluate `secrets.X != ''` without ever placing the
+      # secret value itself into the generated script or logs, so this is safe to use for a
+      # presence check. Both secrets are required: cosign.key from `generate-key-pair` is
+      # password-encrypted by default, and cosign only decrypts it non-interactively when
+      # COSIGN_PASSWORD is set — without it, `cosign sign` would block on a stdin prompt
+      # that doesn't exist on a runner.
+      - name: Check signing secrets are configured
+        id: secrets-check
+        env:
+          KEY_PRESENT: ${{ secrets.COSIGN_PRIVATE_KEY != '' }}
+          PASSWORD_PRESENT: ${{ secrets.COSIGN_PASSWORD != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "$KEY_PRESENT" == "true" && "$PASSWORD_PRESENT" == "true" ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail — release build published without signing secrets
+        if: steps.gate.outputs.required == 'true' && steps.secrets-check.outputs.present == 'false'
+        run: |
+          echo "::error::COSIGN_PRIVATE_KEY and/or COSIGN_PASSWORD secrets are not configured. A v*.*.* release must be signed for narwhal's Kyverno admission policy. See docs/cosign-signing-setup.md."
+          exit 1
+
+      - name: Skip signing — secrets not configured on a non-release build
+        if: steps.gate.outputs.required == 'false' && steps.secrets-check.outputs.present == 'false'
+        run: echo "::warning::COSIGN_PRIVATE_KEY/COSIGN_PASSWORD not configured — skipping image signing for this workflow_dispatch build (not a v*.*.* release)."
+
+      # cosign-installer verifies the cosign binary it downloads itself (see the action's
+      # README), matching this repo's convention of pinning every `uses:` to a full commit
+      # SHA with the version as a comment.
+      - name: Install cosign
+        if: steps.secrets-check.outputs.present == 'true'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Log in to GHCR
+        if: steps.secrets-check.outputs.present == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Signs the immutable manifest-list digest from the merge job, not a mutable tag —
+      # a later `:latest`/`:1.2` re-point must not silently carry an old signature.
+      # --yes skips cosign's interactive "publish to a public registry?" confirmation
+      # prompt, which would otherwise hang a non-interactive CI runner (verified against
+      # the locally installed cosign v3.1.3). COSIGN_PASSWORD is a cosign-recognized env
+      # var name read automatically to decrypt the key — no explicit --password flag
+      # exists on `cosign sign`. Deliberately no --tlog-upload/--use-signing-config flag:
+      # cosign-installer defaults to cosign v3.0.6, and --tlog-upload=false requires the
+      # newer --use-signing-config mechanism that v3.0.6 may not have, so pinning the sign
+      # invocation to that flag combo untested against the actually-installed version is
+      # a worse risk than the transparency-log upload itself — this CI runner has internet
+      # access and narwhal's air-gap policy only constrains the cluster-side *verify* path
+      # (docs/common/supply-chain-policy.md §6), not this sign step.
+      - name: Sign image digest
+        if: steps.secrets-check.outputs.present == 'true'
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${IMAGE}@${{ needs.merge.outputs.digest }}"
