@@ -100,6 +100,10 @@ components:
     rounded: "{rounded.md}"
 ---
 
+## Product archetype
+
+`archetype: Operations Dashboard`
+
 ## Overview
 
 The Narwhal Portal is the management UI for a Kubernetes Internal Developer
