@@ -1,7 +1,7 @@
 import "server-only"
 import { K8S_API_SERVER } from "./config"
 import { cacheGet, cacheSet } from "./valkey"
-import type { SecuritySummary, WorkloadVulnRow, ImageVulnReport, Vulnerability, Severity } from "@/types/security"
+import type { SecuritySummary, WorkloadVulnRow, ImageVulnReport, Vulnerability, Severity, VulnDbFreshness } from "@/types/security"
 
 // --- K8s API helpers (local, avoids circular dep with k8s-client.ts) ---
 const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""

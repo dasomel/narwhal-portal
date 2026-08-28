@@ -13,7 +13,7 @@ describe("Runtime Configuration Validation (Issue #60)", () => {
   })
 
   it("passes validation in development profile with defaults", () => {
-    process.env.NODE_ENV = "development"
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
     const result = validateRuntimeConfig()
     expect(result.environment).toBe("development")
     expect(result.valid).toBe(true)
@@ -21,7 +21,7 @@ describe("Runtime Configuration Validation (Issue #60)", () => {
   })
 
   it("fails fast in production if required Keycloak variables are missing", () => {
-    process.env.NODE_ENV = "production"
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
     delete process.env.AUTH_MOCK
     delete process.env.AUTH_SECRET
     delete process.env.KEYCLOAK_ISSUER
@@ -38,7 +38,7 @@ describe("Runtime Configuration Validation (Issue #60)", () => {
   })
 
   it("passes in production when all required variables are supplied", () => {
-    process.env.NODE_ENV = "production"
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
     delete process.env.AUTH_MOCK
     process.env.AUTH_SECRET = "secret"
     process.env.KEYCLOAK_ISSUER = "https://keycloak.narwhal.internal"

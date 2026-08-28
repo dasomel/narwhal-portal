@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
-import { validateRuntimeConfig, IS_PRODUCTION } from "@/lib/config"
-import { getValkeyClient } from "@/lib/valkey"
+import { validateRuntimeConfig } from "@/lib/config"
+import { getValkey } from "@/lib/valkey"
 
 export const dynamic = "force-dynamic"
 
@@ -25,7 +25,7 @@ export async function GET() {
   let valkeyStatus: "ok" | "degraded" | "skipped" = "skipped"
   if (process.env.VALKEY_URL || process.env.VALKEY_PASSWORD) {
     try {
-      const client = getValkeyClient()
+      const client = getValkey()
       const pingRes = await Promise.race([
         client.ping(),
         new Promise((_, reject) =>
