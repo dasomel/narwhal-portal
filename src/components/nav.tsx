@@ -85,10 +85,18 @@ export function Nav() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => {
-            // Federated logout: also ends the Keycloak SSO session so the user
-            // is not silently logged back in.
-            window.location.href = "/api/auth/federated-logout"
+          onClick={async () => {
+            // Federated logout: POST request with CSRF verification
+            try {
+              const res = await fetch("/api/auth/federated-logout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+              })
+              const data = await res.json().catch(() => null)
+              window.location.href = data?.url || "/login"
+            } catch {
+              window.location.href = "/login"
+            }
           }}
         >
           {t("nav.logout")}

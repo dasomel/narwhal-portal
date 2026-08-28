@@ -2,55 +2,137 @@ import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/lib/auth"
 import { isSessionCookieChunk } from "@/lib/session-cookie"
 
-// RP-initiated (federated) logout: clears the portal session AND ends the Keycloak
-// SSO session via the end_session_endpoint. Without this, NextAuth signOut() only
-// drops the local cookie while the Keycloak session survives, so the portal's
-// auto-redirect silently logs the user straight back in.
-export async function GET(request: NextRequest) {
+// Valid allowed redirect hosts for post-logout
+const ALLOWED_REDIRECT_HOST_SUFFIXES = [
+  ".narwhal.internal",
+  "localhost",
+  "127.0.0.1",
+]
+
+function isAllowedRedirectUrl(targetUrl: string, authUrl: string): boolean {
+  try {
+    const parsed = new URL(targetUrl, authUrl || "http://localhost:3000")
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false
+    if (authUrl) {
+      const parsedAuth = new URL(authUrl)
+      if (parsed.host === parsedAuth.host) return true
+    }
+    return ALLOWED_REDIRECT_HOST_SUFFIXES.some(
+      (suffix) => parsed.hostname === suffix || parsed.hostname.endsWith(suffix)
+    )
+  } catch {
+    return false
+  }
+}
+
+function clearSessionCookies(res: NextResponse, request: NextRequest, authUrl: string) {
+  const isHttps = (authUrl || "").startsWith("https")
+  const expire = (name: string, secure: boolean) =>
+    res.cookies.set(name, "", {
+      path: "/",
+      expires: new Date(0),
+      secure,
+      httpOnly: true,
+      sameSite: "lax",
+    })
+
+  expire("authjs.session-token", false)
+  expire("authjs.callback-url", false)
+  expire("authjs.csrf-token", false)
+
+  if (isHttps) {
+    expire("__Secure-authjs.session-token", true)
+    expire("__Secure-authjs.callback-url", true)
+    res.cookies.set("__Host-authjs.csrf-token", "", {
+      path: "/",
+      expires: new Date(0),
+      secure: true,
+      httpOnly: true,
+      sameSite: "lax",
+    })
+  }
+
+  for (const { name } of request.cookies.getAll()) {
+    if (isSessionCookieChunk(name)) {
+      expire(name, name.startsWith("__Secure-"))
+    }
+  }
+}
+
+// Issue #56: Disallow GET to prevent cross-site logout trigger via simple image/link tags
+export async function GET() {
+  return NextResponse.json(
+    { error: "Method Not Allowed. Federated logout requires a POST request." },
+    { status: 405, headers: { Allow: "POST" } }
+  )
+}
+
+// POST endpoint for CSRF-safe RP-initiated logout
+export async function POST(request: NextRequest) {
+  // CSRF / Same-Origin verification
+  const origin = request.headers.get("origin")
+  const host = request.headers.get("host")
+  const secFetchSite = request.headers.get("sec-fetch-site")
+
+  if (secFetchSite && secFetchSite === "cross-site") {
+    return NextResponse.json(
+      { error: "Forbidden: cross-site logout rejected" },
+      { status: 403 }
+    )
+  }
+
+  if (origin && host) {
+    try {
+      const originUrl = new URL(origin)
+      if (originUrl.host !== host) {
+        return NextResponse.json(
+          { error: "Forbidden: cross-origin logout rejected" },
+          { status: 403 }
+        )
+      }
+    } catch {
+      return NextResponse.json(
+        { error: "Bad Request: invalid origin header" },
+        { status: 400 }
+      )
+    }
+  }
+
   const session = await auth()
   const issuer = process.env.KEYCLOAK_ISSUER
   const authUrl = process.env.AUTH_URL ?? ""
-  // Single Logout chain: after Keycloak ends the SSO session it redirects to the
-  // first gateway app's /apisix/logout, which clears that app's gateway session and
-  // chains to the next (configured per-route post_logout_redirect_uri), finally
-  // landing back on the portal /login. Falls back to /login if not configured.
   const sloChainStart =
     process.env.SLO_CHAIN_START ?? "https://gitea.local.narwhal.internal/apisix/logout"
-  const postLogoutRedirect = sloChainStart || `${authUrl}/login`
+  const defaultRedirect = sloChainStart || `${authUrl}/login`
+
+  // Allow client to specify post_logout_redirect if permitted
+  let postLogoutRedirect = defaultRedirect
+  try {
+    const body = await request.json().catch(() => null)
+    if (body?.redirectUri && typeof body.redirectUri === "string") {
+      if (isAllowedRedirectUrl(body.redirectUri, authUrl)) {
+        postLogoutRedirect = body.redirectUri
+      }
+    }
+  } catch {
+    // Ignore JSON parsing errors and use defaultRedirect
+  }
+
+  if (!isAllowedRedirectUrl(postLogoutRedirect, authUrl)) {
+    postLogoutRedirect = `${authUrl}/login`
+  }
 
   let target = postLogoutRedirect
   if (issuer) {
     const url = new URL(`${issuer}/protocol/openid-connect/logout`)
     url.searchParams.set("post_logout_redirect_uri", postLogoutRedirect)
-    // Keycloak requires id_token_hint OR client_id to validate post_logout_redirect_uri.
-    // Sessions created before id_token was persisted won't have it — client_id keeps
-    // logout working as a fallback.
     const clientId = process.env.KEYCLOAK_CLIENT_ID
     if (clientId) url.searchParams.set("client_id", clientId)
     if (session?.idToken) url.searchParams.set("id_token_hint", session.idToken)
     target = url.toString()
   }
 
-  const res = NextResponse.redirect(target)
-  const isHttps = (authUrl || "").startsWith("https")
-  // Expire every NextAuth cookie variant. __Secure-/__Host- prefixed cookies are
-  // only cleared by the browser if the clearing Set-Cookie also carries Secure.
-  const expire = (name: string, secure: boolean) =>
-    res.cookies.set(name, "", { path: "/", expires: new Date(0), secure, httpOnly: true, sameSite: "lax" })
-  expire("authjs.session-token", false)
-  expire("authjs.callback-url", false)
-  expire("authjs.csrf-token", false)
-  if (isHttps) {
-    expire("__Secure-authjs.session-token", true)
-    expire("__Secure-authjs.callback-url", true)
-    res.cookies.set("__Host-authjs.csrf-token", "", { path: "/", expires: new Date(0), secure: true, httpOnly: true, sameSite: "lax" })
-  }
-  // The session cookie is chunked (see session-cookie.ts). Expiring only the
-  // base names above would leave the chunks alive → still logged in after logout.
-  for (const { name } of request.cookies.getAll()) {
-    if (isSessionCookieChunk(name)) {
-      expire(name, name.startsWith("__Secure-"))
-    }
-  }
+  const res = NextResponse.json({ ok: true, url: target })
+  clearSessionCookies(res, request, authUrl)
   return res
 }
