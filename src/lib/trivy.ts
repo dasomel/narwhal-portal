@@ -125,13 +125,33 @@ function scoreRow(row: WorkloadVulnRow): number {
   return row.summary.Critical * 1000 + row.summary.High * 100 + row.summary.Medium * 10 + row.summary.Low
 }
 
-// --- Safe empty defaults ---
+export function computeVulnDbFreshness(lastSyncIso?: string): VulnDbFreshness {
+  const syncTime = lastSyncIso || process.env.VULN_DB_LAST_SYNC || new Date().toISOString()
+  const syncDate = new Date(syncTime)
+  const diffMs = Math.max(0, Date.now() - (isNaN(syncDate.getTime()) ? Date.now() : syncDate.getTime()))
+  const dbAgeDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  let status: "fresh" | "stale" | "critical" = "fresh"
+  if (dbAgeDays >= 30) {
+    status = "critical"
+  } else if (dbAgeDays >= 14) {
+    status = "stale"
+  }
+
+  return {
+    lastSyncTime: syncTime,
+    dbAgeDays,
+    status,
+    dbRegistry: process.env.TRIVY_DB_REGISTRY || "harbor.kakao.narwhal.internal/library/trivy-db",
+  }
+}
 
 const emptySummary: SecuritySummary = {
   totals: { Critical: 0, High: 0, Medium: 0, Low: 0, Unknown: 0 },
   scannedImages: 0,
   scannedWorkloads: 0,
   lastUpdated: new Date().toISOString(),
+  vulnDb: computeVulnDbFreshness(),
 }
 
 // --- Exported functions (signatures unchanged) ---
@@ -174,6 +194,7 @@ export async function getSecuritySummary(): Promise<SecuritySummary> {
       scannedImages: imageSet.size,
       scannedWorkloads: workloadSet.size,
       lastUpdated: latestTs || new Date().toISOString(),
+      vulnDb: computeVulnDbFreshness(latestTs),
     }
 
     await cacheSet(cacheKey, result, 60)

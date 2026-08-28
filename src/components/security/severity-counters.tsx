@@ -37,16 +37,35 @@ export function SeverityCounters({ summary, locale }: Props) {
           </div>
         ))}
       </div>
-      <div className="flex items-center gap-6 text-xs text-muted-foreground">
-        <span>
-          {t(locale, "security.summary.scannedImages")}: <span className="font-medium text-foreground">{summary.scannedImages}</span>
-        </span>
-        <span>
-          {t(locale, "security.summary.scannedWorkloads")}: <span className="font-medium text-foreground">{summary.scannedWorkloads}</span>
-        </span>
-        <span>
-          {t(locale, "security.summary.lastUpdated")}: <span className="font-medium text-foreground">{relativeTime(summary.lastUpdated, locale)}</span>
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-6">
+          <span>
+            {t(locale, "security.summary.scannedImages")}: <span className="font-medium text-foreground">{summary.scannedImages}</span>
+          </span>
+          <span>
+            {t(locale, "security.summary.scannedWorkloads")}: <span className="font-medium text-foreground">{summary.scannedWorkloads}</span>
+          </span>
+          <span>
+            {t(locale, "security.summary.lastUpdated")}: <span className="font-medium text-foreground">{relativeTime(summary.lastUpdated, locale)}</span>
+          </span>
+        </div>
+        {summary.vulnDb && (
+          <div className="flex items-center gap-2">
+            <span>Vulnerability DB:</span>
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                summary.vulnDb.status === "fresh"
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800"
+                  : summary.vulnDb.status === "stale"
+                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-300 dark:border-amber-800"
+                  : "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-400 border border-red-300 dark:border-red-800"
+              }`}
+              title={`Last sync: ${new Date(summary.vulnDb.lastSyncTime).toISOString()}`}
+            >
+              {summary.vulnDb.status === "fresh" ? "● Fresh" : summary.vulnDb.status === "stale" ? "▲ Stale" : "✖ Outdated"} (Age: {summary.vulnDb.dbAgeDays}d)
+            </span>
+          </div>
+        )}
       </div>
     </div>
   )

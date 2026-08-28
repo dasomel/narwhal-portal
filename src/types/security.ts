@@ -34,11 +34,19 @@ export interface WorkloadVulnRow {
   summary: SeverityCounts
 }
 
+export interface VulnDbFreshness {
+  lastSyncTime: string
+  dbAgeDays: number
+  status: "fresh" | "stale" | "critical"
+  dbRegistry?: string
+}
+
 export interface SecuritySummary {
   totals: SeverityCounts
   scannedImages: number
   scannedWorkloads: number
   lastUpdated: string
+  vulnDb?: VulnDbFreshness
 }
 
 export type FalcoEventPriority =
