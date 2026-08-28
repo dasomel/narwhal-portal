@@ -4,9 +4,9 @@
  * while preserving local development ergonomics.
  */
 
-export const IS_PRODUCTION = process.env.NODE_ENV === "production"
-export const IS_DEVELOPMENT = process.env.NODE_ENV === "development"
-export const IS_TEST = process.env.NODE_ENV === "test"
+export function isProduction(): boolean {
+  return process.env.NODE_ENV === "production"
+}
 
 // Centralized K8S_API_SERVER configuration
 export function getK8sApiServer(): string {
@@ -17,7 +17,7 @@ export function getK8sApiServer(): string {
     const port = process.env.KUBERNETES_SERVICE_PORT || "443"
     return `https://${process.env.KUBERNETES_SERVICE_HOST}:${port}`
   }
-  if (!IS_PRODUCTION) {
+  if (process.env.NODE_ENV !== "production") {
     // Development-only fallback for local VM cluster
     return "https://192.168.56.100:6443"
   }
@@ -28,7 +28,7 @@ export const K8S_API_SERVER =
   process.env.K8S_API_SERVER ||
   (process.env.KUBERNETES_SERVICE_HOST
     ? `https://${process.env.KUBERNETES_SERVICE_HOST}:${process.env.KUBERNETES_SERVICE_PORT || "443"}`
-    : IS_PRODUCTION
+    : process.env.NODE_ENV === "production"
     ? ""
     : "https://192.168.56.100:6443")
 
@@ -41,7 +41,7 @@ export interface ConfigValidationResult {
 }
 
 export function validateRuntimeConfig(): ConfigValidationResult {
-  const isProd = IS_PRODUCTION
+  const isProd = process.env.NODE_ENV === "production"
   const missingRequired: string[] = []
   const missingOptional: string[] = []
   const details: Record<string, "configured" | "missing" | "defaulted"> = {}

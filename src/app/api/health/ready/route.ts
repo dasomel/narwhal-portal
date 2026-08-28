@@ -39,7 +39,7 @@ export async function GET() {
   }
 
   // In production without mock auth, fail readiness if valkey is down
-  if (IS_PRODUCTION && process.env.AUTH_MOCK !== "true" && valkeyStatus === "degraded") {
+  if (process.env.NODE_ENV === "production" && process.env.AUTH_MOCK !== "true" && valkeyStatus === "degraded") {
     return NextResponse.json(
       {
         status: "not_ready",

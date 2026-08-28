@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { validateRuntimeConfig } from "@/lib/config"
-import { auth } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -8,9 +7,6 @@ export const dynamic = "force-dynamic"
 // Does not expose secret values, credentials, or sensitive tokens.
 export async function GET() {
   const config = validateRuntimeConfig()
-
-  // Optional: check session role if authenticated
-  const session = await auth().catch(() => null)
 
   const dependencyHealth = {
     keycloak: process.env.KEYCLOAK_ISSUER ? "configured" : "unconfigured",
@@ -36,6 +32,5 @@ export async function GET() {
       details: config.details,
     },
     dependencies: dependencyHealth,
-    authenticated: Boolean(session),
   })
 }
