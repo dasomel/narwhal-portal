@@ -74,6 +74,13 @@ export async function POST(request: NextRequest) {
   const host = request.headers.get("host")
   const secFetchSite = request.headers.get("sec-fetch-site")
 
+  if (!origin && !secFetchSite) {
+    return NextResponse.json(
+      { error: "Forbidden: logout request origin could not be verified" },
+      { status: 403 }
+    )
+  }
+
   if (secFetchSite && secFetchSite === "cross-site") {
     return NextResponse.json(
       { error: "Forbidden: cross-site logout rejected" },

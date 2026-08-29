@@ -47,6 +47,26 @@ describe("Federated Logout API (Issue #56)", () => {
     expect(res.status).toBe(403)
   })
 
+  it("rejects POST requests without Origin or Sec-Fetch-Site", async () => {
+    const req = new NextRequest("https://portal.local.narwhal.internal/api/auth/federated-logout", {
+      method: "POST",
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(403)
+  })
+
+  it("accepts POST requests explicitly marked same-origin", async () => {
+    const req = new NextRequest("https://portal.local.narwhal.internal/api/auth/federated-logout", {
+      method: "POST",
+      headers: {
+        "sec-fetch-site": "same-origin",
+      },
+    })
+    const res = await POST(req)
+
+    expect(res.status).toBe(200)
+  })
+
   it("accepts valid same-origin POST and returns Keycloak SLO url", async () => {
     const req = new NextRequest("https://portal.local.narwhal.internal/api/auth/federated-logout", {
       method: "POST",
@@ -62,5 +82,24 @@ describe("Federated Logout API (Issue #56)", () => {
     expect(json.url).toContain("https://keycloak.local.narwhal.internal/realms/narwhal/protocol/openid-connect/logout")
     expect(json.url).toContain("post_logout_redirect_uri")
     expect(json.url).toContain("id_token_hint=sample-id-token")
+  })
+
+  it("keeps the configured SLO redirect when a requested redirect is not allowed", async () => {
+    const req = new NextRequest("https://portal.local.narwhal.internal/api/auth/federated-logout", {
+      method: "POST",
+      headers: {
+        host: "portal.local.narwhal.internal",
+        origin: "https://portal.local.narwhal.internal",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ redirectUri: "https://evil-site.example/logout" }),
+    })
+    const res = await POST(req)
+    const json = await res.json()
+    const logoutUrl = new URL(json.url)
+
+    expect(logoutUrl.searchParams.get("post_logout_redirect_uri")).toBe(
+      "https://gitea.local.narwhal.internal/apisix/logout"
+    )
   })
 })
