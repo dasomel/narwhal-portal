@@ -2,14 +2,15 @@ import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/lib/auth"
 import { isSessionCookieChunk } from "@/lib/session-cookie"
 
-// Valid allowed redirect hosts for post-logout
-const ALLOWED_REDIRECT_HOST_SUFFIXES = [
-  ".narwhal.internal",
-  "localhost",
-  "127.0.0.1",
-]
+// Valid allowed redirect hosts for post-logout.
+// Exact hosts and dot-anchored domain suffixes are kept separate: "localhost" / "127.0.0.1"
+// are single exact hosts, not suffixes, so an unanchored endsWith() on them would let a
+// hostname like "maliciouslocalhost" pass (open redirect). ".narwhal.internal" is a real
+// domain suffix, so its leading dot enforces a subdomain boundary.
+const ALLOWED_REDIRECT_EXACT_HOSTS = ["localhost", "127.0.0.1"]
+const ALLOWED_REDIRECT_HOST_SUFFIXES = [".narwhal.internal"]
 
-function isAllowedRedirectUrl(targetUrl: string, authUrl: string): boolean {
+export function isAllowedRedirectUrl(targetUrl: string, authUrl: string): boolean {
   try {
     const parsed = new URL(targetUrl, authUrl || "http://localhost:3000")
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false
@@ -17,8 +18,9 @@ function isAllowedRedirectUrl(targetUrl: string, authUrl: string): boolean {
       const parsedAuth = new URL(authUrl)
       if (parsed.host === parsedAuth.host) return true
     }
-    return ALLOWED_REDIRECT_HOST_SUFFIXES.some(
-      (suffix) => parsed.hostname === suffix || parsed.hostname.endsWith(suffix)
+    return (
+      ALLOWED_REDIRECT_EXACT_HOSTS.includes(parsed.hostname) ||
+      ALLOWED_REDIRECT_HOST_SUFFIXES.some((suffix) => parsed.hostname.endsWith(suffix))
     )
   } catch {
     return false
