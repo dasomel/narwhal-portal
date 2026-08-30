@@ -227,3 +227,6 @@ SCAFFOLD_COMPLETE
 
 # harness scratch workspace — do not commit
 /.claude/_workspace/
+
+# agent worktrees (isolation: "worktree" scratch checkouts) — never commit, ephemeral
+/.claude/worktrees/
