@@ -11,7 +11,7 @@ reproduced below as those licenses require. The portal's own code is Apache-2.0;
 pnpm run notices
 ```
 
-Scope: production dependencies only (`pnpm licenses list --prod`) — 670 packages.
+Scope: production dependencies only (`pnpm licenses list --prod`) — 672 packages.
 Development-only tooling is not redistributed and is therefore out of scope.
 Platform-gated native packages are excluded and listed separately (73 in the lockfile).
 
@@ -111,7 +111,7 @@ revisited — starting with `@img/sharp-libvips-*`, which is LGPL-3.0-or-later.
 
 | License | Packages |
 |---|---:|
-| MIT | 480 |
+| MIT | 482 |
 | Apache-2.0 | 110 |
 | ISC | 54 |
 | BSD-3-Clause | 9 |
@@ -135,7 +135,7 @@ or is an SPDX expression rather than a single identifier.
 
 ### CC-BY-4.0
 
-- `caniuse-lite@1.0.30001781` — https://github.com/browserslist/caniuse-lite#readme
+- `caniuse-lite@1.0.30001809` — https://github.com/browserslist/caniuse-lite#readme
 
 ### MIT AND ISC
 
@@ -2790,7 +2790,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 </details>
 
-### @next/env@16.3.1
+### @next/env@16.3.2
 
 - License: `MIT`
 - Author: Next.js Team
@@ -25674,7 +25674,7 @@ Apache License
 
 </details>
 
-### baseline-browser-mapping@2.10.10
+### baseline-browser-mapping@2.11.17
 
 - License: `Apache-2.0`
 - Homepage: https://github.com/web-platform-dx/baseline-browser-mapping#readme
@@ -26245,7 +26245,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 </details>
 
-### caniuse-lite@1.0.30001781
+### caniuse-lite@1.0.30001809
 
 - License: `CC-BY-4.0`
 - Author: Ben Briggs
@@ -35087,6 +35087,39 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
+### nanoid@3.3.18
+
+- License: `MIT`
+- Author: Andrey Sitnik
+- Homepage: https://github.com/ai/nanoid#readme
+
+<details><summary>LICENSE</summary>
+
+```
+The MIT License (MIT)
+
+Copyright 2017 Andrey Sitnik <andrey@sitnik.ru>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+</details>
+
 ### negotiator@1.0.0
 
 - License: `MIT`
@@ -35123,7 +35156,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
-### next@16.3.1
+### next@16.3.2
 
 - License: `MIT`
 - Homepage: https://nextjs.org
@@ -36714,6 +36747,39 @@ available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/b
 </details>
 
 ### postcss@8.5.14
+
+- License: `MIT`
+- Author: Andrey Sitnik
+- Homepage: https://postcss.org/
+
+<details><summary>LICENSE</summary>
+
+```
+The MIT License (MIT)
+
+Copyright 2013 Andrey Sitnik <andrey@sitnik.es>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+</details>
+
+### postcss@8.5.26
 
 - License: `MIT`
 - Author: Andrey Sitnik
