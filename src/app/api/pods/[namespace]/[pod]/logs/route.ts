@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
+import { getK8sApiServer } from "@/lib/config"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import {
   assertK8sName,
@@ -18,7 +19,6 @@ export interface PodLogsResponse {
   namespace: string
 }
 
-const K8S_API_SERVER = process.env.K8S_API_SERVER ?? "https://192.168.56.100:6443"
 const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
 
 const ALLOWED_ROLES = ["cluster-admin", "developer", "viewer"]
@@ -67,7 +67,7 @@ export async function GET(
     if (previous) query.set("previous", "true")
 
     const path = `/api/v1/namespaces/${safeK8sSegment(namespace)}/pods/${safeK8sSegment(pod)}/log?${query}`
-    const res = await fetch(`${K8S_API_SERVER}${path}`, {
+    const res = await fetch(`${getK8sApiServer()}${path}`, {
       headers: {
         Authorization: `Bearer ${K8S_TOKEN}`,
         // K8s pod-log subresource rejects `Accept: text/plain` with 406 on this API server;

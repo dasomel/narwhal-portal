@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
+import { getK8sApiServer } from "@/lib/config"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 
 export const dynamic = "force-dynamic"
@@ -16,7 +17,6 @@ export interface PodsResponse {
   pods: PodSummary[]
 }
 
-const K8S_API_SERVER = process.env.K8S_API_SERVER ?? "https://192.168.56.100:6443"
 const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
 
 interface K8sPodList {
@@ -45,7 +45,7 @@ async function fetchPodsByNamespace(namespace: string, instance?: string): Promi
     ? `?${new URLSearchParams({ labelSelector: `app.kubernetes.io/instance=${useInstance}` })}`
     : ""
   const path = `/api/v1/namespaces/${namespace}/pods${query}`
-  const res = await fetch(`${K8S_API_SERVER}${path}`, {
+  const res = await fetch(`${getK8sApiServer()}${path}`, {
     headers: {
       Authorization: `Bearer ${K8S_TOKEN}`,
       Accept: "application/json",
