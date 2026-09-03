@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
   try {
     const [apps, evals, scope] = await Promise.all([
       getArgoApps(),
-      evaluateAll(ownerFilter, tierFilter),
+      evaluateAll(tierFilter),
       getEffectiveScope(gate.session),
     ])
 
@@ -68,19 +68,23 @@ export async function GET(req: NextRequest) {
 
     // portal#31: this endpoint returned every service's scorecard to any
     // developer/viewer regardless of team ownership — filter to the same scope
-    // /api/catalog applies, before computing tierCounts so the aggregate counts
-    // don't leak cross-tenant data either. An app absent from serviceMap (deleted
-    // between fetches, or evaluateAll referencing a stale id) is excluded rather
-    // than assumed visible.
-    const scopedEvals = evals.filter((e) => {
+    // /api/catalog applies, plus the requested owner, before computing tierCounts
+    // so aggregates and returned services share one visibility-filtered set. An
+    // app absent from serviceMap (deleted between fetches, or evaluateAll
+    // referencing a stale id) is excluded rather than assumed visible.
+    const filteredEvals = evals.filter((e) => {
       const svc = serviceMap.get(e.serviceId)
-      return svc ? appVisible(svc.project, svc.namespace, scope) : false
+      return (
+        svc !== undefined &&
+        appVisible(svc.project, svc.namespace, scope) &&
+        (!ownerFilter || svc.owner === ownerFilter)
+      )
     })
 
     const tierCounts = { gold: 0, silver: 0, bronze: 0, none: 0 }
-    for (const e of scopedEvals) tierCounts[e.tier]++
+    for (const e of filteredEvals) tierCounts[e.tier]++
 
-    const services = scopedEvals.map((e) => {
+    const services = filteredEvals.map((e) => {
       const svc = serviceMap.get(e.serviceId)
       return {
         id: e.serviceId,
@@ -93,17 +97,12 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    // Owner filter applied in-memory if evaluateAll didn't handle it
-    const filtered = ownerFilter
-      ? services.filter((s) => s.owner === ownerFilter)
-      : services
-
     const response: ScorecardListResponse = {
       evaluatedAt: new Date().toISOString(),
       rulesVersion,
-      totalServices: filtered.length,
+      totalServices: services.length,
       tierCounts,
-      services: filtered,
+      services,
     }
 
     return NextResponse.json(response)

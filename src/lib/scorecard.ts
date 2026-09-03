@@ -363,10 +363,9 @@ export async function evaluateService(serviceId: string): Promise<ScorecardEvalu
 }
 
 export async function evaluateAll(
-  ownerFilter?: string,
   tierFilter?: string,
 ): Promise<ScorecardEvaluation[]> {
-  const cacheKey = `scorecard:all:${ownerFilter ?? ""}:${tierFilter ?? ""}`
+  const cacheKey = `scorecard:all:${tierFilter ?? ""}`
   const cached = await cacheGet<ScorecardEvaluation[]>(cacheKey)
   if (cached) return cached
 

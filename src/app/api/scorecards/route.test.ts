@@ -32,9 +32,9 @@ const namespaces: NamespaceInfo[] = [
   { name: "frontend-app", status: "Active", labels: {}, createdAt: "2026-01-01T00:00:00Z" },
 ]
 
-function fakeApp(name: string, project: string, namespace: string): ArgoApp {
+function fakeApp(name: string, project: string, namespace: string, owner?: string): ArgoApp {
   return {
-    metadata: { name },
+    metadata: { name, annotations: owner ? { "narwhal.io/owner": owner } : undefined },
     spec: { project, destination: { namespace } },
     status: { sync: { status: "Synced" }, health: { status: "Healthy" } },
   }
@@ -42,8 +42,8 @@ function fakeApp(name: string, project: string, namespace: string): ArgoApp {
 const platformApp = fakeApp("platform-app", "platform", "platform-system")
 const frontendApp = fakeApp("frontend-app", "apps", "frontend-app")
 
-function fakeEval(serviceId: string): ScorecardEvaluation {
-  return { serviceId, score: 90, tier: "gold", passed: [], failed: [], evaluatedAt: "2026-01-01T00:00:00Z" }
+function fakeEval(serviceId: string, tier: ScorecardEvaluation["tier"] = "gold"): ScorecardEvaluation {
+  return { serviceId, score: 90, tier, passed: [], failed: [], evaluatedAt: "2026-01-01T00:00:00Z" }
 }
 const rulesDoc: ScorecardRulesDoc = { version: 1, rules: [], tiers: { gold: 90, silver: 70, bronze: 50 } }
 
@@ -84,5 +84,28 @@ describe("GET /api/scorecards — scope enforcement", () => {
     vi.mocked(requireRole).mockResolvedValue({ error: "unauthorized" } as never)
     const res = await GET(requestUrl())
     expect(res.status).toBe(401)
+  })
+})
+
+describe("GET /api/scorecards — owner filtering", () => {
+  it("derives tierCounts from the same owner-filtered services it returns", async () => {
+    const ownerGold = fakeApp("owner-gold", "platform", "platform-system", "team-x")
+    const ownerBronze = fakeApp("owner-bronze", "platform", "platform-system", "team-x")
+    const otherSilver = fakeApp("other-silver", "platform", "platform-system", "team-y")
+    vi.mocked(requireRole).mockResolvedValue({ session: platformTeamSession } as never)
+    vi.mocked(getArgoApps).mockResolvedValue([ownerGold, ownerBronze, otherSilver])
+    vi.mocked(evaluateAll).mockResolvedValue([
+      fakeEval("owner-gold", "gold"),
+      fakeEval("owner-bronze", "bronze"),
+      fakeEval("other-silver", "silver"),
+    ])
+
+    const res = await GET(new NextRequest("http://localhost/api/scorecards?owner=team-x"))
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.services.map((service: { id: string }) => service.id)).toEqual(["owner-gold", "owner-bronze"])
+    expect(body.totalServices).toBe(2)
+    expect(body.tierCounts).toEqual({ gold: 1, silver: 0, bronze: 1, none: 0 })
   })
 })
