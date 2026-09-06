@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { validateRuntimeConfig } from "@/lib/config"
 import { getValkey } from "@/lib/valkey"
+import { requireRole } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -53,7 +54,21 @@ async function probeValkey(): Promise<DependencyState> {
 
 // Detailed status/diagnostics endpoint for operators.
 // Does not expose secret values, credentials, sensitive tokens, or raw dependency URLs.
+//
+// RBAC-gated (cluster-admin only), unlike /live and /ready: this route fans out up to
+// 8 outbound probes per call, which an unauthenticated caller could use as both a
+// request-amplification vector and a live map of which backend dependencies are down.
+// /live and /ready stay open (see src/proxy.ts's matcher) because they do no comparable
+// fan-out — /ready's only outbound call is a single bounded Valkey ping.
 export async function GET() {
+  const gate = await requireRole("cluster-admin")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 },
+    )
+  }
+
   const config = validateRuntimeConfig()
 
   const [keycloak, argocd, prometheus, alertmanager, gitea, openbao, loki, valkey] = await Promise.all([

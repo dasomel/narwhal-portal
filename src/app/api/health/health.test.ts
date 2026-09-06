@@ -1,7 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+
+// /api/health/status fans out up to 8 outbound probes per call and reports which
+// backend dependencies are down — gated to cluster-admin (see status/route.ts) so it
+// can't be used as an unauthenticated amplification vector / dependency topology leak.
+// Default the mock to an authorized admin session so the existing "what does the body
+// look like" tests below don't each need their own auth setup; the dedicated access
+// control tests override this per case.
+vi.mock("@/lib/auth", () => ({
+  requireRole: vi.fn().mockResolvedValue({
+    session: { user: { role: "cluster-admin" }, groups: ["cluster-admin"], teams: [] },
+  }),
+}))
+
 import { GET as getLive } from "./live/route"
 import { GET as getReady } from "./ready/route"
 import { GET as getStatus } from "./status/route"
+import { requireRole } from "@/lib/auth"
 
 describe("Health Endpoints (Issue #63 & #60)", () => {
   it("liveness probe returns HTTP 200 with process info", async () => {
@@ -41,6 +55,50 @@ describe("Health Endpoints (Issue #63 & #60)", () => {
     expect(text).not.toContain("password")
     expect(text).not.toContain("clientSecret")
     expect(text).not.toContain("bearer")
+  })
+})
+
+describe("status diagnostics access control (Issue #63 review fix)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.mocked(requireRole).mockResolvedValue({
+      session: { user: { role: "cluster-admin" }, groups: ["cluster-admin"], teams: [] },
+    } as never)
+  })
+
+  it("rejects an unauthenticated caller with 401 and does not fan out any probes", async () => {
+    vi.mocked(requireRole).mockResolvedValueOnce({ error: "unauthorized" } as never)
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+
+    const res = await getStatus()
+    const json = await res.json()
+
+    expect(res.status).toBe(401)
+    expect(json).toEqual({ error: "Unauthorized" })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("rejects a non-admin session with 403 and does not fan out any probes", async () => {
+    vi.mocked(requireRole).mockResolvedValueOnce({ error: "forbidden" } as never)
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+
+    const res = await getStatus()
+    const json = await res.json()
+
+    expect(res.status).toBe(403)
+    expect(json).toEqual({ error: "Forbidden" })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("returns the full diagnostics body for a cluster-admin session", async () => {
+    const res = await getStatus()
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json.dependencies).toBeDefined()
+    expect(requireRole).toHaveBeenCalledWith("cluster-admin")
   })
 })
 
