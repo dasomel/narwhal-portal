@@ -288,11 +288,15 @@ function evalArgoCDHistory(
 // ---------------------------------------------------------------------------
 
 export async function evaluateService(serviceId: string): Promise<ScorecardEvaluation> {
-  const cacheKey = `scorecard:detail:${serviceId}`
+  // Load rules before the cache lookup so a ConfigMap version change (rules.version)
+  // busts this key instead of serving an evaluation computed under stale rules —
+  // loadRules() is itself cached (300s), so this is cheap.
+  const rules = await loadRules()
+  const cacheKey = `scorecard:detail:${rules.version}:${serviceId}`
   const cached = await cacheGet<ScorecardEvaluation>(cacheKey)
   if (cached) return cached
 
-  const [rules, app] = await Promise.all([loadRules(), getArgoApp(serviceId)])
+  const app = await getArgoApp(serviceId)
   if (!app) throw new Error(`ArgoCD application not found: ${serviceId}`)
 
   const namespace = app.spec.destination?.namespace ?? "default"
@@ -365,7 +369,10 @@ export async function evaluateService(serviceId: string): Promise<ScorecardEvalu
 export async function evaluateAll(
   tierFilter?: string,
 ): Promise<ScorecardEvaluation[]> {
-  const cacheKey = `scorecard:all:${tierFilter ?? ""}`
+  // See evaluateService: load rules first so rules.version can bust this key
+  // when the ConfigMap changes, instead of relying on this cache's own 60s TTL.
+  const rules = await loadRules()
+  const cacheKey = `scorecard:all:${rules.version}:${tierFilter ?? ""}`
   const cached = await cacheGet<ScorecardEvaluation[]>(cacheKey)
   if (cached) return cached
 
