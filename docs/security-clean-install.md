@@ -291,13 +291,22 @@ spec:
               - serviceAccountToken:
                   path: token
                   expirationSeconds: 3600
-                  audience: https://kubernetes.default.svc
+                  audience: https://kubernetes.default.svc.cluster.local
 ```
 
 포털 코드(`src/lib/k8s-token.ts`)가 `/var/run/secrets/kubernetes.io/serviceaccount/token`을
 매 호출마다 읽는다(최대 60초 캐시, 401 응답 시 즉시 무효화 후 재읽기) — 이 마운트 경로가 기본값이라
-`K8S_SA_TOKEN_FILE`을 별도로 지정할 필요는 없다. `aud` 클레임은 `K8S_TOKEN_AUDIENCE`(기본
-`https://kubernetes.default.svc`)와 일치해야 하며 불일치 시 즉시 거부된다.
+`K8S_SA_TOKEN_FILE`을 별도로 지정할 필요는 없다.
+
+`audience`는 **기본값이 없다** — `aud` 클레임 검증은 `K8S_TOKEN_AUDIENCE`를 명시적으로
+설정했을 때만 켜진다. kubeadm 클러스터는 `--service-account-issuer`(narwhal의
+`scripts/cluster/02-init-cluster.sh`가 오버라이드하지 않음)로부터 기본 audience를 만드는데,
+그 값은 보통 `https://kubernetes.default.svc.cluster.local`이지 일부 문서가 가정하는
+`https://kubernetes.default.svc`가 아니다. 하드코딩된 기본값이었다면 실제 클러스터마다
+`getK8sBearerToken()`이 매번 throw했을 것이다. **`K8S_TOKEN_AUDIENCE`를 설정한다면 위
+projected volume의 `audience:` 값과 정확히 같아야 한다** — 둘이 다르면 불일치로 즉시 거부된다.
+설정하지 않으면 어떤 `aud`든 통과하고(디버그 로그 1회만 남김), Deployment에 오타가 있어도
+포털이 조용히 계속 뜨는 대신 API 서버가 401로 알려준다.
 
 **옵션 B — kubectl create token (개발 전용, production에서 자동 차단):**
 ```bash

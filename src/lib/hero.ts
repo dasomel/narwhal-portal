@@ -3,6 +3,7 @@ import { getAlerts } from "./alertmanager"
 import { getArgoApps } from "./argocd"
 import { getClusterMetrics } from "./prometheus"
 import { getK8sApiServer } from "./config"
+import { getK8sBearerToken } from "./k8s-token"
 import type {
   HeroResponse,
   HeroIncident,
@@ -188,15 +189,13 @@ function nodeToIncident(node: NodePressureInfo): HeroIncident {
 // Node pressure fetch (direct K8s API — no external lib dep)
 // ---------------------------------------------------------------------------
 
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
-
 async function getNodePressureNodes(): Promise<NodePressureInfo[]> {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 5000)
     const res = await fetch(`${getK8sApiServer()}/api/v1/nodes`, {
       headers: {
-        Authorization: `Bearer ${K8S_TOKEN}`,
+        Authorization: `Bearer ${getK8sBearerToken()}`,
         Accept: "application/json",
       },
       signal: controller.signal,

@@ -239,13 +239,20 @@ spec:
         # Kubernetes API — replaces the static K8S_SA_TOKEN secret env var. Mounted at the
         # well-known in-cluster path so the default in src/lib/k8s-token.ts needs no
         # K8S_SA_TOKEN_FILE override; the kubelet rotates the file in place before expiry.
+        #
+        # `audience` here is this kubeadm cluster's actual --service-account-issuer
+        # (narwhal's scripts/cluster/02-init-cluster.sh does not override it, so it
+        # defaults to the cluster-internal issuer URL, not the bare
+        # https://kubernetes.default.svc some docs assume). If K8S_TOKEN_AUDIENCE is
+        # set in narwhal-portal-secrets, it MUST match this value exactly — src/lib/k8s-token.ts
+        # only enforces the aud check when that env var is set, and a mismatch throws.
         - name: kube-api-token
           projected:
             sources:
               - serviceAccountToken:
                   path: token
                   expirationSeconds: 3600
-                  audience: https://kubernetes.default.svc
+                  audience: https://kubernetes.default.svc.cluster.local
 ---
 apiVersion: v1
 kind: Service

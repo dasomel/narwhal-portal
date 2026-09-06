@@ -3,12 +3,14 @@
 
 import "server-only"
 import { getK8sApiServer } from "./config"
+import { getK8sBearerToken } from "./k8s-token"
 import { assertK8sNamespace, assertK8sNodeName, safeK8sSegment } from "./validation"
 import { buildJobScript, type ApplyTarget } from "./tuning-commands"
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
 
-function useBearer(apiServer: string): boolean {
-  return apiServer.startsWith("https://") && K8S_TOKEN.length > 0
+function authHeaders(apiServer: string): Record<string, string> {
+  if (!apiServer.startsWith("https://")) return {}
+  const token = getK8sBearerToken()
+  return token.length > 0 ? { Authorization: `Bearer ${token}` } : {}
 }
 
 const TUNING_NAMESPACE = process.env.TUNING_JOB_NAMESPACE ?? "devtools"
@@ -40,9 +42,9 @@ async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
+    ...authHeaders(apiServer),
     ...(init?.headers as Record<string, string> | undefined),
   }
-  if (useBearer(apiServer)) headers.Authorization = `Bearer ${K8S_TOKEN}`
   const res = await fetch(`${apiServer}${path}`, { ...init, headers })
   if (!res.ok) {
     const body = await res.text().catch(() => "")
@@ -53,8 +55,7 @@ async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 async function k8sFetchText(path: string): Promise<string> {
   const apiServer = getK8sApiServer()
-  const headers: Record<string, string> = { Accept: "text/plain" }
-  if (useBearer(apiServer)) headers.Authorization = `Bearer ${K8S_TOKEN}`
+  const headers: Record<string, string> = { Accept: "text/plain", ...authHeaders(apiServer) }
   const res = await fetch(`${apiServer}${path}`, { headers })
   if (!res.ok) throw new Error(`K8s API ${res.status} ${path}`)
   return res.text()
@@ -67,7 +68,7 @@ async function deleteJob(namespace: string, name: string): Promise<void> {
     `${apiServer}/apis/batch/v1/namespaces/${safeK8sSegment(namespace)}/jobs/${safeK8sSegment(name)}?propagationPolicy=Background`,
     {
       method: "DELETE",
-      headers: useBearer(apiServer) ? { Authorization: `Bearer ${K8S_TOKEN}` } : {},
+      headers: authHeaders(apiServer),
     },
   ).catch(() => {})
 }

@@ -13,16 +13,20 @@
  * getDependencyUrl's fail-fast contract in config.ts: a production pod with no
  * mounted token file throws rather than silently falling back to a long-lived
  * static credential.
+ *
+ * The `aud` claim is checked ONLY when K8S_TOKEN_AUDIENCE is explicitly set —
+ * see the comment on expectedAudience() below for why there's no default.
  */
 import { readFileSync } from "fs"
 import { isProduction } from "./config"
 
 const DEFAULT_TOKEN_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-const DEFAULT_AUDIENCE = "https://kubernetes.default.svc"
 // How long a successfully-read token is served from cache before the file is
 // re-read. Short enough that a 3600s-lifetime projected token is always
 // refreshed well ahead of expiry with no restart involved.
 const REFRESH_INTERVAL_MS = 60_000
+
+let warnedNoAudienceConfigured = false
 
 interface CachedToken {
   value: string
@@ -35,8 +39,16 @@ function tokenFilePath(): string {
   return process.env.K8S_SA_TOKEN_FILE || DEFAULT_TOKEN_FILE
 }
 
-function expectedAudience(): string {
-  return process.env.K8S_TOKEN_AUDIENCE || DEFAULT_AUDIENCE
+// K8S_TOKEN_AUDIENCE has no default: kubeadm clusters mint the projected
+// token's default audience from the API server's --service-account-issuer,
+// which is commonly the cluster-internal issuer URL (e.g.
+// https://kubernetes.default.svc.cluster.local, see deploy/skaffold-dev-portal.yaml's
+// projected volume) rather than the bare https://kubernetes.default.svc some
+// docs assume — a hard default here would reject real tokens on real clusters.
+// The check only runs when this is explicitly set, and must match whatever
+// `audience:` the projected volume declares.
+function expectedAudience(): string | null {
+  return process.env.K8S_TOKEN_AUDIENCE || null
 }
 
 function readTokenFile(path: string): string | null {
@@ -61,13 +73,24 @@ function decodeJwtPayload(token: string): { aud?: string | string[] } | null {
 
 /**
  * Rejects a decodable JWT whose `aud` claim doesn't include the expected
- * Kubernetes API audience. Opaque (non-JWT) tokens — e.g. a dev-only
- * K8S_SA_TOKEN — can't be decoded and are passed through unchecked.
+ * Kubernetes API audience — but ONLY when K8S_TOKEN_AUDIENCE is explicitly
+ * configured. Left unset, any audience is accepted (logged once at debug
+ * level) since the cluster's actual default audience varies by issuer
+ * configuration and guessing wrong would fail-closed on a healthy token.
+ * Opaque (non-JWT) tokens — e.g. a dev-only K8S_SA_TOKEN — can't be decoded
+ * and are passed through unchecked either way.
  */
 function assertAudience(token: string): void {
+  const expected = expectedAudience()
+  if (!expected) {
+    if (!warnedNoAudienceConfigured) {
+      warnedNoAudienceConfigured = true
+      console.debug("[k8s-token] K8S_TOKEN_AUDIENCE not set — skipping audience check")
+    }
+    return
+  }
   const payload = decodeJwtPayload(token)
   if (!payload) return
-  const expected = expectedAudience()
   const auds = Array.isArray(payload.aud) ? payload.aud : payload.aud ? [payload.aud] : []
   if (auds.length > 0 && !auds.includes(expected)) {
     throw new Error(`K8s service account token audience mismatch: expected "${expected}", got [${auds.join(", ")}]`)

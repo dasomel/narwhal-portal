@@ -1,16 +1,17 @@
 import "server-only"
 import { getK8sApiServer } from "./config"
+import { getK8sBearerToken } from "./k8s-token"
 import { cacheGet, cacheSet } from "./valkey"
 import type { SecuritySummary, WorkloadVulnRow, ImageVulnReport, Vulnerability, Severity, VulnDbFreshness } from "@/types/security"
 
 // --- K8s API helpers (local, avoids circular dep with k8s-client.ts) ---
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
 
 async function trivyK8sFetch<T>(path: string): Promise<T> {
   const apiServer = getK8sApiServer()
   const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (apiServer.startsWith("https://") && K8S_TOKEN.length > 0) {
-    headers["Authorization"] = `Bearer ${K8S_TOKEN}`
+  if (apiServer.startsWith("https://")) {
+    const token = getK8sBearerToken()
+    if (token.length > 0) headers["Authorization"] = `Bearer ${token}`
   }
   const res = await fetch(`${apiServer}${path}`, {
     headers,

@@ -95,17 +95,33 @@ describe("k8s-token", () => {
     expect(() => getK8sBearerToken()).toThrow(/Missing required production configuration/)
   })
 
-  it("rejects a token whose audience does not match the expected Kubernetes API audience", async () => {
+  it("accepts any audience when K8S_TOKEN_AUDIENCE is not configured (kubeadm default varies by issuer)", async () => {
+    const file = join(dir, "token")
+    // A real kubeadm cluster's default projected-token audience is commonly the
+    // issuer URL (https://kubernetes.default.svc.cluster.local), not the bare
+    // https://kubernetes.default.svc some docs assume — with no configured
+    // expectation, this must not be rejected.
+    writeFileSync(file, fakeJwt({ aud: "https://kubernetes.default.svc.cluster.local" }))
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
+    process.env.K8S_SA_TOKEN_FILE = file
+    delete process.env.K8S_TOKEN_AUDIENCE
+
+    const { getK8sBearerToken } = await import("./k8s-token")
+    expect(getK8sBearerToken()).toBe(readFileSync(file, "utf8").trim())
+  })
+
+  it("rejects a token whose audience does not match K8S_TOKEN_AUDIENCE once it is explicitly configured", async () => {
     const file = join(dir, "token")
     writeFileSync(file, fakeJwt({ aud: "https://some-other-cluster.example" }))
     ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
     process.env.K8S_SA_TOKEN_FILE = file
+    process.env.K8S_TOKEN_AUDIENCE = "https://kubernetes.default.svc.cluster.local"
 
     const { getK8sBearerToken } = await import("./k8s-token")
     expect(() => getK8sBearerToken()).toThrow(/audience mismatch/)
   })
 
-  it("validates against a configurable K8S_TOKEN_AUDIENCE instead of the default", async () => {
+  it("accepts a token whose audience matches a configured K8S_TOKEN_AUDIENCE", async () => {
     const file = join(dir, "token")
     writeFileSync(file, fakeJwt({ aud: "https://custom-api.narwhal.internal" }))
     ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
