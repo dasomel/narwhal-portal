@@ -234,13 +234,31 @@ listener "tcp" {
 
 cert-manager Certificate로 TLS Secret 발급 → openbao Deployment에 마운트.
 
-**`.env.local`:**
+**클러스터 배포 (narwhal#156 이후 — 권장, `OPENBAO_TOKEN` 미주입):** 클러스터가
+`narwhal-portal-secrets`로 아래 env를 주입하면 `src/lib/openbao.ts`의 `getOpenBaoToken()`이
+매 호출마다 OpenBao Kubernetes auth(`POST /v1/auth/${mount}/login`, body
+`{role, jwt}`)로 client token을 발급받아 인메모리에 캐시한다(만료 = `lease_duration * 0.8`,
+403 응답 시 1회 재로그인). `OPENBAO_TOKEN`을 아예 주입하지 않는 것이 의도된 구성이다.
+
+```bash
+OPENBAO_ADDR=https://openbao.local.narwhal.internal  # https:// 필수
+OPENBAO_AUTH_METHOD=kubernetes
+OPENBAO_K8S_ROLE=narwhal-portal
+OPENBAO_K8S_AUTH_MOUNT=kubernetes
+OPENBAO_K8S_TOKEN_PATH=/var/run/secrets/openbao/token  # 없으면 SA 기본 토큰(.../serviceaccount/token)으로 폴백
+OPENBAO_K8S_AUTH_AUDIENCE=vault  # 프로젝션 볼륨의 audience — 애플리케이션 코드가 아니라 kubelet이 소비
+```
+
+**로컬 개발(`.env.local`, 정적 토큰 폴백):** `OPENBAO_AUTH_METHOD`가 없고 Kubernetes SA 토큰
+파일도 없으면 `OPENBAO_TOKEN`으로 폴백한다 — production에서는 이 폴백이 fail-fast로 막힌다
+(`OPENBAO_AUTH_METHOD=token`을 명시하지 않는 한).
+
 ```bash
 OPENBAO_ADDR=https://openbao.local.narwhal.internal  # https:// 필수
 OPENBAO_TOKEN=<vault token 또는 AppRole secret_id>
 ```
 
-OpenBao 초기화 + 토큰 발급:
+OpenBao 초기화 + 토큰 발급(로컬 개발용):
 ```bash
 vault operator init -key-shares=5 -key-threshold=3   # 최초 1회만
 vault operator unseal <key1>; vault operator unseal <key2>; vault operator unseal <key3>
@@ -258,7 +276,13 @@ echo $TOKEN  # → OPENBAO_TOKEN
 
 **검증:**
 ```bash
+# 정적 토큰(OPENBAO_TOKEN) 사용 시
 curl -sk -H "X-Vault-Token: $OPENBAO_TOKEN" "$OPENBAO_ADDR/v1/sys/health" | jq .
+
+# Kubernetes auth 사용 시 (파드 안에서)
+JWT=$(cat /var/run/secrets/openbao/token)
+curl -sk -X POST -d "{\"role\":\"narwhal-portal\",\"jwt\":\"$JWT\"}" \
+  "$OPENBAO_ADDR/v1/auth/kubernetes/login" | jq .auth.client_token
 ```
 
 ---
@@ -346,7 +370,9 @@ curl -sk -H "Authorization: Bearer $TOKEN" \
 | `APISIX_ADMIN_URL`, `APISIX_API_KEY` | 수동 | APISIX admin 설정값 |
 | `PROMETHEUS_URL`, `ALERTMANAGER_URL`, `LOKI_URL` | 수동 | 클러스터 내부 DNS |
 | `VALKEY_URL`, `VALKEY_TLS=true`, `VALKEY_PASSWORD` | 1+6 | rediss:// + AUTH |
-| `OPENBAO_ADDR`, `OPENBAO_TOKEN` | 7 | https:// 필수 |
+| `OPENBAO_ADDR` | 7 | https:// 필수 |
+| `OPENBAO_AUTH_METHOD`, `OPENBAO_K8S_ROLE`, `OPENBAO_K8S_AUTH_MOUNT`, `OPENBAO_K8S_TOKEN_PATH`, `OPENBAO_K8S_AUTH_AUDIENCE` | 7 | 클러스터 배포 기본값(Kubernetes auth); `OPENBAO_TOKEN`은 주입하지 않음 |
+| `OPENBAO_TOKEN` | 7 (로컬 전용) | Kubernetes SA 토큰이 없을 때만 폴백; production은 `OPENBAO_AUTH_METHOD=token`을 명시해야 이 폴백을 허용 |
 | `TUNING_JOB_IMAGE`, `TUNING_JOB_NAMESPACE` | 5 | digest pin |
 | `LIVE_INGEST_SECRET` | 1 | 자동 생성 |
 | `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT` | 수동 | OTEL 사용 시 둘 다 필수 |
@@ -369,10 +395,15 @@ for k in AUTH_SECRET AUTH_URL OIDC_CLIENT_ID OIDC_CLIENT_SECRET \
          KEYCLOAK_URL KEYCLOAK_ADMIN_CLIENT_SECRET \
          ARGOCD_URL ARGOCD_TOKEN \
          VALKEY_URL VALKEY_TLS VALKEY_PASSWORD \
-         OPENBAO_ADDR OPENBAO_TOKEN \
+         OPENBAO_ADDR \
          TUNING_JOB_IMAGE LIVE_INGEST_SECRET; do
   grep -q "^$k=.\+" .env.local || echo "MISSING: $k"
 done
+# OPENBAO_TOKEN is only required when OPENBAO_AUTH_METHOD=token (or unset outside
+# production); a cluster deployment using Kubernetes auth intentionally omits it.
+if [ "${OPENBAO_AUTH_METHOD:-}" = "token" ]; then
+  grep -q "^OPENBAO_TOKEN=.\+" .env.local || echo "MISSING: OPENBAO_TOKEN"
+fi
 
 # 3) Tuning 이미지 digest 형식 검증
 grep '^TUNING_JOB_IMAGE=' .env.local | grep -qE '@sha256:[0-9a-f]{64}$' \
