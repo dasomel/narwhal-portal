@@ -39,9 +39,11 @@ export async function GET(
 
   return NextResponse.json({
     ...detail.value,
-    cpu: metrics?.cpu ?? { cores: 0, usagePercent: 0 },
-    memory: metrics?.memory ?? { totalBytes: 0, usagePercent: 0 },
-    disk: metrics?.disk ?? { totalBytes: 0, usagePercent: 0 },
-    podCount: podCount.status === "fulfilled" ? podCount.value : 0,
+    cpu: metrics?.cpu ?? { cores: null, usagePercent: null, status: "unavailable" },
+    memory: metrics?.memory ?? { totalBytes: null, usagePercent: null, status: "unavailable" },
+    disk: metrics?.disk ?? { totalBytes: null, usagePercent: null, status: "unavailable" },
+    podCount: podCount.status === "fulfilled" ? podCount.value : null,
+    metricsStatus: metrics?.status ?? "unavailable",
+    evidenceSource: metrics?.evidenceSource ?? "none",
   })
 }

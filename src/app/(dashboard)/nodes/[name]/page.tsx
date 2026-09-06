@@ -25,9 +25,9 @@ async function getNodeData(name: string) {
 
   return {
     detail,
-    cpuUsage: nodeMetrics?.cpu.usagePercent ?? 0,
-    memoryUsage: nodeMetrics?.memory.usagePercent ?? 0,
-    diskUsage: nodeMetrics?.disk.usagePercent ?? 0,
+    cpuUsage: nodeMetrics?.cpu.usagePercent ?? null,
+    memoryUsage: nodeMetrics?.memory.usagePercent ?? null,
+    diskUsage: nodeMetrics?.disk.usagePercent ?? null,
     podCount,
     pods,
   }
@@ -124,42 +124,42 @@ export default async function NodeDetailPage({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
         <Card className="p-5 shadow-sm border-border ring-1 ring-border bg-card">
            <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest leading-none">{t("nodes.metric.cpu")}</p>
-           <p className={`text-3xl font-black mt-2.5 ${cpuUsage > 80 ? 'text-red-500' : 'text-foreground'}`}>{cpuUsage}%</p>
+           <p className={`text-3xl font-black mt-2.5 ${cpuUsage !== null && cpuUsage > 80 ? 'text-red-500' : 'text-foreground'}`}>{cpuUsage !== null ? `${cpuUsage}%` : "—"}</p>
            <div className="flex items-center gap-2 mt-4">
              <div className="flex-1 bg-muted h-1.5 rounded-full overflow-hidden leading-[0]">
-               <div className="bg-blue-600 h-full rounded-full transition-all duration-1000" style={{ width: `${cpuUsage}%` }} />
+               <div className="bg-blue-600 h-full rounded-full transition-all duration-1000" style={{ width: `${cpuUsage ?? 0}%` }} />
              </div>
-             <span className="text-xs font-bold text-muted-foreground mt-0.5">{cpuUsage}%</span>
+             <span className="text-xs font-bold text-muted-foreground mt-0.5">{cpuUsage !== null ? `${cpuUsage}%` : "—"}</span>
            </div>
         </Card>
         <Card className="p-5 shadow-sm border-border ring-1 ring-border bg-card">
            <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest leading-none">{t("nodes.metric.memory")}</p>
-           <p className={`text-3xl font-black mt-2.5 ${memoryUsage > 80 ? 'text-red-500' : 'text-foreground'}`}>{memoryUsage}%</p>
+           <p className={`text-3xl font-black mt-2.5 ${memoryUsage !== null && memoryUsage > 80 ? 'text-red-500' : 'text-foreground'}`}>{memoryUsage !== null ? `${memoryUsage}%` : "—"}</p>
            <div className="flex items-center gap-2 mt-4">
              <div className="flex-1 bg-muted h-1.5 rounded-full overflow-hidden leading-[0]">
-               <div className="bg-green-600 h-full rounded-full transition-all duration-1000" style={{ width: `${memoryUsage}%` }} />
+               <div className="bg-green-600 h-full rounded-full transition-all duration-1000" style={{ width: `${memoryUsage ?? 0}%` }} />
              </div>
-             <span className="text-xs font-bold text-muted-foreground mt-0.5">{memoryUsage}%</span>
+             <span className="text-xs font-bold text-muted-foreground mt-0.5">{memoryUsage !== null ? `${memoryUsage}%` : "—"}</span>
            </div>
         </Card>
         <Card className="p-5 shadow-sm border-border ring-1 ring-border bg-card">
            <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest leading-none">{t("nodes.metric.disk")}</p>
-           <p className={`text-3xl font-black mt-2.5 ${diskUsage > 80 ? 'text-red-500' : 'text-foreground'}`}>{diskUsage}%</p>
+           <p className={`text-3xl font-black mt-2.5 ${diskUsage !== null && diskUsage > 80 ? 'text-red-500' : 'text-foreground'}`}>{diskUsage !== null ? `${diskUsage}%` : "—"}</p>
            <div className="flex items-center gap-2 mt-4">
              <div className="flex-1 bg-muted h-1.5 rounded-full overflow-hidden leading-[0]">
-               <div className="bg-amber-500 h-full rounded-full transition-all duration-1000" style={{ width: `${diskUsage}%` }} />
+               <div className="bg-amber-500 h-full rounded-full transition-all duration-1000" style={{ width: `${diskUsage ?? 0}%` }} />
              </div>
-             <span className="text-xs font-bold text-muted-foreground mt-0.5">{diskUsage}%</span>
+             <span className="text-xs font-bold text-muted-foreground mt-0.5">{diskUsage !== null ? `${diskUsage}%` : "—"}</span>
            </div>
         </Card>
         <Card className="p-5 shadow-sm border-border ring-1 ring-border bg-card shadow-blue-50/50">
            <p className="text-xs text-blue-600 font-bold uppercase tracking-widest leading-none">{t("nodes.metric.pods")}</p>
-           <p className="text-3xl font-black mt-2.5 text-foreground font-mono tracking-tighter">{podCount}<span className="text-sm font-bold text-muted-foreground/50 ml-1.5">/ {detail.capacity.pods}</span></p>
+           <p className="text-3xl font-black mt-2.5 text-foreground font-mono tracking-tighter">{podCount !== null ? podCount : "—"}<span className="text-sm font-bold text-muted-foreground/50 ml-1.5">/ {detail.capacity.pods}</span></p>
            <div className="flex items-center gap-2 mt-4">
              <div className="flex-1 bg-muted h-1.5 rounded-full overflow-hidden leading-[0]">
-               <div className="bg-narwhal-accent h-full rounded-full transition-all duration-1000" style={{ width: `${(podCount / parseInt(detail.capacity.pods)) * 100}%` }} />
+               <div className="bg-narwhal-accent h-full rounded-full transition-all duration-1000" style={{ width: `${podCount !== null ? Math.min((podCount / (parseInt(detail.capacity.pods) || 1)) * 100, 100) : 0}%` }} />
              </div>
-             <span className="text-xs font-bold text-muted-foreground mt-0.5">{Math.round((podCount / parseInt(detail.capacity.pods)) * 100)}%</span>
+             <span className="text-xs font-bold text-muted-foreground mt-0.5">{podCount !== null ? `${Math.round((podCount / (parseInt(detail.capacity.pods) || 1)) * 100)}%` : "—"}</span>
            </div>
         </Card>
       </div>

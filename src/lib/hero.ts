@@ -313,8 +313,8 @@ export async function buildHeroResponse(): Promise<HeroResponse> {
   const nodeReady = metrics?.nodes?.ready ?? 0
   const podTotal = metrics?.pods?.total ?? 0
   const podRunning = metrics?.pods?.running ?? 0
-  const cpu = metrics?.cpu ?? 0
-  const memory = metrics?.memory ?? 0
+  const cpu = metrics?.cpu ?? null
+  const memory = metrics?.memory ?? null
 
   // Last sync time: find the most recent operationState.finishedAt across all apps
   let latestSyncTs: string | null = null

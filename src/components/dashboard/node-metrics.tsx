@@ -9,9 +9,9 @@ import { useT } from "@/lib/i18n-client"
 interface NodeMetric {
   node: string
   role: string
-  cpu: { cores: number; usagePercent: number }
-  memory: { totalBytes: number; usagePercent: number }
-  disk: { totalBytes: number; usagePercent: number }
+  cpu: { cores?: number | null; usagePercent: number | null }
+  memory: { totalBytes?: number | null; usagePercent: number | null }
+  disk: { totalBytes?: number | null; usagePercent: number | null }
 }
 
 interface MetricsResponse {
@@ -21,8 +21,9 @@ interface MetricsResponse {
 type SortKey = "node" | "role" | "cpu" | "memory" | "disk"
 type SortDir = "asc" | "desc"
 
-function formatGi(bytes: number): string {
-  return (bytes / 1024 ** 3).toFixed(1)
+function formatGi(bytes?: number | null): string {
+  if (bytes === null || bytes === undefined) return "—"
+  return `${(bytes / 1024 ** 3).toFixed(1)} Gi`
 }
 
 function progressColor(percent: number): string {
@@ -31,7 +32,15 @@ function progressColor(percent: number): string {
   return "bg-narwhal-success"
 }
 
-function ProgressBar({ percent }: { percent: number }) {
+function ProgressBar({ percent }: { percent: number | null }) {
+  if (percent === null || percent === undefined) {
+    return (
+      <div className="flex items-center gap-2 mt-1">
+        <div className="flex-1 bg-muted rounded-full h-2" />
+        <span className="text-xs text-muted-foreground w-8 text-right">—</span>
+      </div>
+    )
+  }
   return (
     <div className="flex items-center gap-2 mt-1">
       <div className="flex-1 bg-muted rounded-full h-2">
@@ -94,9 +103,9 @@ export function NodeMetrics() {
       let cmp = 0
       if (sortKey === "node") cmp = a.node.localeCompare(b.node)
       else if (sortKey === "role") cmp = a.role.localeCompare(b.role)
-      else if (sortKey === "cpu") cmp = a.cpu.usagePercent - b.cpu.usagePercent
-      else if (sortKey === "memory") cmp = a.memory.usagePercent - b.memory.usagePercent
-      else if (sortKey === "disk") cmp = a.disk.usagePercent - b.disk.usagePercent
+      else if (sortKey === "cpu") cmp = (a.cpu.usagePercent ?? -1) - (b.cpu.usagePercent ?? -1)
+      else if (sortKey === "memory") cmp = (a.memory.usagePercent ?? -1) - (b.memory.usagePercent ?? -1)
+      else if (sortKey === "disk") cmp = (a.disk.usagePercent ?? -1) - (b.disk.usagePercent ?? -1)
       return sortDir === "asc" ? cmp : -cmp
     })
   }, [nodes, sortKey, sortDir])
@@ -160,15 +169,17 @@ export function NodeMetrics() {
                       </Badge>
                     </td>
                     <td className="py-3 pr-4 min-w-[120px]">
-                      <span className="text-foreground">{n.cpu.cores} cores</span>
+                      <span className="text-foreground">
+                        {n.cpu.cores !== null && n.cpu.cores !== undefined ? `${n.cpu.cores} cores` : "—"}
+                      </span>
                       <ProgressBar percent={n.cpu.usagePercent} />
                     </td>
                     <td className="py-3 pr-4 min-w-[120px]">
-                      <span className="text-foreground">{formatGi(n.memory.totalBytes)} Gi</span>
+                      <span className="text-foreground">{formatGi(n.memory.totalBytes)}</span>
                       <ProgressBar percent={n.memory.usagePercent} />
                     </td>
                     <td className="py-3 min-w-[120px]">
-                      <span className="text-foreground">{formatGi(n.disk.totalBytes)} Gi</span>
+                      <span className="text-foreground">{formatGi(n.disk.totalBytes)}</span>
                       <ProgressBar percent={n.disk.usagePercent} />
                     </td>
                   </tr>
