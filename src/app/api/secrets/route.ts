@@ -16,9 +16,15 @@ export async function GET(req: Request) {
   // NOT go through operation-context's beginOperation/dashboard event lifecycle:
   // that pipeline is for mutations and would surface every governance-view load
   // as an "operation" to other viewers, which is a bigger, separate call.
-  const correlationId = req.headers.get("x-correlation-id") ?? undefined
+  // The correlation id is caller-supplied: strip control characters and cap the
+  // length so a crafted header cannot inject fake log lines, and emit one JSON
+  // object rather than interpolating into a free-form string.
+  const rawCorrelation = req.headers.get("x-correlation-id")
+  const correlationId = rawCorrelation
+    ? rawCorrelation.replace(/[^\x20-\x7e]/g, "").slice(0, 128) || undefined
+    : undefined
   console.info(
-    `[audit] secrets.list actor=${getActorId(session)}${correlationId ? ` correlation=${correlationId}` : ""}`
+    JSON.stringify({ audit: "secrets.list", actor: getActorId(session), correlationId })
   )
 
   try {
