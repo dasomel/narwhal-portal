@@ -1,8 +1,10 @@
 import { cacheGet, cacheSet } from "./valkey"
 import { assertPromQLSafe, K8S_NODE_NAME_RE } from "./validation"
-import { getK8sApiServer } from "./config"
+import { getK8sApiServer, getDependencyUrl } from "./config"
 
-const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? "http://localhost:9090"
+function prometheusUrl(): string {
+  return getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")
+}
 
 async function query(promql: string): Promise<number> {
   // M-1: PromQL safety — defense in depth. Callers should already supply
@@ -11,7 +13,7 @@ async function query(promql: string): Promise<number> {
   const cached = await cacheGet<number>(`prom:${promql}`)
   if (cached !== null) return cached
 
-  const url = `${PROMETHEUS_URL}/api/v1/query?query=${encodeURIComponent(promql)}`
+  const url = `${prometheusUrl()}/api/v1/query?query=${encodeURIComponent(promql)}`
   const res = await fetch(url, { next: { revalidate: 0 } })
   if (!res.ok) throw new Error(`Prometheus query failed: ${res.status}`)
   const data = await res.json()
@@ -30,7 +32,7 @@ export async function queryVector(promql: string): Promise<VectorResult[]> {
   const cached = await cacheGet<VectorResult[]>(`promv:${promql}`)
   if (cached !== null) return cached
 
-  const url = `${PROMETHEUS_URL}/api/v1/query?query=${encodeURIComponent(promql)}`
+  const url = `${prometheusUrl()}/api/v1/query?query=${encodeURIComponent(promql)}`
   const res = await fetch(url, { next: { revalidate: 0 } })
   if (!res.ok) throw new Error(`Prometheus query failed: ${res.status}`)
   const data = await res.json()
@@ -122,7 +124,7 @@ export async function queryRange(
 
   const end = Math.floor(Date.now() / 1000)
   const start = end - durationMinutes * 60
-  const url = `${PROMETHEUS_URL}/api/v1/query_range?query=${encodeURIComponent(promql)}&start=${start}&end=${end}&step=${stepSeconds}`
+  const url = `${prometheusUrl()}/api/v1/query_range?query=${encodeURIComponent(promql)}&start=${start}&end=${end}&step=${stepSeconds}`
 
   try {
     const res = await fetch(url, { next: { revalidate: 0 } })

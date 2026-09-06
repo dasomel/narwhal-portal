@@ -1,6 +1,7 @@
 import { readFileSync } from "fs"
 import { join } from "path"
 import { cacheGet, cacheSet } from "./valkey"
+import { getDependencyUrl } from "./config"
 
 const VAULT_SECRETS_PATH = "/vault/secrets"
 
@@ -21,7 +22,9 @@ export function getSecret(name: string, envFallback?: string): string {
 
 // --- HTTP 클라이언트 ---
 
-const OPENBAO_ADDR = process.env.OPENBAO_ADDR ?? "http://localhost:8200"
+function openbaoAddr(): string {
+  return getDependencyUrl("OPENBAO_ADDR", "http://localhost:8200")
+}
 const OPENBAO_TOKEN = process.env.OPENBAO_TOKEN ?? ""
 
 export interface SecretEntry {
@@ -32,23 +35,24 @@ export interface SecretEntry {
 }
 
 let httpsChecked = false
-function assertHttpsInProduction(): void {
+function assertHttpsInProduction(addr: string): void {
   if (httpsChecked) return
   httpsChecked = true
-  if (!OPENBAO_ADDR.startsWith("http://")) return
+  if (!addr.startsWith("http://")) return
   if (process.env.NODE_ENV === "production") {
     throw new Error(
-      `[OpenBao] OPENBAO_ADDR must use HTTPS in production. Got: ${OPENBAO_ADDR}`
+      `[OpenBao] OPENBAO_ADDR must use HTTPS in production. Got: ${addr}`
     )
   }
   console.warn(
-    `[OpenBao] OPENBAO_ADDR is using HTTP (${OPENBAO_ADDR}) — HTTPS required in production`
+    `[OpenBao] OPENBAO_ADDR is using HTTP (${addr}) — HTTPS required in production`
   )
 }
 
 function baoFetch(path: string, init?: RequestInit) {
-  assertHttpsInProduction()
-  return fetch(`${OPENBAO_ADDR}${path}`, {
+  const addr = openbaoAddr()
+  assertHttpsInProduction(addr)
+  return fetch(`${addr}${path}`, {
     ...init,
     headers: { "X-Vault-Token": OPENBAO_TOKEN, ...init?.headers },
   })

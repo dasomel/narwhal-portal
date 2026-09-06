@@ -1,8 +1,11 @@
 import { cacheGet, cacheSet } from "./valkey"
 import { getUserScope, type OwnershipMismatch } from "./role-filter"
 import { getEffectiveScope, namespaceVisible } from "./scope"
+import { getDependencyUrl } from "./config"
 
-const ARGOCD_URL = process.env.ARGOCD_URL ?? "http://localhost:8080"
+function argocdUrl(): string {
+  return getDependencyUrl("ARGOCD_URL", "http://localhost:8080")
+}
 const ARGOCD_TOKEN = process.env.ARGOCD_TOKEN ?? ""
 
 // H-3: ArgoCD project allowlist for the `developer` role.
@@ -55,7 +58,7 @@ export interface ArgoApp {
 function argoFetch(path: string, timeout = 5000): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout)
-  return fetch(`${ARGOCD_URL}${path}`, {
+  return fetch(`${argocdUrl()}${path}`, {
     headers: { Authorization: `Bearer ${ARGOCD_TOKEN}` },
     signal: controller.signal,
   }).finally(() => clearTimeout(timer))
@@ -151,7 +154,7 @@ export interface SyncResult {
 export async function syncArgoApp(name: string): Promise<SyncResult> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 10000)
-  const res = await fetch(`${ARGOCD_URL}/api/v1/applications/${encodeURIComponent(name)}/sync`, {
+  const res = await fetch(`${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/sync`, {
     method: "POST",
     headers: { Authorization: `Bearer ${ARGOCD_TOKEN}`, "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -173,7 +176,7 @@ export async function syncArgoApp(name: string): Promise<SyncResult> {
 
 export async function rollbackArgoApp(name: string, id: number): Promise<boolean> {
   try {
-    const res = await fetch(`${ARGOCD_URL}/api/v1/applications/${encodeURIComponent(name)}/rollback`, {
+    const res = await fetch(`${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/rollback`, {
       method: "POST",
       headers: { Authorization: `Bearer ${ARGOCD_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({ id }),

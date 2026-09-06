@@ -24,6 +24,32 @@ export function getK8sApiServer(): string {
   throw new Error("Missing required production configuration: K8S_API_SERVER")
 }
 
+// Names of the remaining fetch-target env vars that must not silently default to
+// localhost in production. Kept in sync with validateRuntimeConfig()'s
+// optionalServices list below — same names, different concern (that list only
+// drives the /api/health/ready diagnostic report; this accessor gates actual
+// runtime calls).
+export type DependencyUrlEnvVar =
+  | "PROMETHEUS_URL"
+  | "TEMPO_URL"
+  | "APISIX_ADMIN_URL"
+  | "ARGOCD_URL"
+  | "OPENBAO_ADDR"
+  | "ALERTMANAGER_URL"
+
+// Generic fail-fast accessor for dependency base URLs: env var → in production
+// throw, otherwise fall back to the dev-only default. Mirrors getK8sApiServer's
+// semantics (call at call-time, never at module top level — see 85ca55c).
+export function getDependencyUrl(name: DependencyUrlEnvVar, devDefault: string): string {
+  if (process.env[name]) {
+    return process.env[name] as string
+  }
+  if (!isProduction()) {
+    return devDefault
+  }
+  throw new Error(`Missing required production configuration: ${name}`)
+}
+
 export interface ConfigValidationResult {
   valid: boolean
   environment: string

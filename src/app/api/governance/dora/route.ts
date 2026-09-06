@@ -5,10 +5,13 @@ import { getCommitTimestamp } from "@/lib/gitea"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import { appVisible, getEffectiveScope } from "@/lib/scope"
 import { assertPromQLSafe } from "@/lib/validation"
+import { getDependencyUrl } from "@/lib/config"
 
 export const dynamic = "force-dynamic"
 
-const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? "http://localhost:9090"
+function prometheusUrl(): string {
+  return getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")
+}
 
 export interface DoraDeployment {
   app: string
@@ -45,7 +48,7 @@ async function getMttrMinutes(sevenDaysAgoMs: number): Promise<number | null> {
     const promql = 'max by (alertname, namespace) (ALERTS{alertstate="firing",severity!="none"})'
     assertPromQLSafe(promql)
 
-    const url = `${PROMETHEUS_URL}/api/v1/query_range?query=${encodeURIComponent(promql)}&start=${start}&end=${end}&step=300`
+    const url = `${prometheusUrl()}/api/v1/query_range?query=${encodeURIComponent(promql)}&start=${start}&end=${end}&step=300`
     const res = await fetch(url, {
       next: { revalidate: 0 },
       signal: AbortSignal.timeout(5000),

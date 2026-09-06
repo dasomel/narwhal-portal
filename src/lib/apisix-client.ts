@@ -1,6 +1,9 @@
 import { cacheDel, cacheGet, cacheSet } from "./valkey"
+import { getDependencyUrl } from "./config"
 
-const APISIX_URL = process.env.APISIX_ADMIN_URL ?? "http://localhost:9180"
+function apisixUrl(): string {
+  return getDependencyUrl("APISIX_ADMIN_URL", "http://localhost:9180")
+}
 // D05 least-privilege split: full admin key for writes (toggle), viewer key for reads (list).
 // READONLY falls back to the admin key so reads still work before the scoped key is deployed.
 const API_KEY = process.env.APISIX_API_KEY ?? ""
@@ -22,7 +25,7 @@ export async function getRoutes(): Promise<ApisixRoute[]> {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
-    const res = await fetch(`${APISIX_URL}/apisix/admin/routes`, {
+    const res = await fetch(`${apisixUrl()}/apisix/admin/routes`, {
       headers: { "X-API-KEY": READONLY_KEY },
       signal: controller.signal,
     })
@@ -39,7 +42,7 @@ export async function getRoutes(): Promise<ApisixRoute[]> {
 }
 
 export async function toggleRoute(id: string, enable: boolean): Promise<void> {
-  const res = await fetch(`${APISIX_URL}/apisix/admin/routes/${id}`, {
+  const res = await fetch(`${apisixUrl()}/apisix/admin/routes/${id}`, {
     method: "PATCH",
     headers: { "X-API-KEY": API_KEY, "Content-Type": "application/json" },
     body: JSON.stringify({ status: enable ? 1 : 0 }),

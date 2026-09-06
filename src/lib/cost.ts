@@ -7,8 +7,11 @@
 
 import { cacheGet, cacheSet } from "./valkey"
 import { namespaceVisible, type EffectiveScope } from "./scope"
+import { getDependencyUrl } from "./config"
 
-const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? "http://localhost:9090"
+function prometheusUrl(): string {
+  return getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")
+}
 
 // 단가: 모듈 로드 시 env 읽고 number 변환 (default: spec §4.4 기본값)
 const UNIT_PRICES = {
@@ -78,7 +81,7 @@ interface PromVectorResult {
 const PROM_TIMEOUT_MS = 5000
 
 async function queryVector(promql: string): Promise<PromVectorResult[]> {
-  const url = `${PROMETHEUS_URL}/api/v1/query?query=${encodeURIComponent(promql)}`
+  const url = `${prometheusUrl()}/api/v1/query?query=${encodeURIComponent(promql)}`
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), PROM_TIMEOUT_MS)
   try {
@@ -97,7 +100,7 @@ async function queryRangeVector(
   endTs: number,
   step: number
 ): Promise<Array<{ metric: Record<string, string>; values: [number, string][] }>> {
-  const url = `${PROMETHEUS_URL}/api/v1/query_range?query=${encodeURIComponent(promql)}&start=${startTs}&end=${endTs}&step=${step}`
+  const url = `${prometheusUrl()}/api/v1/query_range?query=${encodeURIComponent(promql)}&start=${startTs}&end=${endTs}&step=${step}`
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), PROM_TIMEOUT_MS)
   try {

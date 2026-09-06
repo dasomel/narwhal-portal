@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { validateRuntimeConfig, getK8sApiServer } from "./config"
+import { validateRuntimeConfig, getK8sApiServer, getDependencyUrl } from "./config"
 
 describe("Runtime Configuration Validation (Issue #60)", () => {
   const originalEnv = { ...process.env }
@@ -58,5 +58,41 @@ describe("Runtime Configuration Validation (Issue #60)", () => {
     expect(result.valid).toBe(true)
     expect(result.missingRequired.length).toBe(0)
     expect(getK8sApiServer()).toBe("https://k8s.narwhal.internal:6443")
+  })
+})
+
+describe("getDependencyUrl (Issue #60 phase 3)", () => {
+  const originalEnv = { ...process.env }
+
+  beforeEach(() => {
+    process.env = { ...originalEnv }
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+  })
+
+  it("returns the env var value when set", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
+    process.env.PROMETHEUS_URL = "https://prometheus.narwhal.internal"
+    expect(getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")).toBe(
+      "https://prometheus.narwhal.internal",
+    )
+  })
+
+  it("falls back to the dev default outside production when unset", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
+    delete process.env.PROMETHEUS_URL
+    expect(getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")).toBe(
+      "http://localhost:9090",
+    )
+  })
+
+  it("throws in production when unset instead of defaulting to localhost", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.PROMETHEUS_URL
+    expect(() => getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")).toThrow(
+      "Missing required production configuration: PROMETHEUS_URL",
+    )
   })
 })
