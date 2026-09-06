@@ -190,9 +190,17 @@ spec:
           # (Keycloak / ArgoCD / K8s API / OpenBao) via NODE_EXTRA_CA_CERTS instead of
           # NODE_TLS_REJECT_UNAUTHORIZED=0. NODE_EXTRA_CA_CERTS=/etc/ssl/narwhal/ca.crt is
           # injected into narwhal-portal-secrets by 13-2-narwhal-portal-bindings.sh.
+          #
+          # Portal #20: kube-api-token replaces the long-lived K8S_SA_TOKEN env var
+          # (narwhal-portal-secrets must no longer carry it — see docs/security-clean-install.md
+          # section 8). src/lib/k8s-token.ts reads this file on every call (cached ~60s, and
+          # re-read immediately on a 401), so a 1h projected token rotates with zero downtime.
           volumeMounts:
             - name: narwhal-ca
               mountPath: /etc/ssl/narwhal
+              readOnly: true
+            - name: kube-api-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
               readOnly: true
           resources:
             requests:
@@ -227,6 +235,17 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
+        # Portal #20: projected serviceAccountToken, 1h lifetime, audience-scoped to the
+        # Kubernetes API — replaces the static K8S_SA_TOKEN secret env var. Mounted at the
+        # well-known in-cluster path so the default in src/lib/k8s-token.ts needs no
+        # K8S_SA_TOKEN_FILE override; the kubelet rotates the file in place before expiry.
+        - name: kube-api-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+                  audience: https://kubernetes.default.svc
 ---
 apiVersion: v1
 kind: Service

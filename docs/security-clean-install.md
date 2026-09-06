@@ -269,9 +269,10 @@ curl -sk -H "X-Vault-Token: $OPENBAO_TOKEN" "$OPENBAO_ADDR/v1/sys/health" | jq .
 
 > 보안 감사 C-1: SA 토큰 단기화는 운영 측 핵심 권고.
 
-**옵션 A — projected service account token (권장):**
+**옵션 A — projected service account token (기본값, portal#20에서 구현 완료):**
 
-`narwhal-portal` Deployment 매니페스트에 다음 추가(클러스터 리포):
+`deploy/skaffold-dev-portal.yaml`의 `narwhal-portal` Deployment에 이미 반영되어 있다(프로덕션
+클러스터 리포의 매니페스트도 동일한 volume을 추가해야 한다 — narwhal 쪽 작업):
 ```yaml
 spec:
   template:
@@ -281,7 +282,7 @@ spec:
         - name: portal
           volumeMounts:
             - name: kube-api-token
-              mountPath: /var/run/secrets/tokens
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
               readOnly: true
       volumes:
         - name: kube-api-token
@@ -293,9 +294,12 @@ spec:
                   audience: https://kubernetes.default.svc
 ```
 
-포털 코드에서 `K8S_SA_TOKEN` 대신 `/var/run/secrets/tokens/token` 파일을 매 요청마다 읽도록 수정 필요(별도 작업, 본 문서 범위 외 — 코드 수정 후 별도 PR로 처리).
+포털 코드(`src/lib/k8s-token.ts`)가 `/var/run/secrets/kubernetes.io/serviceaccount/token`을
+매 호출마다 읽는다(최대 60초 캐시, 401 응답 시 즉시 무효화 후 재읽기) — 이 마운트 경로가 기본값이라
+`K8S_SA_TOKEN_FILE`을 별도로 지정할 필요는 없다. `aud` 클레임은 `K8S_TOKEN_AUDIENCE`(기본
+`https://kubernetes.default.svc`)와 일치해야 하며 불일치 시 즉시 거부된다.
 
-**옵션 B — kubectl create token (임시):**
+**옵션 B — kubectl create token (개발 전용, production에서 자동 차단):**
 ```bash
 kubectl -n devtools create serviceaccount idp-portal
 kubectl create clusterrolebinding idp-portal --clusterrole=narwhal-portal \
@@ -303,7 +307,10 @@ kubectl create clusterrolebinding idp-portal --clusterrole=narwhal-portal \
 TOKEN=$(kubectl -n devtools create token idp-portal --duration=3600s)
 ```
 
-`TOKEN` 값을 `.env.local`의 `K8S_SA_TOKEN`에 입력. CronJob 등으로 30분마다 갱신 권장(아니면 옵션 A로 전환).
+`TOKEN` 값을 `.env.local`의 `K8S_SA_TOKEN`에 입력 — 프로젝트 토큰 파일이 없을 때만 쓰이는
+**개발 전용 폴백**이다. `NODE_ENV=production`에서는 `k8s-token.ts`가 이 값을 무시하고 즉시
+throw하므로(옵션 A 마운트 없이 production을 띄우는 설정 실수를 조기에 잡기 위함), 프로덕션에
+`K8S_SA_TOKEN`을 넣어도 되살아나지 않는다.
 
 **검증:**
 ```bash
@@ -324,7 +331,8 @@ curl -sk -H "Authorization: Bearer $TOKEN" \
 | `AUTH_MOCK` | 미설정 또는 `false` | production에서 `true`면 부팅 차단 |
 | `KEYCLOAK_ISSUER`, `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET` | 2 | 포털 로그인 OIDC |
 | `KEYCLOAK_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_ADMIN_CLIENT_ID`, `KEYCLOAK_ADMIN_CLIENT_SECRET` | 3 | Keycloak admin API |
-| `K8S_API_SERVER`, `K8S_SA_TOKEN` | 8 | 클러스터 내 부팅 시 in-cluster config 자동 사용 가능 |
+| `K8S_API_SERVER` | 8 | 클러스터 내 부팅 시 in-cluster config 자동 사용 가능 |
+| `K8S_SA_TOKEN` | 8 | **개발 전용 폴백만.** production은 옵션 A의 projected token 볼륨을 요구하며 이 값을 무시한다 |
 | `ARGOCD_URL`, `ARGOCD_TOKEN`, `ARGOCD_DEVELOPER_PROJECTS` | 4 | |
 | `APISIX_ADMIN_URL`, `APISIX_API_KEY` | 수동 | APISIX admin 설정값 |
 | `PROMETHEUS_URL`, `ALERTMANAGER_URL`, `LOKI_URL` | 수동 | 클러스터 내부 DNS |

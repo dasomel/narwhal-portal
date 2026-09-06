@@ -2,6 +2,7 @@ import { cacheGet, cacheSet } from "./valkey"
 import { K8S_RECOMMENDED_KERNEL_PARAMS } from "./kernel-params"
 import { assertK8sName, assertK8sNamespace, assertK8sNodeName, safeK8sSegment } from "./validation"
 import { getK8sApiServer } from "./config"
+import { getK8sBearerToken, invalidateK8sBearerToken } from "./k8s-token"
 
 export type { Localized, MaybeLocalized } from "./i18n-utils"
 export { pick } from "./i18n-utils"
@@ -9,18 +10,28 @@ export { pick } from "./i18n-utils"
 import type { MaybeLocalized } from "./i18n-utils"
 import type { Locale } from "./i18n"
 
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
+function authHeaders(apiServer: string): Record<string, string> {
+  // kubectl proxy (http://) authenticates via the local kubectl config → no Bearer needed.
+  if (!apiServer.startsWith("https://")) return {}
+  const token = getK8sBearerToken()
+  return token.length > 0 ? { Authorization: `Bearer ${token}` } : {}
+}
 
 async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const apiServer = getK8sApiServer()
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
+    ...authHeaders(apiServer),
     ...(init?.headers as Record<string, string> | undefined),
   }
-  // kubectl proxy (http://) authenticates via the local kubectl config → no Bearer needed.
-  if (apiServer.startsWith("https://") && K8S_TOKEN.length > 0) headers.Authorization = `Bearer ${K8S_TOKEN}`
-  const res = await fetch(`${apiServer}${path}`, { ...init, headers })
+  let res = await fetch(`${apiServer}${path}`, { ...init, headers })
+  if (res.status === 401) {
+    // Cached token may have rotated or expired underneath us — re-read the
+    // projected token file once and retry before giving up.
+    invalidateK8sBearerToken()
+    res = await fetch(`${apiServer}${path}`, { ...init, headers: { ...headers, ...authHeaders(apiServer) } })
+  }
   if (!res.ok) throw new Error(`K8s API ${res.status}: ${path}`)
   return res.json() as Promise<T>
 }

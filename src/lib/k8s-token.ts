@@ -1,0 +1,109 @@
+/**
+ * Kubernetes API bearer-token provider (Portal #20).
+ *
+ * Production reads the token from a projected serviceAccountToken volume file
+ * (default path is the well-known in-cluster mount; override via
+ * K8S_SA_TOKEN_FILE for a non-standard mount). The file is re-read on a short
+ * interval and immediately after invalidateK8sBearerToken(), so a 1h-rotated
+ * token takes effect without restarting the process — unlike the K8S_SA_TOKEN
+ * env var this replaces, which was read once at module load and never changed
+ * for the life of the pod (see k8s-client.ts / live-k8s-informer.ts history).
+ *
+ * K8S_SA_TOKEN remains a fallback, but ONLY outside production — mirrors
+ * getDependencyUrl's fail-fast contract in config.ts: a production pod with no
+ * mounted token file throws rather than silently falling back to a long-lived
+ * static credential.
+ */
+import { readFileSync } from "fs"
+import { isProduction } from "./config"
+
+const DEFAULT_TOKEN_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+const DEFAULT_AUDIENCE = "https://kubernetes.default.svc"
+// How long a successfully-read token is served from cache before the file is
+// re-read. Short enough that a 3600s-lifetime projected token is always
+// refreshed well ahead of expiry with no restart involved.
+const REFRESH_INTERVAL_MS = 60_000
+
+interface CachedToken {
+  value: string
+  readAtMs: number
+}
+
+let cached: CachedToken | null = null
+
+function tokenFilePath(): string {
+  return process.env.K8S_SA_TOKEN_FILE || DEFAULT_TOKEN_FILE
+}
+
+function expectedAudience(): string {
+  return process.env.K8S_TOKEN_AUDIENCE || DEFAULT_AUDIENCE
+}
+
+function readTokenFile(path: string): string | null {
+  try {
+    const raw = readFileSync(path, "utf8").trim()
+    return raw.length > 0 ? raw : null
+  } catch {
+    return null
+  }
+}
+
+/** Decodes a JWT payload — no signature verification, only used for the audience check below. */
+function decodeJwtPayload(token: string): { aud?: string | string[] } | null {
+  const parts = token.split(".")
+  if (parts.length !== 3) return null
+  try {
+    return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as { aud?: string | string[] }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Rejects a decodable JWT whose `aud` claim doesn't include the expected
+ * Kubernetes API audience. Opaque (non-JWT) tokens — e.g. a dev-only
+ * K8S_SA_TOKEN — can't be decoded and are passed through unchecked.
+ */
+function assertAudience(token: string): void {
+  const payload = decodeJwtPayload(token)
+  if (!payload) return
+  const expected = expectedAudience()
+  const auds = Array.isArray(payload.aud) ? payload.aud : payload.aud ? [payload.aud] : []
+  if (auds.length > 0 && !auds.includes(expected)) {
+    throw new Error(`K8s service account token audience mismatch: expected "${expected}", got [${auds.join(", ")}]`)
+  }
+}
+
+/**
+ * Forces the next getK8sBearerToken() call to re-read the token file instead
+ * of serving the cached value. Call this after a 401 from the API server so a
+ * rotated (or freshly re-mounted) token takes effect immediately rather than
+ * waiting for REFRESH_INTERVAL_MS.
+ */
+export function invalidateK8sBearerToken(): void {
+  cached = null
+}
+
+export function getK8sBearerToken(): string {
+  const now = Date.now()
+  if (cached && now - cached.readAtMs < REFRESH_INTERVAL_MS) {
+    return cached.value
+  }
+
+  const fromFile = readTokenFile(tokenFilePath())
+  if (fromFile) {
+    assertAudience(fromFile)
+    cached = { value: fromFile, readAtMs: now }
+    return fromFile
+  }
+
+  if (!isProduction()) {
+    const envToken = process.env.K8S_SA_TOKEN ?? ""
+    cached = { value: envToken, readAtMs: now }
+    return envToken
+  }
+
+  throw new Error(
+    `Missing required production configuration: projected service account token not found at ${tokenFilePath()} (K8S_SA_TOKEN env fallback is dev-only)`,
+  )
+}
