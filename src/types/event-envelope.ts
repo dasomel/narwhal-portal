@@ -52,6 +52,8 @@ export interface EventEnvelope<TData = Record<string, unknown>> {
   span_id: string | null
   source: string
   source_version: string | null
+  producer?: string | null
+  credential_scope?: string | null
   actor: EventActor
   resource: EventResource | null
   idempotency_key: string | null
