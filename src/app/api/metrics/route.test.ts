@@ -9,15 +9,26 @@ vi.mock("@/lib/prometheus", () => ({ getClusterMetrics: vi.fn(), getNodeMetrics:
 
 const { requireRole } = await import("@/lib/auth")
 const { getClusterMetrics, getNodeMetrics } = await import("@/lib/prometheus")
+import type { ClusterMetricsProjection } from "@/lib/prometheus"
+
 const { GET } = await import("./route")
 
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(getClusterMetrics).mockResolvedValue({
+    status: "ok",
+    source: "prometheus",
+    evaluatedAt: "2026-09-07T00:00:00.000Z",
     cpu: 42,
     memory: 55,
-    nodes: { total: 3, ready: 3 },
-    pods: { total: 20, running: 18 },
+    nodes: { total: 3, ready: 3, source: "prometheus", status: "ok" },
+    pods: { total: 20, running: 18, source: "prometheus", status: "ok" },
+    components: Object.fromEntries(
+      ["cpu", "memory", "nodeCount", "nodeReady", "podCount", "podRunning"].map((k) => [
+        k,
+        { status: "ok", query: k, value: 1, source: "prometheus" },
+      ]),
+    ) as ClusterMetricsProjection["components"],
   })
   vi.mocked(getNodeMetrics).mockResolvedValue([])
 })
