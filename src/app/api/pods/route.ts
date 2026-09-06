@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { getK8sApiServer } from "@/lib/config"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { ValidationError, toValidationErrorBody, assertK8sNamespace } from "@/lib/validation"
+import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
 
@@ -76,6 +78,27 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   if (!namespace) {
     return NextResponse.json({ error: "namespace query parameter is required" }, { status: 400 })
+  }
+
+  // portal#33: this route (used by the Catalog pod-logs viewer to list a
+  // service's pods) accepted any caller-supplied namespace with no visibility
+  // check — the same gap /api/k8s/pods had. Same fix: validate the namespace
+  // is a real one before authorizing on it, then require it be in the
+  // caller's effective scope. Cache keys stay per-namespace (unchanged) since
+  // the pod list itself doesn't vary by caller — only whether they may read
+  // it does, and that's decided here before any cache lookup happens.
+  try {
+    assertK8sNamespace(namespace)
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return NextResponse.json(toValidationErrorBody(err), { status: 400 })
+    }
+    throw err
+  }
+
+  const scope = await getEffectiveScope(session)
+  if (!namespaceVisible(namespace, scope)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
   try {

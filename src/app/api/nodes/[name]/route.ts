@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/lib/auth"
+import { requireRole } from "@/lib/auth"
 import { getNodeDetail } from "@/lib/k8s-client"
 import { getNodeMetrics, getNodePodCount } from "@/lib/prometheus"
 import { assertK8sNodeName, ValidationError, toValidationErrorBody } from "@/lib/validation"
@@ -10,8 +10,19 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ name: string }> }
 ) {
-  const session = await auth()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  // portal#33: node telemetry has no namespace/team dimension (see the
+  // rationale in src/app/api/metrics/route.ts), so the applicable policy
+  // is a role gate rather than getEffectiveScope/namespaceVisible — the same
+  // requireRole(cluster-admin, developer, viewer) used by /api/cost,
+  // /api/scorecards and /api/service-graph for other non-tenant-scoped reads.
+  // This route previously accepted any authenticated session including guest.
+  const gate = await requireRole("cluster-admin", "developer", "viewer")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
+  }
 
   const { name } = await params
   try {
