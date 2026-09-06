@@ -202,9 +202,20 @@ spec:
               cpu: "1"
               # next dev(Turbopack)가 다수 라우트 컴파일 시 2Gi 초과 → OOMKilled(137) → 502.
               memory: 3Gi
+          # Issue #63: liveness is process-only (no dependency calls); readiness
+          # gates on required config + critical dependencies (see
+          # src/app/api/health/{live,ready}/route.ts). Both are excluded from the
+          # session-cookie gate in src/proxy.ts's matcher (`(?!api|...)`), so they
+          # answer without a session.
+          livenessProbe:
+            httpGet:
+              path: /api/health/live
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /api/auth/session
+              path: /api/health/ready
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 10
