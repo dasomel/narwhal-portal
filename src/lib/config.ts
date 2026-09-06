@@ -24,14 +24,6 @@ export function getK8sApiServer(): string {
   throw new Error("Missing required production configuration: K8S_API_SERVER")
 }
 
-export const K8S_API_SERVER =
-  process.env.K8S_API_SERVER ||
-  (process.env.KUBERNETES_SERVICE_HOST
-    ? `https://${process.env.KUBERNETES_SERVICE_HOST}:${process.env.KUBERNETES_SERVICE_PORT || "443"}`
-    : process.env.NODE_ENV === "production"
-    ? ""
-    : "https://192.168.56.100:6443")
-
 export interface ConfigValidationResult {
   valid: boolean
   environment: string

@@ -7,13 +7,16 @@
  * source at all — the page could only ever show what the /api/events/ingest webhook
  * received (nothing was posting to it).
  */
-import { K8S_API_SERVER } from "./config"
+import { getK8sApiServer } from "./config"
 import { pushEvent } from "./live-stream"
 import type { LiveEventIngest, LiveEventType, LiveSeverity } from "@/types/live"
 import type { EventResource } from "@/types/event-envelope"
 
 const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
-const USE_BEARER = K8S_API_SERVER.startsWith("https://") && K8S_TOKEN.length > 0
+
+function useBearer(apiServer: string): boolean {
+  return apiServer.startsWith("https://") && K8S_TOKEN.length > 0
+}
 
 let started = false
 
@@ -33,9 +36,9 @@ interface K8sEvent {
   involvedObject?: { kind?: string; name?: string; namespace?: string }
 }
 
-function headers(): Record<string, string> {
+function headers(apiServer: string): Record<string, string> {
   const h: Record<string, string> = { Accept: "application/json" }
-  if (USE_BEARER) h.Authorization = `Bearer ${K8S_TOKEN}`
+  if (useBearer(apiServer)) h.Authorization = `Bearer ${K8S_TOKEN}`
   return h
 }
 
@@ -85,19 +88,19 @@ function toIngest(ev: K8sEvent): LiveEventIngest | null {
   }
 }
 
-async function getLatestResourceVersion(): Promise<string> {
-  const res = await fetch(`${K8S_API_SERVER}/api/v1/events?limit=1`, { headers: headers() })
+async function getLatestResourceVersion(apiServer: string): Promise<string> {
+  const res = await fetch(`${apiServer}/api/v1/events?limit=1`, { headers: headers(apiServer) })
   if (!res.ok) throw new Error(`list events ${res.status}`)
   const body = (await res.json()) as { metadata?: { resourceVersion?: string } }
   return body.metadata?.resourceVersion ?? "0"
 }
 
 /** Runs one watch connection; returns the last-seen resourceVersion when it ends. */
-async function watchOnce(resourceVersion: string): Promise<string> {
+async function watchOnce(apiServer: string, resourceVersion: string): Promise<string> {
   const url =
-    `${K8S_API_SERVER}/api/v1/events` +
+    `${apiServer}/api/v1/events` +
     `?watch=1&resourceVersion=${encodeURIComponent(resourceVersion)}&timeoutSeconds=300`
-  const res = await fetch(url, { headers: headers() })
+  const res = await fetch(url, { headers: headers(apiServer) })
   if (!res.ok || !res.body) throw new Error(`watch events ${res.status}`)
 
   const reader = res.body.getReader()
@@ -133,7 +136,8 @@ async function watchOnce(resourceVersion: string): Promise<string> {
 export function startLiveK8sInformer(): void {
   if (started) return
   if (process.env.NEXT_RUNTIME && process.env.NEXT_RUNTIME !== "nodejs") return
-  if (!USE_BEARER) {
+  const apiServer = getK8sApiServer()
+  if (!useBearer(apiServer)) {
     console.warn("[live-k8s-informer] K8S_SA_TOKEN not set — live event informer disabled")
     return
   }
@@ -145,8 +149,8 @@ export function startLiveK8sInformer(): void {
     let backoff = 1000
     for (;;) {
       try {
-        if (rv === "0") rv = await getLatestResourceVersion()
-        rv = await watchOnce(rv)
+        if (rv === "0") rv = await getLatestResourceVersion(apiServer)
+        rv = await watchOnce(apiServer, rv)
         backoff = 1000 // clean cycle — reset backoff
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)

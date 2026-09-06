@@ -1,7 +1,7 @@
 import { cacheGet, cacheSet } from "./valkey"
 import { K8S_RECOMMENDED_KERNEL_PARAMS } from "./kernel-params"
 import { assertK8sName, assertK8sNamespace, assertK8sNodeName, safeK8sSegment } from "./validation"
-import { K8S_API_SERVER } from "./config"
+import { getK8sApiServer } from "./config"
 
 export type { Localized, MaybeLocalized } from "./i18n-utils"
 export { pick } from "./i18n-utils"
@@ -10,17 +10,17 @@ import type { MaybeLocalized } from "./i18n-utils"
 import type { Locale } from "./i18n"
 
 const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
-// kubectl proxy (http://) authenticates via the local kubectl config → no Bearer needed.
-const USE_BEARER = K8S_API_SERVER.startsWith("https://") && K8S_TOKEN.length > 0
 
 async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const apiServer = getK8sApiServer()
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
     ...(init?.headers as Record<string, string> | undefined),
   }
-  if (USE_BEARER) headers.Authorization = `Bearer ${K8S_TOKEN}`
-  const res = await fetch(`${K8S_API_SERVER}${path}`, { ...init, headers })
+  // kubectl proxy (http://) authenticates via the local kubectl config → no Bearer needed.
+  if (apiServer.startsWith("https://") && K8S_TOKEN.length > 0) headers.Authorization = `Bearer ${K8S_TOKEN}`
+  const res = await fetch(`${apiServer}${path}`, { ...init, headers })
   if (!res.ok) throw new Error(`K8s API ${res.status}: ${path}`)
   return res.json() as Promise<T>
 }

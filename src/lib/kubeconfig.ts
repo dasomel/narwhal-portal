@@ -1,5 +1,5 @@
 import * as yaml from "js-yaml"
-import { K8S_API_SERVER } from "./config"
+import { getK8sApiServer } from "./config"
 
 // L-5: idToken/refreshToken were unused — kubectl oidc-login fetches tokens
 // itself via PKCE. Removed from the public signature.
@@ -10,7 +10,7 @@ export interface KubeconfigOptions {
 }
 
 export function generateKubeconfig(opts: KubeconfigOptions): string {
-  const CLUSTER_SERVER = K8S_API_SERVER
+  const CLUSTER_SERVER = getK8sApiServer()
   const CLUSTER_CA = process.env.K8S_CA_DATA ?? ""
 
   const kubeconfig = {

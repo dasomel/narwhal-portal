@@ -1,6 +1,6 @@
 import { cacheGet, cacheSet } from "./valkey"
 import { assertPromQLSafe, K8S_NODE_NAME_RE } from "./validation"
-import { K8S_API_SERVER } from "./config"
+import { getK8sApiServer } from "./config"
 
 const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? "http://localhost:9090"
 
@@ -156,9 +156,10 @@ async function k8sCountsFallback(): Promise<{
   pods: { total: number; running: number }
 } | null> {
   try {
+    const apiServer = getK8sApiServer()
     const [nodesRes, podsRes] = await Promise.all([
-      fetch(`${K8S_API_SERVER}/api/v1/nodes`, { next: { revalidate: 10 } }),
-      fetch(`${K8S_API_SERVER}/api/v1/pods`, { next: { revalidate: 10 } }),
+      fetch(`${apiServer}/api/v1/nodes`, { next: { revalidate: 10 } }),
+      fetch(`${apiServer}/api/v1/pods`, { next: { revalidate: 10 } }),
     ])
     if (!nodesRes.ok || !podsRes.ok) return null
     const [nodes, pods] = await Promise.all([nodesRes.json(), podsRes.json()])

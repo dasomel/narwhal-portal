@@ -1,10 +1,9 @@
 // TODO(wrap-up): i18n keys for ko/en — see spec §5.7
 import yaml from "js-yaml"
-import { K8S_API_SERVER } from "./config"
+import { getK8sApiServer } from "./config"
 import { cacheGet, cacheSet } from "./valkey"
 import { getArgoApps, getArgoApp } from "./argocd"
 const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
-const USE_BEARER = K8S_API_SERVER.startsWith("https://") && K8S_TOKEN.length > 0
 
 const SCORECARD_CM_NAME = process.env.SCORECARD_CONFIGMAP_NAME ?? "narwhal-scorecard-rules"
 const SCORECARD_CM_NS = process.env.SCORECARD_CONFIGMAP_NAMESPACE ?? "devtools"
@@ -55,9 +54,10 @@ interface RawConfigMap {
 }
 
 async function k8sGet<T>(path: string): Promise<T> {
+  const apiServer = getK8sApiServer()
   const headers: Record<string, string> = { Accept: "application/json" }
-  if (USE_BEARER) headers.Authorization = `Bearer ${K8S_TOKEN}`
-  const res = await fetch(`${K8S_API_SERVER}${path}`, { headers })
+  if (apiServer.startsWith("https://") && K8S_TOKEN.length > 0) headers.Authorization = `Bearer ${K8S_TOKEN}`
+  const res = await fetch(`${apiServer}${path}`, { headers })
   if (res.status === 404) {
     const err = new Error(`K8s 404: ${path}`)
     ;(err as NodeJS.ErrnoException).code = "NOT_FOUND"

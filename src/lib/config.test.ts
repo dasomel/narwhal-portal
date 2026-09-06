@@ -20,6 +20,14 @@ describe("Runtime Configuration Validation (Issue #60)", () => {
     expect(getK8sApiServer()).toBe("https://192.168.56.100:6443")
   })
 
+  it("falls back to the in-cluster server derived from KUBERNETES_SERVICE_HOST", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.K8S_API_SERVER
+    process.env.KUBERNETES_SERVICE_HOST = "10.0.0.1"
+    process.env.KUBERNETES_SERVICE_PORT = "6443"
+    expect(getK8sApiServer()).toBe("https://10.0.0.1:6443")
+  })
+
   it("fails fast in production if required Keycloak variables are missing", () => {
     ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
     delete process.env.AUTH_MOCK
