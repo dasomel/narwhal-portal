@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/lib/auth"
+import { requireRole } from "@/lib/auth"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import { getCluster, resolveClusterCredentials, clusterCacheKey, DEFAULT_CLUSTER_ID } from "@/lib/cluster-registry"
 
@@ -73,8 +73,16 @@ function calcAge(creationTimestamp: string): string {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await auth()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  // portal#33 follow-up: this is a fleet-wide node/pod/namespace dump, so it
+  // carries the same role gate as /api/metrics and /api/nodes — guest sessions
+  // only ever had it hidden client-side.
+  const gate = await requireRole("cluster-admin", "developer", "viewer")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
+  }
 
   // portal#21 pilot: this route now resolves an explicit cluster instead of
   // reading process-global K8S_API_SERVER/K8S_SA_TOKEN directly. Defaulting to
