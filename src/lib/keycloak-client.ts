@@ -110,17 +110,46 @@ function mapUser(raw: Record<string, unknown>): KeycloakUser {
   }
 }
 
+// Safety limit on pagination to prevent infinite loops if the API returns repeating pages
+const MAX_PAGES = 1000
+
+async function fetchAllPages<T>(
+  baseUrl: string,
+  h: HeadersInit,
+  pageSize = 100,
+  errorPrefix = "Keycloak API"
+): Promise<T[]> {
+  const results: T[] = []
+  let first = 0
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const sep = baseUrl.includes("?") ? "&" : "?"
+    const res = await fetch(`${baseUrl}${sep}first=${first}&max=${pageSize}`, {
+      headers: h,
+    })
+    if (!res.ok) throw new Error(`${errorPrefix} ${res.status}`)
+    const data: T[] = await res.json()
+    results.push(...data)
+    if (data.length < pageSize) {
+      return results
+    }
+    first += pageSize
+  }
+
+  throw new Error(`${errorPrefix} pagination exceeded max page limit`)
+}
+
 export async function getUsers(): Promise<KeycloakUser[]> {
   const cached = await cacheGet<KeycloakUser[]>("keycloak:users")
   if (cached) return cached
 
   const h = await headers()
-  const res = await fetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/users?max=100`,
-    { headers: h }
+  const data = await fetchAllPages<Record<string, unknown>>(
+    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/users`,
+    h,
+    100,
+    "Keycloak API"
   )
-  if (!res.ok) throw new Error(`Keycloak API ${res.status}`)
-  const data: Record<string, unknown>[] = await res.json()
   const users = data.map(mapUser)
   await cacheSet("keycloak:users", users, 300)
   return users
@@ -131,12 +160,12 @@ export async function getGroups(): Promise<KeycloakGroup[]> {
   if (cached) return cached
 
   const h = await headers()
-  const res = await fetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups?max=100`,
-    { headers: h }
+  const data = await fetchAllPages<{ id: string; name: string }>(
+    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups`,
+    h,
+    100,
+    "Keycloak groups"
   )
-  if (!res.ok) throw new Error(`Keycloak groups ${res.status}`)
-  const data: Array<{ id: string; name: string }> = await res.json()
   const groups: KeycloakGroup[] = data.map((g) => ({ pk: g.id, name: g.name, num_pk: 0 }))
   await cacheSet("keycloak:groups", groups, 60)
   return groups
@@ -147,48 +176,63 @@ export async function getGroupsDetailed(): Promise<KeycloakGroupDetailed[]> {
   if (cached) return cached
 
   const h = await headers()
-  const listRes = await fetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups?max=100`,
-    { headers: h }
+  const groupList = await fetchAllPages<{
+    id: string
+    name: string
+    attributes?: Record<string, string[]>
+  }>(
+    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups`,
+    h,
+    100,
+    "Keycloak groups"
   )
-  if (!listRes.ok) throw new Error(`Keycloak groups ${listRes.status}`)
-  const groupList: Array<{ id: string; name: string; attributes?: Record<string, string[]> }> =
-    await listRes.json()
 
-  const detailed = await Promise.all(
-    groupList.map(async (g) => {
-      const membersRes = await fetch(
-        `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${g.id}/members?max=100`,
-        { headers: h }
-      )
-      const members: Record<string, unknown>[] = membersRes.ok ? await membersRes.json() : []
-      const rawAttrs = g.attributes ?? {}
-      const attributes: Record<string, unknown> = {}
-      for (const [k, v] of Object.entries(rawAttrs)) {
-        if (Array.isArray(v) && v.length === 1) {
-          try {
-            attributes[k] = JSON.parse(v[0])
-          } catch {
-            attributes[k] = v[0]
-          }
-        } else {
-          attributes[k] = v
+  const BATCH_SIZE = 10
+  const detailed: KeycloakGroupDetailed[] = []
+
+  for (let i = 0; i < groupList.length; i += BATCH_SIZE) {
+    const batch = groupList.slice(i, i + BATCH_SIZE)
+    const batchResults = await Promise.all(
+      batch.map(async (g) => {
+        let members: Array<{ id: string }> = []
+        try {
+          members = await fetchAllPages<{ id: string }>(
+            `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${g.id}/members`,
+            h,
+            100,
+            "Get group members"
+          )
+        } catch {
+          members = []
         }
-      }
-      const detailed: KeycloakGroupDetailed = {
-        pk: g.id,
-        name: g.name,
-        num_pk: 0,
-        is_superuser: false,
-        parent: null,
-        parent_name: null,
-        users: members.map((m) => m.id as string),
-        attributes,
-        roles_obj: [],
-      }
-      return detailed
-    })
-  )
+        const rawAttrs = g.attributes ?? {}
+        const attributes: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(rawAttrs)) {
+          if (Array.isArray(v) && v.length === 1) {
+            try {
+              attributes[k] = JSON.parse(v[0])
+            } catch {
+              attributes[k] = v[0]
+            }
+          } else {
+            attributes[k] = v
+          }
+        }
+        return {
+          pk: g.id,
+          name: g.name,
+          num_pk: 0,
+          is_superuser: false,
+          parent: null,
+          parent_name: null,
+          users: members.map((m) => m.id),
+          attributes,
+          roles_obj: [],
+        }
+      })
+    )
+    detailed.push(...batchResults)
+  }
 
   await cacheSet("keycloak:groups-detailed", detailed, 60)
   return detailed
@@ -249,12 +293,12 @@ export async function setUserActive(pk: string, isActive: boolean): Promise<void
 
 export async function getGroupMembers(groupPk: string): Promise<KeycloakUser[]> {
   const h = await headers()
-  const res = await fetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${groupPk}/members?max=100`,
-    { headers: h }
+  const data = await fetchAllPages<Record<string, unknown>>(
+    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${groupPk}/members`,
+    h,
+    100,
+    "Get group members"
   )
-  if (!res.ok) throw new Error(`Get group members ${res.status}`)
-  const data: Record<string, unknown>[] = await res.json()
   return data.map(mapUser)
 }
 
