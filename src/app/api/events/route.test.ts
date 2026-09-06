@@ -28,6 +28,10 @@ const { GET } = await import("./route")
 
 const platformTeamSession = { groups: ["developer"], teams: ["platform-team"], user: { role: "developer" } }
 const frontendTeamSession = { groups: ["developer"], teams: ["frontend-team"], user: { role: "developer" } }
+const clusterAdminSession = { groups: ["cluster-admin"], teams: [], user: { role: "cluster-admin" } }
+// No team mapping and no role-default group — getVisibilityScope() falls through to
+// hasMapping:false with zero namespaces, the "scope cannot be established" case.
+const unscopedSession = { groups: ["unmapped-group"], teams: [], user: { role: "developer" } }
 
 const namespaces: NamespaceInfo[] = [
   { name: "platform-system", status: "Active", labels: {}, createdAt: "2026-01-01T00:00:00Z" },
@@ -47,6 +51,19 @@ function fakeApp(name: string, project: string, namespace: string): ArgoApp {
 }
 const platformApp = fakeApp("platform-app", "platform", "platform-system")
 const frontendApp = fakeApp("frontend-app", "apps", "frontend-app")
+
+const platformAlert = {
+  labels: { alertname: "PlatformDown", namespace: "platform-system", severity: "critical" },
+  annotations: { summary: "platform down" },
+  status: { state: "active" },
+  startsAt: "2026-08-20T00:00:00Z",
+}
+const frontendAlert = {
+  labels: { alertname: "FrontendDown", namespace: "frontend-app", severity: "warning" },
+  annotations: { summary: "frontend down" },
+  status: { state: "active" },
+  startsAt: "2026-08-20T00:00:00Z",
+}
 
 function req() {
   return new Request("http://localhost/api/events")
@@ -94,5 +111,34 @@ describe("GET /api/events — scope enforcement", () => {
     vi.mocked(auth).mockResolvedValue(null as never)
     const res = await GET(req())
     expect(res.status).toBe(401)
+  })
+
+  it("shows cluster-admin every team's deploy events (full view preserved)", async () => {
+    vi.mocked(auth).mockResolvedValue(clusterAdminSession as never)
+    const res = await GET(req())
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    const titles = body.map((e: { title: string }) => e.title)
+    expect(titles).toContain("platform-app")
+    expect(titles).toContain("frontend-app")
+  })
+
+  it("denies a non-admin caller with no scope mapping (default-deny, empty timeline)", async () => {
+    vi.mocked(auth).mockResolvedValue(unscopedSession as never)
+    const res = await GET(req())
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toEqual([])
+  })
+
+  it("filters Alertmanager alerts by structured namespace label, not text", async () => {
+    vi.mocked(getAlerts).mockResolvedValue([platformAlert, frontendAlert] as never)
+    vi.mocked(auth).mockResolvedValue(frontendTeamSession as never)
+    const res = await GET(req())
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    const titles = body.map((e: { title: string }) => e.title)
+    expect(titles).toContain("FrontendDown")
+    expect(titles).not.toContain("PlatformDown")
   })
 })
