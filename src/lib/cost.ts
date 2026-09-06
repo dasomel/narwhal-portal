@@ -6,6 +6,7 @@
  */
 
 import { cacheGet, cacheSet } from "./valkey"
+import { namespaceVisible, type EffectiveScope } from "./scope"
 
 const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? "http://localhost:9090"
 
@@ -201,12 +202,20 @@ function calcItem(id: string, cpuCores: number, memBytes: number, storageBytes: 
  * - namespace: namespace별 항목 목록
  * - service: service(label_app_kubernetes_io_instance)별 항목 목록
  *
+ * portal#28: 반환하는 모든 항목(단일 cluster 합산 포함)은 effScope로 가시성 필터링된
+ * PromQL 행에서만 계산한다 — developer/viewer가 다른 팀의 namespace/service 비용을,
+ * 심지어 "cluster" 합산을 통해서도 간접적으로 보지 못하게 한다. cluster-admin은
+ * namespaceVisible이 항상 true라 기존과 동일하게 전체를 본다. 캐시 키에 effScope의
+ * fingerprint를 넣어 서로 다른 스코프의 결과가 캐시에서 충돌하지 않게 한다
+ * (governance/scorecard, governance/dora와 같은 패턴).
+ *
  * Prometheus 미응답 시 { items: [], notice } 반환 (graceful degradation)
  */
 export async function getCost(
-  scope: "cluster" | "namespace" | "service"
+  scope: "cluster" | "namespace" | "service",
+  effScope: EffectiveScope
 ): Promise<{ items: CostItem[]; notice?: string }> {
-  const cacheKey = `cost:${scope}:all`
+  const cacheKey = `cost:${scope}:${effScope.fingerprint}`
   const cached = await cacheGet<{ items: CostItem[]; notice?: string }>(cacheKey)
   if (cached !== null) return cached
 
@@ -217,9 +226,10 @@ export async function getCost(
         queryVector(memByNamespaceQuery()),
         queryVector(storageByNamespaceQuery()),
       ])
-      const cpuTotal = cpuRes.reduce((s, r) => s + parseFloat(r.value[1]), 0)
-      const memTotal = memRes.reduce((s, r) => s + parseFloat(r.value[1]), 0)
-      const storTotal = storRes.reduce((s, r) => s + parseFloat(r.value[1]), 0)
+      const visible = (r: PromVectorResult) => namespaceVisible(r.metric.namespace ?? "", effScope)
+      const cpuTotal = cpuRes.filter(visible).reduce((s, r) => s + parseFloat(r.value[1]), 0)
+      const memTotal = memRes.filter(visible).reduce((s, r) => s + parseFloat(r.value[1]), 0)
+      const storTotal = storRes.filter(visible).reduce((s, r) => s + parseFloat(r.value[1]), 0)
       const items = [calcItem("cluster", cpuTotal, memTotal, storTotal)]
       const result = { items }
       await cacheSet(cacheKey, result, 300) // 5min
@@ -238,15 +248,15 @@ export async function getCost(
       const storMap = new Map<string, number>()
       for (const r of cpuRes) {
         const ns = r.metric.namespace
-        if (ns && ns !== "unknown") cpuMap.set(ns, parseFloat(r.value[1]))
+        if (ns && ns !== "unknown" && namespaceVisible(ns, effScope)) cpuMap.set(ns, parseFloat(r.value[1]))
       }
       for (const r of memRes) {
         const ns = r.metric.namespace
-        if (ns && ns !== "unknown") memMap.set(ns, (memMap.get(ns) ?? 0) + parseFloat(r.value[1]))
+        if (ns && ns !== "unknown" && namespaceVisible(ns, effScope)) memMap.set(ns, (memMap.get(ns) ?? 0) + parseFloat(r.value[1]))
       }
       for (const r of storRes) {
         const ns = r.metric.namespace
-        if (ns && ns !== "unknown") storMap.set(ns, (storMap.get(ns) ?? 0) + parseFloat(r.value[1]))
+        if (ns && ns !== "unknown" && namespaceVisible(ns, effScope)) storMap.set(ns, (storMap.get(ns) ?? 0) + parseFloat(r.value[1]))
       }
       const namespaces = new Set([...cpuMap.keys(), ...memMap.keys()])
       const items: CostItem[] = []
@@ -268,13 +278,13 @@ export async function getCost(
     const memMap = new Map<string, number>()
     for (const r of cpuRes) {
       const svc = r.metric.label_app_kubernetes_io_instance
-      if (svc && svc !== "unknown" && svc !== "") {
+      if (svc && svc !== "unknown" && svc !== "" && namespaceVisible(r.metric.namespace ?? "", effScope)) {
         cpuMap.set(svc, parseFloat(r.value[1]))
       }
     }
     for (const r of memRes) {
       const svc = r.metric.label_app_kubernetes_io_instance
-      if (svc && svc !== "unknown" && svc !== "") {
+      if (svc && svc !== "unknown" && svc !== "" && namespaceVisible(r.metric.namespace ?? "", effScope)) {
         memMap.set(svc, (memMap.get(svc) ?? 0) + parseFloat(r.value[1]))
       }
     }

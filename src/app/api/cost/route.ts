@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { getCost, unitPrices } from "@/lib/cost"
+import { getEffectiveScope } from "@/lib/scope"
 import { ValidationError, toValidationErrorBody } from "@/lib/validation"
 
 export const dynamic = "force-dynamic"
@@ -32,8 +33,13 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    // portal#28: getCost previously returned every namespace/service's cost to any
+    // developer/viewer regardless of team ownership — filter to the same
+    // effective scope the other scoped routes apply, before any aggregation happens.
+    const effScope = await getEffectiveScope(gate.session)
     const { items, notice } = await getCost(
-      scope as "cluster" | "namespace" | "service"
+      scope as "cluster" | "namespace" | "service",
+      effScope
     )
 
     const body: Record<string, unknown> = {
