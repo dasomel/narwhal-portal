@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config"
+import { configDefaults, defineConfig } from "vitest/config"
 import { fileURLToPath } from "node:url"
 
 // portal#21: every existing "@/..." import in a src/lib/*.ts file that vitest
@@ -9,6 +9,12 @@ import { fileURLToPath } from "node:url"
 // real (non-type) "@/..." value import (DEFAULT_CLUSTER_ID from
 // src/types/cluster.ts). Mirrors the one alias tsconfig.json's "paths" defines.
 export default defineConfig({
+  test: {
+    // Agent worktrees are created under .claude/worktrees/ inside this repo; without
+    // this, vitest also collects every test file in those checkouts and the suite
+    // count doubles (observed 559 vs 283), so "all green" stops meaning this tree.
+    exclude: [...configDefaults.exclude, ".claude/**"],
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
