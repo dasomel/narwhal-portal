@@ -29,10 +29,20 @@ const OPENBAO_TOKEN = process.env.OPENBAO_TOKEN ?? ""
 
 export interface SecretEntry {
   path: string
-  keys: string[]
   version: number
   createdTime: string
+  updatedTime: string
 }
+
+/**
+ * Thrown when OpenBao secret metadata cannot be read (non-404 error on the list
+ * or a per-secret metadata call). listSecrets() fails closed on this instead of
+ * returning an empty/partial list — an empty array would read as "no secrets
+ * exist" to the governance view (portal#19) when the real cause is a permission
+ * or connectivity problem, silently under-reporting exposure rather than
+ * surfacing the degraded state explicitly.
+ */
+export class SecretMetadataError extends Error {}
 
 let httpsChecked = false
 function assertHttpsInProduction(addr: string): void {
@@ -68,28 +78,39 @@ export async function listSecrets(): Promise<SecretEntry[]> {
   const SECRET_PREFIX = "narwhal-portal/"
 
   const listRes = await baoFetch(`/v1/secret/metadata/${SECRET_PREFIX}?list=true`)
-  if (!listRes.ok) return []
+  if (listRes.status === 404) {
+    // KV v2 404s a list on a prefix with nothing under it — a genuine empty
+    // inventory, distinct from a read failure, so this caches and returns clean.
+    await cacheSet(cacheKey, [], 30)
+    return []
+  }
+  if (!listRes.ok) {
+    throw new SecretMetadataError(`Failed to list secret metadata (HTTP ${listRes.status})`)
+  }
 
   const listData = await listRes.json()
   // Keys are returned relative to the listed prefix (e.g. "keycloak-token"),
-  // so prefix them back for metadata/data lookups while displaying the leaf name.
+  // so prefix them back for metadata lookups while displaying the leaf name.
   const keys: string[] = listData?.data?.keys ?? []
 
+  // portal#19: this used to also GET /v1/secret/data/<path> per secret solely to
+  // read Object.keys() off the value, which required KV data-read capability the
+  // inventory view has no business holding. Everything the UI shows now comes
+  // from /v1/secret/metadata/<path> alone; KV v2 metadata does not expose field
+  // names, so per-secret key names are dropped rather than approximated.
   const entries: SecretEntry[] = await Promise.all(
     keys.filter((k) => !k.endsWith("/")).map(async (key) => {
       const fullPath = `${SECRET_PREFIX}${key}`
-      try {
-        const metaRes = await baoFetch(`/v1/secret/metadata/${fullPath}`)
-        if (!metaRes.ok) return { path: key, keys: [], version: 0, createdTime: "" }
-        const meta = await metaRes.json()
-        const version = meta?.data?.current_version ?? 0
-        const createdTime = meta?.data?.created_time ?? ""
-        const dataRes = await baoFetch(`/v1/secret/data/${fullPath}`)
-        const secretData = dataRes.ok ? await dataRes.json() : null
-        const secretKeys = secretData?.data?.data ? Object.keys(secretData.data.data) : []
-        return { path: key, keys: secretKeys, version, createdTime }
-      } catch {
-        return { path: key, keys: [], version: 0, createdTime: "" }
+      const metaRes = await baoFetch(`/v1/secret/metadata/${fullPath}`)
+      if (!metaRes.ok) {
+        throw new SecretMetadataError(`Failed to read metadata for '${key}' (HTTP ${metaRes.status})`)
+      }
+      const meta = await metaRes.json()
+      return {
+        path: key,
+        version: meta?.data?.current_version ?? 0,
+        createdTime: meta?.data?.created_time ?? "",
+        updatedTime: meta?.data?.updated_time ?? "",
       }
     })
   )

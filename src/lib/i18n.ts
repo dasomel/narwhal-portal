@@ -312,7 +312,9 @@ const ko = {
   "secrets.keys": "키",
   "secrets.version": "버전",
   "secrets.created": "생성일",
-  "secrets.masked": "*** ({count}개)",
+  "secrets.updated": "수정일",
+  "secrets.masked": "***",
+  "secrets.error": "시크릿 목록을 불러오지 못했습니다 — 잠시 후 다시 시도하세요",
 
   // namespace form
   "ns.title": "개발 네임스페이스",
@@ -1438,7 +1440,9 @@ const en: Record<keyof typeof ko, string> = {
   "secrets.keys": "Keys",
   "secrets.version": "Version",
   "secrets.created": "Created",
-  "secrets.masked": "*** ({count})",
+  "secrets.updated": "Updated",
+  "secrets.masked": "***",
+  "secrets.error": "Failed to load secrets — please try again later",
 
   // namespace form
   "ns.title": "Dev Namespaces",
