@@ -186,6 +186,11 @@ spec:
           envFrom:
             - secretRef:
                 name: narwhal-portal-secrets
+          env:
+            # Portal #20: must equal the projected volume's `audience` below so the
+            # client-side aud check in src/lib/k8s-token.ts is active in-cluster.
+            - name: K8S_TOKEN_AUDIENCE
+              value: https://kubernetes.default.svc.cluster.local
           # D04: mount the cluster CA bundle so Node trusts in-cluster TLS
           # (Keycloak / ArgoCD / K8s API / OpenBao) via NODE_EXTRA_CA_CERTS instead of
           # NODE_TLS_REJECT_UNAUTHORIZED=0. NODE_EXTRA_CA_CERTS=/etc/ssl/narwhal/ca.crt is

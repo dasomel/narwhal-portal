@@ -85,7 +85,10 @@ function assertAudience(token: string): void {
   if (!expected) {
     if (!warnedNoAudienceConfigured) {
       warnedNoAudienceConfigured = true
-      console.debug("[k8s-token] K8S_TOKEN_AUDIENCE not set — skipping audience check")
+      // The API server still rejects a wrong-audience token, so this client-side
+      // check is defence in depth; make its absence loud in production.
+      const log = isProduction() ? console.warn : console.debug
+      log("[k8s-token] K8S_TOKEN_AUDIENCE not set — skipping client-side audience check")
     }
     return
   }
