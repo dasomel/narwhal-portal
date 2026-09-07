@@ -10,12 +10,17 @@ vi.mock("next/headers", () => ({
   headers: vi.fn(),
 }))
 
-import { cacheGet, cacheSet } from "./valkey"
+import { cacheGet, cacheSet, cacheDel } from "./valkey"
 import {
   getUsers,
   getGroups,
   getGroupsDetailed,
   getGroupMembers,
+  createUser,
+  setUserActive,
+  addUserToGroup,
+  removeUserFromGroup,
+  updateGroupAttributes,
 } from "./keycloak-client"
 
 describe("keycloak-client pagination and methods", () => {
@@ -224,5 +229,93 @@ describe("keycloak-client pagination and methods", () => {
     expect(detailed[11].users).toEqual(["user-for-11"])
     expect(detailed[0].attributes).toEqual({ role: "role-0" })
     expect(cacheSet).toHaveBeenCalledWith("keycloak:groups-detailed", detailed, 60)
+  })
+
+  it("createUser creates a user and invalidates keycloak:users cache", async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ Location: "http://localhost/admin/realms/narwhal/users/new-user-123" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: "new-user-123",
+          username: "newuser",
+          email: "new@example.com",
+          firstName: "New",
+          lastName: "User",
+          enabled: true,
+        }),
+      })
+
+    const user = await createUser({
+      username: "newuser",
+      email: "new@example.com",
+      name: "New User",
+      password: "secretpassword",
+    })
+
+    expect(user.pk).toBe("new-user-123")
+    expect(cacheDel).toHaveBeenCalledWith("keycloak:users")
+  })
+
+  it("setUserActive updates user status and invalidates keycloak:users cache", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+    })
+
+    await setUserActive("user-123", false)
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/admin/realms/narwhal/users/user-123"),
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ enabled: false }),
+      })
+    )
+    expect(cacheDel).toHaveBeenCalledWith("keycloak:users")
+  })
+
+  it("addUserToGroup invalidates keycloak:groups-detailed and keycloak:users caches", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+    })
+
+    await addUserToGroup("group-123", "user-456")
+
+    expect(cacheDel).toHaveBeenCalledWith("keycloak:groups-detailed")
+    expect(cacheDel).toHaveBeenCalledWith("keycloak:users")
+  })
+
+  it("removeUserFromGroup invalidates keycloak:groups-detailed and keycloak:users caches", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+    })
+
+    await removeUserFromGroup("group-123", "user-456")
+
+    expect(cacheDel).toHaveBeenCalledWith("keycloak:groups-detailed")
+    expect(cacheDel).toHaveBeenCalledWith("keycloak:users")
+  })
+
+  it("updateGroupAttributes invalidates keycloak:groups and keycloak:groups-detailed caches", async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: "group-123",
+          name: "Engineers",
+          attributes: { env: ["dev"] },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+      })
+
+    await updateGroupAttributes("group-123", { env: "prod" })
+
+    expect(cacheDel).toHaveBeenCalledWith("keycloak:groups")
+    expect(cacheDel).toHaveBeenCalledWith("keycloak:groups-detailed")
   })
 })

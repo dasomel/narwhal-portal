@@ -275,6 +275,7 @@ export async function createUser(payload: {
     { headers: h }
   )
   if (!getRes.ok) throw new Error(`Get new user failed: ${getRes.status}`)
+  await cacheDel("keycloak:users")
   return mapUser(await getRes.json())
 }
 
@@ -289,6 +290,7 @@ export async function setUserActive(pk: string, isActive: boolean): Promise<void
     }
   )
   if (!res.ok) throw new Error(`Update user failed: ${res.status}`)
+  await cacheDel("keycloak:users")
 }
 
 export async function getGroupMembers(groupPk: string): Promise<KeycloakUser[]> {
@@ -309,7 +311,10 @@ export async function addUserToGroup(groupPk: string, userPk: string): Promise<v
     { method: "PUT", headers: h }
   )
   if (!res.ok) throw new Error(`Add user to group failed: ${res.status}`)
-  await cacheDel("keycloak:groups-detailed")
+  await Promise.all([
+    cacheDel("keycloak:groups-detailed"),
+    cacheDel("keycloak:users"),
+  ])
 }
 
 export async function removeUserFromGroup(groupPk: string, userPk: string): Promise<void> {
@@ -319,7 +324,10 @@ export async function removeUserFromGroup(groupPk: string, userPk: string): Prom
     { method: "DELETE", headers: h }
   )
   if (!res.ok) throw new Error(`Remove user from group failed: ${res.status}`)
-  await cacheDel("keycloak:groups-detailed")
+  await Promise.all([
+    cacheDel("keycloak:groups-detailed"),
+    cacheDel("keycloak:users"),
+  ])
 }
 
 export async function updateGroupAttributes(
@@ -349,5 +357,8 @@ export async function updateGroupAttributes(
     }
   )
   if (!putRes.ok) throw new Error(`Update group attributes failed: ${putRes.status}`)
-  await cacheDel("keycloak:groups-detailed")
+  await Promise.all([
+    cacheDel("keycloak:groups"),
+    cacheDel("keycloak:groups-detailed"),
+  ])
 }
