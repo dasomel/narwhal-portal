@@ -123,6 +123,9 @@ interface CachedToken {
 }
 
 let cachedToken: CachedToken | null = null
+// Shared in-flight login so N concurrent callers on a cold/expired cache
+// converge on one POST /login instead of a stampede against OpenBao.
+let loginInFlight: Promise<CachedToken> | null = null
 
 async function loginWithKubernetes(): Promise<CachedToken> {
   const jwt = readK8sJwt()
@@ -147,7 +150,10 @@ async function loginWithKubernetes(): Promise<CachedToken> {
 
   const data = await res.json()
   const clientToken: string | undefined = data?.auth?.client_token
-  const leaseDuration: number = data?.auth?.lease_duration ?? 3600
+  // lease_duration 0 means "no lease" in OpenBao; treat it (and garbage) as the
+  // default rather than expiring the cache immediately and re-logging in per call.
+  const rawLease = Number(data?.auth?.lease_duration)
+  const leaseDuration = Number.isFinite(rawLease) && rawLease > 0 ? rawLease : 3600
   if (!clientToken) {
     throw new Error("[OpenBao] Kubernetes auth login response missing auth.client_token")
   }
@@ -163,15 +169,24 @@ async function loginWithKubernetes(): Promise<CachedToken> {
  * `forceRefresh` to bypass the cache and re-login (used after a 403).
  */
 export async function getOpenBaoToken(forceRefresh = false): Promise<string> {
-  if (resolvedAuthMethod() === "token") {
-    return tokenFromEnv()
-  }
-
+  // A valid cached Kubernetes-auth token wins before re-resolving the auth
+  // method: with OPENBAO_AUTH_METHOD unset, resolution re-reads the JWT file,
+  // and a transient unmount during volume rotation must not flip us to
+  // "token" mode and fail fast while the cached client token is still good.
   if (!forceRefresh && cachedToken && cachedToken.expiresAt > Date.now()) {
     return cachedToken.token
   }
 
-  cachedToken = await loginWithKubernetes()
+  if (resolvedAuthMethod() === "token") {
+    return tokenFromEnv()
+  }
+
+  if (!loginInFlight) {
+    loginInFlight = loginWithKubernetes().finally(() => {
+      loginInFlight = null
+    })
+  }
+  cachedToken = await loginInFlight
   return cachedToken.token
 }
 

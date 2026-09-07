@@ -200,6 +200,55 @@ describe("openbao Kubernetes auth token provider", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 
+  it("collapses concurrent cold-cache callers into a single login", async () => {
+    process.env.OPENBAO_AUTH_METHOD = "kubernetes"
+    mockedReadFileSync.mockReturnValue("jwt-from-file")
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ auth: { client_token: "tok-shared", lease_duration: 3600, renewable: true } }),
+    })
+
+    const tokens = await Promise.all([getOpenBaoToken(), getOpenBaoToken(), getOpenBaoToken()])
+
+    expect(tokens).toEqual(["tok-shared", "tok-shared", "tok-shared"])
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("treats lease_duration 0 as the default lease instead of expiring the cache immediately", async () => {
+    process.env.OPENBAO_AUTH_METHOD = "kubernetes"
+    mockedReadFileSync.mockReturnValue("jwt-from-file")
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ auth: { client_token: "tok-nolease", lease_duration: 0, renewable: false } }),
+    })
+
+    await getOpenBaoToken()
+    vi.advanceTimersByTime(60_000)
+    const again = await getOpenBaoToken()
+
+    expect(again).toBe("tok-nolease")
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps serving a valid cached token when the JWT file is transiently unmounted and the method is unset", async () => {
+    delete process.env.OPENBAO_AUTH_METHOD
+    mockedReadFileSync.mockReturnValue("jwt-from-file")
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ auth: { client_token: "tok-cached", lease_duration: 3600, renewable: true } }),
+    })
+    await getOpenBaoToken()
+
+    mockedReadFileSync.mockImplementation((path) => {
+      throw enoent(String(path))
+    })
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.OPENBAO_TOKEN
+
+    await expect(getOpenBaoToken()).resolves.toBe("tok-cached")
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
   it("re-logs in once the cached token passes its lease_duration*0.8 expiry", async () => {
     process.env.OPENBAO_AUTH_METHOD = "kubernetes"
     mockedReadFileSync.mockReturnValue("jwt-from-file")
