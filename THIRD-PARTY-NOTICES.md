@@ -36191,7 +36191,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 </details>
 
-### picomatch@4.0.4
+### picomatch@4.0.7
 
 - License: `MIT`
 - Author: Jon Schlinkert
