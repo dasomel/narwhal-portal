@@ -183,3 +183,18 @@ describe("getNamespacesForScope (portal#52)", () => {
     expect(result.map((ns) => ns.name)).toEqual(["ns-a", "ns-b"])
   })
 })
+
+describe("bounded cluster-wide fetch failure semantics (#52 review)", () => {
+  it("reports truncated=true, not an empty cluster, when pagination fails in production", async () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("410 Gone: continue token expired")
+    }) as unknown as typeof fetch
+    const { getAllPodsMinimal, getAllNodesForDistribution } = await import("./k8s-client")
+    for (const fn of [getAllPodsMinimal, getAllNodesForDistribution]) {
+      const res = await fn()
+      expect(res.items).toEqual([])
+      expect(res.truncated).toBe(true)
+    }
+  })
+})

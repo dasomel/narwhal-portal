@@ -1931,7 +1931,8 @@ export async function getAllPodsMinimal(): Promise<BoundedList<K8sRawPodMinimal>
         ],
       }
     }
-    return { items: [], truncated: false, pages: 0 }
+    // #52 review: a failed or expired pagination must not read as "empty cluster".
+    return { items: [], truncated: true, pages: 0 }
   }
 }
 
@@ -1979,7 +1980,8 @@ export async function getAllNodesForDistribution(): Promise<BoundedList<K8sNodeF
         ],
       }
     }
-    return { items: [], truncated: false, pages: 0 }
+    // #52 review: a failed or expired pagination must not read as "empty cluster".
+    return { items: [], truncated: true, pages: 0 }
   }
 }
 
@@ -2089,7 +2091,8 @@ export async function getAllPodsForDistribution(): Promise<BoundedList<K8sPodFor
         }
       ] }
     }
-    return { items: [], truncated: false, pages: 0 }
+    // #52 review: a failed or expired pagination must not read as "empty cluster".
+    return { items: [], truncated: true, pages: 0 }
   }
 }
 
