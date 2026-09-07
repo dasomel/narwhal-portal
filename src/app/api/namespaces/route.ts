@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
-import { getNamespaces } from "@/lib/k8s-client"
+import { getNamespacesForScope } from "@/lib/k8s-client"
 import { GiteaError, giteaConfigured, requestTenantNamespace } from "@/lib/gitea"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 import { resolveNamespaceOwner } from "@/lib/namespace-ownership"
@@ -23,8 +23,12 @@ export async function GET() {
   // Ownership now comes from the namespace's own narwhal.io/team label, with the
   // config patterns still honoured for namespaces that predate the tenant flow —
   // see resolveNamespaceScope. A caller sees a namespace when their team owns it.
+  //
+  // portal#52: getNamespacesForScope fetches per-namespace instead of the
+  // cluster-wide LIST + filter below SMALL_SCOPE_NAMESPACE_THRESHOLD — most
+  // callers here own a handful of namespaces, so this is the common path.
   const scope = await getEffectiveScope(session)
-  const namespaces = await getNamespaces()
+  const namespaces = await getNamespacesForScope(scope)
   return NextResponse.json(namespaces.filter((ns) => namespaceVisible(ns.name, scope)))
 }
 

@@ -32,6 +32,8 @@ export interface ClusterInfra {
     readyNodes: number
     totalPods: number
     totalNamespaces: number
+    /** portal#52: true when the pod or namespace list hit its page cap — totals below are then a partial view. */
+    truncated: boolean
   }
 }
 
@@ -50,6 +52,37 @@ async function k8sFetch<T>(apiServer: string, token: string, path: string): Prom
   })
   if (!res.ok) throw new Error(`K8s API ${res.status}: ${path}`)
   return res.json() as Promise<T>
+}
+
+// portal#52: this route resolves a per-request cluster's credentials (portal#21),
+// so it can't reuse k8s-client.ts's single-cluster listBounded — this is the same
+// continue-token-following shape, scoped to this route's own k8sFetch.
+const LIST_LIMIT = 500
+const LIST_MAX_PAGES = 20
+
+async function listBoundedFrom<T>(
+  apiServer: string,
+  token: string,
+  path: string,
+): Promise<{ items: T[]; truncated: boolean }> {
+  const items: T[] = []
+  let continueToken: string | undefined
+  let truncated = false
+  for (let page = 0; page < LIST_MAX_PAGES; page++) {
+    const params = new URLSearchParams({ limit: String(LIST_LIMIT) })
+    if (continueToken) params.set("continue", continueToken)
+    const sep = path.includes("?") ? "&" : "?"
+    const data = await k8sFetch<{ metadata?: { continue?: string }; items: T[] }>(
+      apiServer,
+      token,
+      `${path}${sep}${params.toString()}`,
+    )
+    items.push(...(data.items ?? []))
+    continueToken = data.metadata?.continue
+    if (!continueToken) break
+    if (page + 1 >= LIST_MAX_PAGES) truncated = true
+  }
+  return { items, truncated }
 }
 
 function parseCpuCores(cpuStr: string): number {
@@ -149,8 +182,11 @@ export async function GET(request: NextRequest) {
         k8sFetch<NodeList>(apiServer, token, "/api/v1/nodes"),
         k8sFetch<NodeMetricsList>(apiServer, token, "/apis/metrics.k8s.io/v1beta1/nodes"),
         k8sFetch<PodList>(apiServer, token, "/api/v1/namespaces/kube-system/pods?labelSelector=tier=control-plane"),
-        k8sFetch<PodList>(apiServer, token, "/api/v1/pods"),
-        k8sFetch<NamespaceList>(apiServer, token, "/api/v1/namespaces"),
+        // portal#52: cluster-wide pods/namespaces were single unbounded LISTs — bounded
+        // via listBoundedFrom (limit + continue-following) so a large cluster can't
+        // return an uncapped response here.
+        listBoundedFrom<PodList["items"][number]>(apiServer, token, "/api/v1/pods"),
+        listBoundedFrom<NamespaceList["items"][number]>(apiServer, token, "/api/v1/namespaces"),
       ])
 
     const rawNodes = nodesResult.status === "fulfilled" ? nodesResult.value.items : []
@@ -249,6 +285,9 @@ export async function GET(request: NextRequest) {
         readyNodes,
         totalPods,
         totalNamespaces: namespaces.length,
+        truncated:
+          (allPodsResult.status === "fulfilled" && allPodsResult.value.truncated) ||
+          (namespacesResult.status === "fulfilled" && namespacesResult.value.truncated),
       },
     }
 

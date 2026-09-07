@@ -44,6 +44,8 @@ export interface DistributionSummary {
   unguardedWorkloads: number
   multiReplicaWorkloads: number
   controlPlaneWorkloadPods: number
+  /** portal#52: true when the cluster-wide node or pod list hit its page cap — this view is partial. */
+  truncated: boolean
 }
 
 
@@ -70,7 +72,7 @@ export async function GET() {
   }
 
   try {
-    const [nodes, pods, promMetrics] = await Promise.all([
+    const [nodesResult, podsResult, promMetrics] = await Promise.all([
       getAllNodesForDistribution(),
       getAllPodsForDistribution(),
       getNodeMetrics().catch((err) => {
@@ -78,6 +80,9 @@ export async function GET() {
         return []
       }),
     ])
+    const nodes = nodesResult.items
+    const pods = podsResult.items
+    const truncated = nodesResult.truncated || podsResult.truncated
 
     const controlPlaneNodes = new Set<string>()
     const workerNodesList: string[] = []
@@ -273,6 +278,7 @@ export async function GET() {
       unguardedWorkloads,
       multiReplicaWorkloads,
       controlPlaneWorkloadPods,
+      truncated,
     }
 
     const recommendations = buildDistributionRecommendations(summary)
