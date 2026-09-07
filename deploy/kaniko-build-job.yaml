@@ -68,7 +68,9 @@ spec:
         - name: git-clone
           # alpine/git is musl-based, ARM64-compatible, available on ghcr
           # fallback: docker.io/alpine/git (same image, Docker Hub mirror)
-          image: alpine/git:latest
+          # Pinned per narwhal#52 D3-A; must move in lockstep with narwhal's
+          # scripts/airgap/images.txt or the air-gap build job can't pull it.
+          image: alpine/git:v2.54.0
           imagePullPolicy: IfNotPresent
           env:
             - name: GITEA_ADMIN_PASSWORD
@@ -98,7 +100,9 @@ spec:
       containers:
         - name: kaniko
           # gcr.io/kaniko-project/executor supports ARM64 from v1.21+
-          image: gcr.io/kaniko-project/executor:latest
+          # Pinned per narwhal#52 D3-A; must move in lockstep with narwhal's
+          # scripts/airgap/images.txt or the air-gap build job can't pull it.
+          image: gcr.io/kaniko-project/executor:v1.24.0
           imagePullPolicy: IfNotPresent
           args:
             - "--context=dir:///workspace"
