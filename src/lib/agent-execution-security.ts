@@ -55,12 +55,20 @@ function assertSupportedCanonicalization(version: string): asserts version is ty
   }
 }
 
+function jsonScalar(value: string | number): string {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new Error("Value cannot be represented as canonical JSON");
+  }
+  return serialized;
+}
+
 function canonicalizeValue(value: JsonValue): string {
   if (value === null) return "null";
 
   switch (typeof value) {
     case "string":
-      return JSON.stringify(value);
+      return jsonScalar(value);
     case "boolean":
       return value ? "true" : "false";
     case "number":
@@ -68,14 +76,14 @@ function canonicalizeValue(value: JsonValue): string {
         throw new Error("Non-finite numbers are not canonical JSON values");
       }
       if (Object.is(value, -0)) return "0";
-      return JSON.stringify(value);
+      return jsonScalar(value);
     case "object":
       if (Array.isArray(value)) {
         return `[${value.map(canonicalizeValue).join(",")}]`;
       }
       return `{${Object.keys(value)
         .sort()
-        .map((key) => `${JSON.stringify(key)}:${canonicalizeValue(value[key])}`)
+        .map((key) => `${jsonScalar(key)}:${canonicalizeValue(value[key])}`)
         .join(",")}}`;
     default:
       throw new Error("Unsupported canonical JSON value");
