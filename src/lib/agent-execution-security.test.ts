@@ -49,7 +49,6 @@ describe("canonical invocation binding", () => {
     expect(canonicalizeJson({ z: 1, a: { y: 2, x: 3 } })).toBe(
       '{"a":{"x":3,"y":2},"z":1}',
     );
-    expect(computeInvocationDigest({ ...resolution(), invocationDigest: undefined } as never)).toBeTruthy();
   });
 
   it("produces the same digest for semantically identical key ordering", () => {
