@@ -1,6 +1,6 @@
 name: Build Check
 
-# Type-check and build whenever the dependency set changes.
+# Type-check and build whenever source, dependency, or build inputs change.
 #
 # WHY THIS EXISTS: every other workflow here is filtered to src/**, DESIGN.md or a
 # v*.*.* tag, so a change to package.json or pnpm-lock.yaml ran NO checks at all. The
@@ -8,13 +8,15 @@ name: Build Check
 # it was only known-good because it was built by hand first. The next one might not be,
 # and Dependabot raises exactly this kind of PR.
 #
-# Also runs on changes to the build inputs themselves — a tsconfig or next.config change
-# can break the build just as effectively as a dependency can, and was equally unwatched.
+# Also runs on source and build-input changes — a TypeScript/Next regression must not rely
+# on a dependency change to receive the production-build gate. The unit-test workflow is
+# not a substitute: it does not compile the route graph or standalone output.
 
 on:
   push:
     branches: [main]
     paths:
+      - "src/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "next.config.ts"
@@ -23,6 +25,7 @@ on:
       - ".github/workflows/build-check.yml"
   pull_request:
     paths:
+      - "src/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "next.config.ts"
@@ -72,7 +75,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Type-check
-        run: npx tsc --noEmit
+        run: pnpm typecheck
 
       # The published image runs the standalone output, so a build that succeeds without
       # producing it would still be broken at deploy time.

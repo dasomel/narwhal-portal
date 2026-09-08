@@ -7,27 +7,127 @@
 
 import { cacheGet, cacheSet } from "./valkey"
 import { namespaceVisible, type EffectiveScope } from "./scope"
-import { getDependencyUrl } from "./config"
+import { getDependencyUrl, isProduction } from "./config"
 
 function prometheusUrl(): string {
   return getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")
 }
 
-// 단가: 모듈 로드 시 env 읽고 number 변환 (default: spec §4.4 기본값)
-const UNIT_PRICES = {
-  cpuHourly: parseFloat(process.env.COST_CPU_HOURLY ?? "0.04"),
-  memGbHourly: parseFloat(process.env.COST_MEM_GB_HOURLY ?? "0.005"),
-  storageGbHourly: parseFloat(process.env.COST_STORAGE_GB_HOURLY ?? "0.0001"),
-} as const
-
-// NaN guard: env에 잘못된 값이 설정되면 default로 fallback
-const PRICES = {
-  cpuHourly: isNaN(UNIT_PRICES.cpuHourly) ? 0.04 : UNIT_PRICES.cpuHourly,
-  memGbHourly: isNaN(UNIT_PRICES.memGbHourly) ? 0.005 : UNIT_PRICES.memGbHourly,
-  storageGbHourly: isNaN(UNIT_PRICES.storageGbHourly) ? 0.0001 : UNIT_PRICES.storageGbHourly,
+export interface CostUnitPrices {
+  cpuHourly: number
+  memGbHourly: number
+  storageGbHourly: number
 }
 
-export { PRICES as unitPrices }
+export interface CostPricingMetadata {
+  estimate: true
+  currency: string
+  version: string
+  effectiveDate: string | null
+  source: string
+  scope: string | null
+  configured: boolean
+}
+
+export interface CostPricing {
+  unitPrices: CostUnitPrices
+  metadata: CostPricingMetadata
+}
+
+export class CostPricingConfigurationError extends Error {
+  constructor(public readonly invalid: string[]) {
+    super(`Invalid production cost pricing configuration: ${invalid.join(", ")}`)
+    this.name = "CostPricingConfigurationError"
+  }
+}
+
+const DEVELOPMENT_PRICES: CostUnitPrices = {
+  cpuHourly: 0.04,
+  memGbHourly: 0.005,
+  storageGbHourly: 0.0001,
+}
+
+const PRICE_ENV: Array<[keyof CostUnitPrices, string]> = [
+  ["cpuHourly", "COST_CPU_HOURLY"],
+  ["memGbHourly", "COST_MEM_GB_HOURLY"],
+  ["storageGbHourly", "COST_STORAGE_GB_HOURLY"],
+]
+
+function configuredString(name: string): string | undefined {
+  const value = process.env[name]?.trim()
+  return value || undefined
+}
+
+function parsePrice(name: string): number | undefined {
+  const value = configuredString(name)
+  if (!value) return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
+
+function isIsoDate(value: string | undefined): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+/**
+ * Reads cost pricing at request time. Production must never substitute the ADR's
+ * development placeholder rates: callers receive an explicit configuration error
+ * instead. Reading lazily also keeps Next's production build independent of env.
+ */
+export function getCostPricing(): CostPricing {
+  const invalid: string[] = []
+  const parsedPrices = {} as Partial<CostUnitPrices>
+  for (const [key, env] of PRICE_ENV) {
+    const price = parsePrice(env)
+    if (price === undefined) invalid.push(env)
+    else parsedPrices[key] = price
+  }
+
+  const currency = configuredString("COST_CURRENCY")
+  if (!currency || !/^[A-Z]{3}$/.test(currency)) invalid.push("COST_CURRENCY")
+  const version = configuredString("COST_PRICING_VERSION")
+  if (!version) invalid.push("COST_PRICING_VERSION")
+  const effectiveDate = configuredString("COST_PRICING_EFFECTIVE_DATE")
+  if (!isIsoDate(effectiveDate)) invalid.push("COST_PRICING_EFFECTIVE_DATE")
+  const source = configuredString("COST_PRICING_SOURCE")
+  if (!source) invalid.push("COST_PRICING_SOURCE")
+  const scope = configuredString("COST_PRICING_SCOPE")
+  if (!scope) invalid.push("COST_PRICING_SCOPE")
+
+  if (isProduction() && invalid.length > 0) {
+    throw new CostPricingConfigurationError(invalid)
+  }
+
+  const configured = invalid.length === 0
+  return {
+    unitPrices: configured ? parsedPrices as CostUnitPrices : DEVELOPMENT_PRICES,
+    metadata: {
+      estimate: true,
+      currency: currency ?? "USD",
+      version: version ?? "development-placeholder",
+      effectiveDate: effectiveDate ?? null,
+      source: source ?? "development-placeholder",
+      scope: scope ?? null,
+      configured,
+    },
+  }
+}
+
+function pricingCacheKey(pricing: CostPricing): string {
+  const { unitPrices, metadata } = pricing
+  return encodeURIComponent([
+    metadata.version,
+    metadata.currency,
+    metadata.effectiveDate ?? "",
+    metadata.source,
+    metadata.scope ?? "",
+    unitPrices.cpuHourly,
+    unitPrices.memGbHourly,
+    unitPrices.storageGbHourly,
+  ].join("|"))
+}
 
 // ---------------------------------------------------------------------------
 // 타입 정의 (spec §4.4, §6.3)
@@ -40,7 +140,7 @@ export interface CostBreakdown {
   memory: { gb: number; hourly: number }
   storage: { gb: number; hourly: number }
   totalHourly: number
-  totalMonthly: number // hourly * 720
+  totalMonthly: number // hourly * 730 (ADR cost basis)
 }
 
 export interface CostItem {
@@ -184,12 +284,12 @@ function trendMemQuery(scope: string, id: string, nsFilter?: string): string {
 // 비용 환산 헬퍼
 // ---------------------------------------------------------------------------
 
-function calcItem(id: string, cpuCores: number, memBytes: number, storageBytes: number): CostItem {
-  const cpuHourly = cpuCores * PRICES.cpuHourly
+function calcItem(id: string, cpuCores: number, memBytes: number, storageBytes: number, prices: CostUnitPrices): CostItem {
+  const cpuHourly = cpuCores * prices.cpuHourly
   const memGb = memBytes / 1e9
-  const memHourly = memGb * PRICES.memGbHourly
+  const memHourly = memGb * prices.memGbHourly
   const storageGb = storageBytes / 1e9
-  const storageHourly = storageGb * PRICES.storageGbHourly
+  const storageHourly = storageGb * prices.storageGbHourly
   const totalHourly = cpuHourly + memHourly + storageHourly
   return {
     id,
@@ -197,7 +297,7 @@ function calcItem(id: string, cpuCores: number, memBytes: number, storageBytes: 
     memory: { gb: Math.round(memGb * 1000) / 1000, hourly: Math.round(memHourly * 10000) / 10000 },
     storage: { gb: Math.round(storageGb * 1000) / 1000, hourly: Math.round(storageHourly * 10000) / 10000 },
     totalHourly: Math.round(totalHourly * 10000) / 10000,
-    totalMonthly: Math.round(totalHourly * 720 * 100) / 100,
+    totalMonthly: Math.round(totalHourly * 730 * 100) / 100,
   }
 }
 
@@ -224,7 +324,9 @@ export async function getCost(
   scope: "cluster" | "namespace" | "service",
   effScope: EffectiveScope
 ): Promise<{ items: CostItem[]; notice?: string }> {
-  const cacheKey = `cost:${scope}:${effScope.fingerprint}`
+  const pricing = getCostPricing()
+  const { unitPrices } = pricing
+  const cacheKey = `cost:${scope}:${effScope.fingerprint}:${pricingCacheKey(pricing)}`
   const cached = await cacheGet<{ items: CostItem[]; notice?: string }>(cacheKey)
   if (cached !== null) return cached
 
@@ -239,7 +341,7 @@ export async function getCost(
       const cpuTotal = cpuRes.filter(visible).reduce((s, r) => s + parseFloat(r.value[1]), 0)
       const memTotal = memRes.filter(visible).reduce((s, r) => s + parseFloat(r.value[1]), 0)
       const storTotal = storRes.filter(visible).reduce((s, r) => s + parseFloat(r.value[1]), 0)
-      const items = [calcItem("cluster", cpuTotal, memTotal, storTotal)]
+      const items = [calcItem("cluster", cpuTotal, memTotal, storTotal, unitPrices)]
       const result = { items }
       await cacheSet(cacheKey, result, 300) // 5min
       return result
@@ -270,7 +372,7 @@ export async function getCost(
       const namespaces = new Set([...cpuMap.keys(), ...memMap.keys()])
       const items: CostItem[] = []
       for (const ns of namespaces) {
-        items.push(calcItem(ns, cpuMap.get(ns) ?? 0, memMap.get(ns) ?? 0, storMap.get(ns) ?? 0))
+        items.push(calcItem(ns, cpuMap.get(ns) ?? 0, memMap.get(ns) ?? 0, storMap.get(ns) ?? 0, unitPrices))
       }
       items.sort((a, b) => b.totalHourly - a.totalHourly)
       const result = { items }
@@ -301,7 +403,7 @@ export async function getCost(
     const items: CostItem[] = []
     for (const svc of services) {
       // service scope: storage는 PVC를 service에 매핑하기 어려우므로 0으로 처리
-      items.push(calcItem(svc, cpuMap.get(svc) ?? 0, memMap.get(svc) ?? 0, 0))
+      items.push(calcItem(svc, cpuMap.get(svc) ?? 0, memMap.get(svc) ?? 0, 0, unitPrices))
     }
     if (items.length === 0) {
       const result = {
@@ -333,7 +435,9 @@ export async function getCost(
  * 필요 없다 — namespace/cluster 집계처럼 caller마다 다른 결과가 나오지 않는다.
  */
 export async function getCostByService(serviceId: string): Promise<CostDetailResult | { notice: string }> {
-  const cacheKey = `cost:service:${serviceId}`
+  const pricing = getCostPricing()
+  const { unitPrices } = pricing
+  const cacheKey = `cost:service:${serviceId}:${pricingCacheKey(pricing)}`
   const cached = await cacheGet<CostDetailResult | { notice: string }>(cacheKey)
   if (cached !== null) return cached
 
@@ -351,7 +455,7 @@ export async function getCostByService(serviceId: string): Promise<CostDetailRes
     const cpuCores = cpuEntry ? parseFloat(cpuEntry.value[1]) : 0
     const memBytes = memEntry ? parseFloat(memEntry.value[1]) : 0
 
-    const base = calcItem(serviceId, cpuCores, memBytes, 0)
+    const base = calcItem(serviceId, cpuCores, memBytes, 0, unitPrices)
 
     // top pods 구성 (pod별 cpu + mem, top 5)
     const podCpuMap = new Map<string, number>()
@@ -370,7 +474,7 @@ export async function getCostByService(serviceId: string): Promise<CostDetailRes
       const podCpu = podCpuMap.get(pod) ?? 0
       const podMemGb = (podMemMap.get(pod) ?? 0) / 1e9
       const podHourly =
-        podCpu * PRICES.cpuHourly + podMemGb * PRICES.memGbHourly
+        podCpu * unitPrices.cpuHourly + podMemGb * unitPrices.memGbHourly
       topPods.push({
         pod,
         cpu: Math.round(podCpu * 1000) / 1000,
@@ -406,16 +510,19 @@ export async function getCostTrend(
   days: number,
   effScope: EffectiveScope
 ): Promise<{ points: CostTrendPoint[]; notice?: string }> {
+  const pricing = getCostPricing()
+  const { unitPrices } = pricing
   const safeDays = Math.min(days, 90)
   // portal#61: namespace/service scope는 route에서 이미 visibility 검증된 id만
   // 넘어오지만, cluster scope의 집계는 caller마다 볼 수 있는 namespace가 달라
   // cache key에 fingerprint가 반드시 필요하다 (getCost의 cluster/namespace 분기와
   // 동일 이유). namespace/service scope는 id가 곧 정답을 결정하므로 fingerprint를
-  // 붙이지 않는다.
+  // 붙이지 않는다. pricingCacheKey는 두 경우 모두 필요 — 단가 설정이 바뀌면
+  // scope와 무관하게 과거 응답을 재사용하면 안 된다.
   const cacheKey =
     scope === "cluster"
-      ? `cost:trend:cluster:${effScope.fingerprint}:${safeDays}`
-      : `cost:trend:${scope}:${id}:${safeDays}`
+      ? `cost:trend:cluster:${effScope.fingerprint}:${safeDays}:${pricingCacheKey(pricing)}`
+      : `cost:trend:${scope}:${id}:${safeDays}:${pricingCacheKey(pricing)}`
   const cached = await cacheGet<{ points: CostTrendPoint[]; notice?: string }>(cacheKey)
   if (cached !== null) return cached
 
@@ -457,7 +564,7 @@ export async function getCostTrend(
       const cpuCores = parseFloat(cpuVal)
       const memBytes = memMap.get(ts) ?? 0
       const totalHourly =
-        cpuCores * PRICES.cpuHourly + (memBytes / 1e9) * PRICES.memGbHourly
+        cpuCores * unitPrices.cpuHourly + (memBytes / 1e9) * unitPrices.memGbHourly
       const date = new Date(ts * 1000).toISOString().slice(0, 10)
       return { date, total: Math.round(totalHourly * 10000) / 10000 }
     })

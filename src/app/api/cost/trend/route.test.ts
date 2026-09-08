@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { NextRequest } from "next/server"
 import type { ArgoApp } from "@/lib/argocd"
 import type { NamespaceInfo } from "@/lib/k8s-client"
@@ -21,15 +21,18 @@ vi.mock("@/lib/k8s-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/k8s-client")>()
   return { ...actual, getNamespaces: vi.fn() }
 })
+vi.mock("@/lib/valkey", () => ({ cacheGet: vi.fn(), cacheSet: vi.fn() }))
 
 const { requireRole } = await import("@/lib/auth")
 const { getArgoApp } = await import("@/lib/argocd")
 const { getCostTrend } = await import("@/lib/cost")
 const { getNamespaces } = await import("@/lib/k8s-client")
+const { cacheGet, cacheSet } = await import("@/lib/valkey")
 const { GET } = await import("./route")
 
 const platformTeamSession = { groups: ["developer"], teams: ["platform-team"], user: { role: "developer" } }
 const frontendTeamSession = { groups: ["developer"], teams: ["frontend-team"], user: { role: "developer" } }
+const adminSession = { groups: ["cluster-admin"], teams: [], user: { role: "cluster-admin" } }
 
 const namespaces: NamespaceInfo[] = [
   { name: "platform-system", status: "Active", labels: {}, createdAt: "2026-01-01T00:00:00Z" },
@@ -42,11 +45,53 @@ const platformApp: ArgoApp = {
   status: { sync: { status: "Synced" }, health: { status: "Healthy" } },
 }
 
+const pricingEnvNames = [
+  "NODE_ENV",
+  "COST_CPU_HOURLY",
+  "COST_MEM_GB_HOURLY",
+  "COST_STORAGE_GB_HOURLY",
+  "COST_CURRENCY",
+  "COST_PRICING_VERSION",
+  "COST_PRICING_EFFECTIVE_DATE",
+  "COST_PRICING_SOURCE",
+  "COST_PRICING_SCOPE",
+] as const
+const originalPricingEnv = Object.fromEntries(
+  pricingEnvNames.map((name) => [name, process.env[name]])
+)
+
+function configurePricing() {
+  process.env.COST_CPU_HOURLY = "6.82"
+  process.env.COST_MEM_GB_HOURLY = "1.22"
+  process.env.COST_STORAGE_GB_HOURLY = "0.0037"
+  process.env.COST_CURRENCY = "KRW"
+  process.env.COST_PRICING_VERSION = "2026.06"
+  process.env.COST_PRICING_EFFECTIVE_DATE = "2026-06-12"
+  process.env.COST_PRICING_SOURCE = "on-prem TCO"
+  process.env.COST_PRICING_SCOPE = "narwhal-prod"
+}
+
 beforeEach(() => {
-  vi.mocked(getCostTrend).mockClear()
+  vi.clearAllMocks()
   vi.mocked(getNamespaces).mockResolvedValue(namespaces)
   vi.mocked(getArgoApp).mockImplementation(async (name: string) => (name === "platform-app" ? platformApp : null))
   vi.mocked(getCostTrend).mockResolvedValue({ points: [] })
+  vi.mocked(cacheGet).mockResolvedValue(null)
+  vi.mocked(cacheSet).mockResolvedValue(undefined)
+  vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
+  vi.stubGlobal("fetch", vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ data: { result: [{ metric: {}, values: [[1, "2"]] }] } }),
+  })))
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  for (const name of pricingEnvNames) {
+    const value = originalPricingEnv[name]
+    if (value === undefined) delete process.env[name]
+    else (process.env as Record<string, string | undefined>)[name] = value
+  }
 })
 
 describe("GET /api/cost/trend — scope enforcement", () => {
@@ -95,5 +140,40 @@ describe("GET /api/cost/trend — scope enforcement", () => {
     vi.mocked(requireRole).mockResolvedValue({ error: "unauthorized" } as never)
     const res = await GET(new NextRequest("http://localhost/api/cost/trend?scope=cluster"))
     expect(res.status).toBe(401)
+  })
+})
+
+describe("GET /api/cost/trend pricing", () => {
+  it("returns configured estimate pricing provenance", async () => {
+    configurePricing()
+
+    const res = await GET(new NextRequest("http://localhost/api/cost/trend?days=7"))
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual(expect.objectContaining({
+      pricing: {
+        estimate: true,
+        currency: "KRW",
+        version: "2026.06",
+        effectiveDate: "2026-06-12",
+        source: "on-prem TCO",
+        scope: "narwhal-prod",
+        configured: true,
+      },
+    }))
+  })
+
+  it("returns 503 for missing production pricing without querying Prometheus", async () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    for (const name of pricingEnvNames.filter((name) => name !== "NODE_ENV")) delete process.env[name]
+
+    const res = await GET(new NextRequest("http://localhost/api/cost/trend?days=7"))
+
+    expect(res.status).toBe(503)
+    await expect(res.json()).resolves.toEqual(expect.objectContaining({
+      error: "Cost pricing is not configured",
+      invalid: expect.arrayContaining(["COST_CPU_HOURLY", "COST_PRICING_VERSION"]),
+    }))
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

@@ -121,8 +121,9 @@ COST_CURRENCY=KRW        # 신설 (§4)
 |---|------|------|------|
 | 1 | 월 환산 720 → **730** 통일 | `src/lib/cost.ts` (`totalMonthly` 주석·계산), spec §4.4 | 소 |
 | 2 | `COST_CURRENCY` env 추가 + UI 통화 라벨 (현재 $ 하드코딩 여부 확인) | `cost.ts`, `/cost` 페이지, catalog cost 탭 | 소 |
+| 2a | 가격 근거를 응답에 남기기 위해 `COST_PRICING_VERSION`, `COST_PRICING_EFFECTIVE_DATE` (ISO date), `COST_PRICING_SOURCE`, `COST_PRICING_SCOPE` env 추가 | `cost.ts`, 비용 API, portal Deployment | 소 |
 | 3 | UI 주석: "유휴 자원 비용은 서비스에 배분되지 않음 (showback 기준)" | `/cost` 글로벌 화면 | 소 |
-| 4 | 단가 기본값(코드 내 0.04 등)은 유지하되 "근거 없는 fallback"임을 주석 명시, 운영 환경은 `.env` 필수 | `cost.ts:13-26` | 소 |
+| 4 | 개발 환경에서만 기본 단가(0.04 등)를 유지하고, 운영 환경에서 단가 또는 2a의 근거 메타데이터가 누락·비정상이면 API가 `503`으로 거부 | `cost.ts`, 비용 API | 소 |
 | 5 | spec §4.4에 본 ADR 링크 추가 | design spec | 소 |
 
 ## 5. 미결정 항목 (확정 필요)

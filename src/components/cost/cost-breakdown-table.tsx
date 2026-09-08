@@ -48,9 +48,13 @@ export function CostBreakdownTable() {
   const [sortKey, setSortKey] = useState<SortKey>("monthly")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
-  const { data, isLoading } = useQuery<CostResponse>({
+  const { data, isLoading, error } = useQuery<CostResponse>({
     queryKey: ["cost", scopeView],
-    queryFn: () => fetch(`/api/cost?scope=${scopeView}`).then((r) => r.json()),
+    queryFn: async () => {
+      const response = await fetch(`/api/cost?scope=${scopeView}`)
+      if (!response.ok) throw new Error("Cost data is unavailable")
+      return response.json()
+    },
     refetchInterval: 60_000,
   })
 
@@ -147,6 +151,10 @@ export function CostBreakdownTable() {
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="h-10 w-full animate-pulse rounded bg-muted" />
             ))}
+          </div>
+        ) : error ? (
+          <div className="py-12 text-center text-sm text-destructive">
+            {t("cost.dataUnavailable")}
           </div>
         ) : sorted.length === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">

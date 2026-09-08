@@ -886,6 +886,12 @@ const ko = {
   "cost.breakdownTitle": "비용 분해",
   "cost.noDataPrometheus": "데이터 없음 — Prometheus 메트릭 수집 상태를 확인하세요.",
   "cost.monthlyEstimate": "월 추정",
+  "cost.estimateNotice": "이 값은 청구서가 아닌 사용량 × 구성된 단가 기반의 추정치입니다.",
+  "cost.pricingMetadata": "통화: {currency} · 단가 버전: {version} · 적용일: {effectiveDate} · 출처: {source} · 범위: {scope}",
+  "cost.notConfigured": "미구성",
+  "cost.developmentPricing": "개발 환경 기본 단가가 사용 중입니다. 운영 배포에는 가격 구성이 필요합니다.",
+  "cost.pricingUnavailable": "비용 단가 구성이 없어 비용 데이터를 표시할 수 없습니다.",
+  "cost.dataUnavailable": "비용 데이터를 불러올 수 없습니다. 잠시 후 다시 시도하세요.",
 
   // scorecard page additions
   "scorecard.pageTitle": "서비스 품질 점수 (Scorecard)",
@@ -2015,6 +2021,12 @@ const en: Record<keyof typeof ko, string> = {
   "cost.breakdownTitle": "Cost Breakdown",
   "cost.noDataPrometheus": "No data — Check Prometheus metric collection status.",
   "cost.monthlyEstimate": "Monthly Estimate",
+  "cost.estimateNotice": "This is an estimate based on usage × configured unit prices, not an invoice.",
+  "cost.pricingMetadata": "Currency: {currency} · Pricing version: {version} · Effective: {effectiveDate} · Source: {source} · Scope: {scope}",
+  "cost.notConfigured": "Not configured",
+  "cost.developmentPricing": "Development placeholder prices are in use. Production deployments require pricing configuration.",
+  "cost.pricingUnavailable": "Cost data cannot be displayed because pricing is not configured.",
+  "cost.dataUnavailable": "Cost data is unavailable. Please try again shortly.",
 
   // scorecard page additions
   "scorecard.pageTitle": "Service Quality Scorecard",

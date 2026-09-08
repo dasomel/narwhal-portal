@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
-import { getCostByService, unitPrices } from "@/lib/cost"
+import { CostPricingConfigurationError, getCostByService, getCostPricing } from "@/lib/cost"
 import { getArgoApp } from "@/lib/argocd"
 import { appVisible, getEffectiveScope } from "@/lib/scope"
 import { ValidationError, toValidationErrorBody, K8S_NAME_RE } from "@/lib/validation"
@@ -45,6 +45,7 @@ export async function GET(
       return NextResponse.json({ error: "Service not found" }, { status: 404 })
     }
 
+    const pricing = getCostPricing()
     const result = await getCostByService(svc)
 
     if ("notice" in result && !("serviceId" in result)) {
@@ -52,7 +53,8 @@ export async function GET(
       return NextResponse.json({
         serviceId: svc,
         generatedAt: new Date().toISOString(),
-        unitPrices,
+        unitPrices: pricing.unitPrices,
+        pricing: pricing.metadata,
         items: [],
         notice: result.notice,
       })
@@ -60,10 +62,17 @@ export async function GET(
 
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
-      unitPrices,
+      unitPrices: pricing.unitPrices,
+      pricing: pricing.metadata,
       ...result,
     })
   } catch (err) {
+    if (err instanceof CostPricingConfigurationError) {
+      return NextResponse.json(
+        { error: "Cost pricing is not configured", invalid: err.invalid },
+        { status: 503 }
+      )
+    }
     if (err instanceof ValidationError) {
       return NextResponse.json(toValidationErrorBody(err), { status: 400 })
     }

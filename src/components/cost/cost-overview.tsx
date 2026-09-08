@@ -32,6 +32,15 @@ interface CostResponse {
   scope: string
   generatedAt: string
   unitPrices: { cpuHourly: number; memGbHourly: number; storageGbHourly: number }
+  pricing: {
+    estimate: true
+    currency: string
+    version: string
+    effectiveDate: string | null
+    source: string
+    scope: string | null
+    configured: boolean
+  }
   items: CostItem[]
   notice?: string
 }
@@ -51,16 +60,23 @@ interface TrendResponse {
 
 export function CostOverview() {
   const t = useT()
-  const { data: costData, isLoading: costLoading } = useQuery<CostResponse>({
+  const { data: costData, isLoading: costLoading, error: costError } = useQuery<CostResponse>({
     queryKey: ["cost", "cluster"],
-    queryFn: () => fetch("/api/cost?scope=cluster").then((r) => r.json()),
+    queryFn: async () => {
+      const response = await fetch("/api/cost?scope=cluster")
+      if (!response.ok) throw new Error("Cost data is unavailable")
+      return response.json()
+    },
     refetchInterval: 60_000,
   })
 
-  const { data: trendData, isLoading: trendLoading } = useQuery<TrendResponse>({
+  const { data: trendData, isLoading: trendLoading, error: trendError } = useQuery<TrendResponse>({
     queryKey: ["cost-trend", "cluster", "cluster", 30],
-    queryFn: () =>
-      fetch("/api/cost/trend?scope=cluster&id=cluster&days=30").then((r) => r.json()),
+    queryFn: async () => {
+      const response = await fetch("/api/cost/trend?scope=cluster&id=cluster&days=30")
+      if (!response.ok) throw new Error("Cost trend data is unavailable")
+      return response.json()
+    },
     refetchInterval: 300_000,
   })
 
@@ -70,17 +86,45 @@ export function CostOverview() {
   const cpuHourly = item?.cpu.hourly ?? 0
   const memHourly = item?.memory.hourly ?? 0
   const storHourly = item?.storage.hourly ?? 0
+  const currency = costData?.pricing.currency ?? "USD"
+  const formatCurrency = (amount: number, maximumFractionDigits = 4) =>
+    new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits }).format(amount)
 
   const chartData = (trendData?.points ?? []).map((p) => ({
     date: p.date.slice(5), // MM-DD
     total: p.total,
   }))
 
+  if (costError) {
+    return (
+      <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        {t("cost.dataUnavailable")}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
       {costData?.notice && (
         <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
           {costData.notice}
+        </div>
+      )}
+      {costData?.pricing && (
+        <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+          <p className="font-medium text-foreground">
+            {t("cost.estimateNotice")}
+          </p>
+          <p className="mt-1">
+            {t("cost.pricingMetadata", {
+              currency: costData.pricing.currency,
+              version: costData.pricing.version,
+              effectiveDate: costData.pricing.effectiveDate ?? t("cost.notConfigured"),
+              source: costData.pricing.source,
+              scope: costData.pricing.scope ?? t("cost.notConfigured"),
+            })}
+          </p>
+          {!costData.pricing.configured && <p className="mt-1">{t("cost.developmentPricing")}</p>}
         </div>
       )}
 
@@ -97,7 +141,7 @@ export function CostOverview() {
               <div className="h-8 w-24 animate-pulse rounded bg-muted" />
             ) : (
               <p className="text-2xl font-bold text-foreground">
-                ${totalHourly.toFixed(4)}
+                {formatCurrency(totalHourly)}
               </p>
             )}
           </CardContent>
@@ -114,7 +158,7 @@ export function CostOverview() {
               <div className="h-8 w-24 animate-pulse rounded bg-muted" />
             ) : (
               <p className="text-2xl font-bold text-foreground">
-                ${totalMonthly.toFixed(2)}
+                {formatCurrency(totalMonthly, 2)}
               </p>
             )}
           </CardContent>
@@ -132,7 +176,7 @@ export function CostOverview() {
             ) : (
               <div>
                 <p className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
-                  ${cpuHourly.toFixed(4)}
+                  {formatCurrency(cpuHourly)}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {item?.cpu.cores.toFixed(3) ?? "0"} cores
@@ -154,7 +198,7 @@ export function CostOverview() {
             ) : (
               <div>
                 <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
-                  ${memHourly.toFixed(4)}
+                  {formatCurrency(memHourly)}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {item?.memory.gb.toFixed(2) ?? "0"} GB
@@ -176,7 +220,7 @@ export function CostOverview() {
             </CardHeader>
             <CardContent className="pt-0">
               <p className="text-xl font-bold text-orange-600 dark:text-orange-400">
-                ${storHourly.toFixed(4)}
+                {formatCurrency(storHourly)}
               </p>
               <p className="text-xs text-muted-foreground">
                 {item?.storage.gb.toFixed(2) ?? "0"} GB
@@ -198,6 +242,10 @@ export function CostOverview() {
             <div className="h-52 flex items-center justify-center text-xs text-muted-foreground">
               {t("common.loading")}
             </div>
+          ) : trendError ? (
+            <div className="h-52 flex items-center justify-center text-xs text-destructive">
+              {t("cost.dataUnavailable")}
+            </div>
           ) : chartData.length === 0 ? (
             <div className="h-52 flex items-center justify-center text-xs text-muted-foreground">
               {trendData?.notice ?? t("cost.noTrendData")}
@@ -217,7 +265,7 @@ export function CostOverview() {
                   tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
                   axisLine={false}
                   tickLine={false}
-                  tickFormatter={(v) => `$${v}`}
+                  tickFormatter={(v) => formatCurrency(Number(v), 2)}
                 />
                 <Tooltip
                   contentStyle={{
@@ -226,7 +274,7 @@ export function CostOverview() {
                     border: "1px solid var(--border)",
                     background: "var(--card)",
                   }}
-                  formatter={(value) => [`$${Number(value).toFixed(4)}/h`, t("cost.cost")]}
+                  formatter={(value) => [`${formatCurrency(Number(value))}/h`, t("cost.cost")]}
                 />
                 <Line
                   type="monotone"

@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
-import { getCostTrend } from "@/lib/cost"
+import { CostPricingConfigurationError, getCostPricing, getCostTrend } from "@/lib/cost"
 import { getArgoApp } from "@/lib/argocd"
 import { appVisible, getEffectiveScope, namespaceVisible } from "@/lib/scope"
 import { ValidationError, toValidationErrorBody } from "@/lib/validation"
@@ -17,6 +17,16 @@ export const dynamic = "force-dynamic"
 
 const VALID_SCOPES = new Set(["cluster", "namespace", "service"])
 const MAX_DAYS = 90
+
+export interface CostTrendResponse {
+  scope: "cluster" | "namespace" | "service"
+  id: string
+  days: number
+  generatedAt: string
+  pricing: ReturnType<typeof getCostPricing>["metadata"]
+  points: Awaited<ReturnType<typeof getCostTrend>>["points"]
+  notice?: string
+}
 
 export async function GET(req: NextRequest) {
   const gate = await requireRole("cluster-admin", "developer", "viewer")
@@ -70,6 +80,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    const pricing = getCostPricing()
     const { points, notice } = await getCostTrend(
       scope as "cluster" | "namespace" | "service",
       id,
@@ -77,17 +88,24 @@ export async function GET(req: NextRequest) {
       effScope
     )
 
-    const body: Record<string, unknown> = {
-      scope,
+    const body: CostTrendResponse = {
+      scope: scope as CostTrendResponse["scope"],
       id,
       days,
       generatedAt: new Date().toISOString(),
+      pricing: pricing.metadata,
       points,
     }
     if (notice) body.notice = notice
 
     return NextResponse.json(body)
   } catch (err) {
+    if (err instanceof CostPricingConfigurationError) {
+      return NextResponse.json(
+        { error: "Cost pricing is not configured", invalid: err.invalid },
+        { status: 503 }
+      )
+    }
     if (err instanceof ValidationError) {
       return NextResponse.json(toValidationErrorBody(err), { status: 400 })
     }
