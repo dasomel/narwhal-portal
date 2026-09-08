@@ -77,7 +77,7 @@ describe("exact tuning approval runtime binding", () => {
     expect(result).toEqual({ ok: false, reason: "invocation-digest-mismatch" })
   })
 
-  it("rejects changed arguments before side effects", async () => {
+  it("rejects changed but independently allowlisted arguments before side effects", async () => {
     const validated = validateTuningItems(items)
     const issued = issueTuningApproval({
       nodeName: "node-1",
@@ -88,7 +88,7 @@ describe("exact tuning approval runtime binding", () => {
     const result = await consumeTuningApproval({
       envelope: issued.approval,
       nodeName: "node-1",
-      items: validateTuningItems([{ kind: "service-enable", service: "chronyd" }]),
+      items: validateTuningItems([{ kind: "service-enable", service: "containerd" }]),
       actor,
       now: new Date("2026-09-08T00:01:00.000Z"),
     })
