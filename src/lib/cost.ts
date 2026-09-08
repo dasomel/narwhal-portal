@@ -233,51 +233,66 @@ function storageByNamespaceQuery(): string {
 }
 
 // CPU cores: service(label_app_kubernetes_io_instance) 단위
-function cpuByServiceQuery(): string {
-  return `sum by (namespace, label_app_kubernetes_io_instance) (rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[1h]) * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels)`
+function cpuByServiceQuery(namespace?: string): string {
+  const namespaceMatcher = namespace ? `,namespace="${namespace}"` : ""
+  return `sum by (namespace, label_app_kubernetes_io_instance) (rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[1h]) * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance!=""${namespaceMatcher}})`
 }
 
 // Memory bytes: service(label_app_kubernetes_io_instance) 단위
-function memByServiceQuery(): string {
-  return `sum by (namespace, label_app_kubernetes_io_instance) (container_memory_working_set_bytes{container!="POD",container!=""} * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels)`
+function memByServiceQuery(namespace?: string): string {
+  const namespaceMatcher = namespace ? `,namespace="${namespace}"` : ""
+  return `sum by (namespace, label_app_kubernetes_io_instance) (container_memory_working_set_bytes{container!="POD",container!=""} * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance!=""${namespaceMatcher}})`
 }
 
 // Top pods CPU: 특정 service의 pod별 사용량
-function topPodCpuQuery(serviceId: string): string {
-  return `sort_desc(sum by (pod) (rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[1h]) * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance="${serviceId}"}))`
+function topPodCpuQuery(serviceId: string, namespace?: string): string {
+  const namespaceMatcher = namespace ? `,namespace="${namespace}"` : ""
+  return `sort_desc(sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[1h]) * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance="${serviceId}"${namespaceMatcher}}))`
 }
 
 // Top pods Memory: 특정 service의 pod별 사용량
-function topPodMemQuery(serviceId: string): string {
-  return `sort_desc(sum by (pod) (container_memory_working_set_bytes{container!="POD",container!=""} * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance="${serviceId}"}))`
+function topPodMemQuery(serviceId: string, namespace?: string): string {
+  const namespaceMatcher = namespace ? `,namespace="${namespace}"` : ""
+  return `sort_desc(sum by (namespace, pod) (container_memory_working_set_bytes{container!="POD",container!=""} * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance="${serviceId}"${namespaceMatcher}}))`
 }
 
 // 추이: 일별 avg_over_time — days일 치 24h 슬라이딩 윈도
 //
 // portal#61: cluster scope의 추이는 caller의 effective scope 밖 namespace까지
-// 합산해 노출했다 — nsFilter(effScope.namespaces로 만든 regex alternation)를 넣으면
+// 합산해 노출했다 — scopeNamespaceMatcher(effScope로 만든 regex alternation)를 넣으면
 // cluster-admin이 아닌 caller가 볼 수 있는 namespace로만 합산을 제한한다.
-function trendCpuQuery(scope: string, id: string, nsFilter?: string): string {
+// service scope는 route에서 이미 검증된 serviceNamespace로 직접 pin해 동일 라벨이
+// 다른 team의 namespace에도 존재하는 경우의 교차 노출을 막는다 (getCostByService와
+// 동일한 방어).
+function scopeNamespaceMatcher(effScope: EffectiveScope): string {
+  if (effScope.all) return ""
+  const names = [...effScope.namespaces]
+    .sort()
+    .map((namespace) => namespace.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&"))
+  return `,namespace=~"^(?:${names.join("|") || "$^"})$"`
+}
+
+function trendCpuQuery(scope: string, id: string, effScope: EffectiveScope, serviceNamespace?: string): string {
+  const namespaceMatcher = serviceNamespace ? `,namespace="${serviceNamespace}"` : scopeNamespaceMatcher(effScope)
   if (scope === "service") {
-    return `sum(avg_over_time(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[1h])[24h:1h]) * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance="${id}"})`
+    return `sum(avg_over_time(rate(container_cpu_usage_seconds_total{container!="POD",container!=""${namespaceMatcher}}[1h])[24h:1h]) * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance="${id}"})`
   }
   if (scope === "namespace") {
     return `sum(avg_over_time(rate(container_cpu_usage_seconds_total{container!="POD",container!="",namespace="${id}"}[1h])[24h:1h]))`
   }
   // cluster
-  const nsMatcher = nsFilter ? `,namespace=~"${nsFilter}"` : ""
-  return `sum(avg_over_time(rate(container_cpu_usage_seconds_total{container!="POD",container!=""${nsMatcher}}[1h])[24h:1h]))`
+  return `sum(avg_over_time(rate(container_cpu_usage_seconds_total{container!="POD",container!=""${namespaceMatcher}}[1h])[24h:1h]))`
 }
 
-function trendMemQuery(scope: string, id: string, nsFilter?: string): string {
+function trendMemQuery(scope: string, id: string, effScope: EffectiveScope, serviceNamespace?: string): string {
+  const namespaceMatcher = serviceNamespace ? `,namespace="${serviceNamespace}"` : scopeNamespaceMatcher(effScope)
   if (scope === "service") {
-    return `sum(avg_over_time(container_memory_working_set_bytes{container!="POD",container!=""}[24h]) * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance="${id}"})`
+    return `sum(avg_over_time(container_memory_working_set_bytes{container!="POD",container!=""${namespaceMatcher}}[24h]) * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance="${id}"})`
   }
   if (scope === "namespace") {
     return `sum(avg_over_time(container_memory_working_set_bytes{container!="POD",container!="",namespace="${id}"}[24h]))`
   }
-  const nsMatcher = nsFilter ? `,namespace=~"${nsFilter}"` : ""
-  return `sum(avg_over_time(container_memory_working_set_bytes{container!="POD",container!=""${nsMatcher}}[24h]))`
+  return `sum(avg_over_time(container_memory_working_set_bytes{container!="POD",container!=""${namespaceMatcher}}[24h]))`
 }
 
 // ---------------------------------------------------------------------------
@@ -429,31 +444,42 @@ export async function getCost(
 /**
  * getCostByService: 단일 service 비용 + top 5 pods
  *
- * portal#61: 호출자의 scope 안에 있는 service인지는 route 레벨에서 getArgoApp +
- * appVisible로 이미 검증됐다는 전제. 캐시 키는 service 단위이므로(팀마다 다른
- * 값을 보는 게 아니라 하나의 service는 하나의 정답만 있음) scope fingerprint가
- * 필요 없다 — namespace/cluster 집계처럼 caller마다 다른 결과가 나오지 않는다.
+ * portal#61: 호출자의 scope 안에 있는 service인지, 그리고 그 service가 실제로 속한
+ * namespace가 무엇인지는 route 레벨에서 getArgoApp + appVisible로 이미 검증됐다는
+ * 전제. serviceNamespace를 PromQL 쿼리 자체에 pin하고 결과를 다시 namespace로
+ * 필터링해 동일 label_app_kubernetes_io_instance 값이 다른 team의 namespace에도
+ * 존재하는 경우의 교차 노출을 막는다. 캐시 키에 effScope.fingerprint +
+ * serviceNamespace를 포함하는 이유도 동일 — resolved scope나 namespace 매핑이
+ * 바뀌면 이전 caller의 캐시를 재사용하면 안 된다.
  */
-export async function getCostByService(serviceId: string): Promise<CostDetailResult | { notice: string }> {
+export async function getCostByService(
+  serviceId: string,
+  effScope: EffectiveScope,
+  serviceNamespace: string
+): Promise<CostDetailResult | { notice: string }> {
   const pricing = getCostPricing()
   const { unitPrices } = pricing
-  const cacheKey = `cost:service:${serviceId}:${pricingCacheKey(pricing)}`
+  const cacheKey = `cost:service:${effScope.fingerprint}:${serviceNamespace}:${serviceId}:${pricingCacheKey(pricing)}`
   const cached = await cacheGet<CostDetailResult | { notice: string }>(cacheKey)
   if (cached !== null) return cached
 
   try {
     const [cpuRes, memRes, topCpuRes, topMemRes] = await Promise.all([
-      queryVector(cpuByServiceQuery()),
-      queryVector(memByServiceQuery()),
-      queryVector(topPodCpuQuery(serviceId)),
-      queryVector(topPodMemQuery(serviceId)),
+      queryVector(cpuByServiceQuery(serviceNamespace)),
+      queryVector(memByServiceQuery(serviceNamespace)),
+      queryVector(topPodCpuQuery(serviceId, serviceNamespace)),
+      queryVector(topPodMemQuery(serviceId, serviceNamespace)),
     ])
 
     // 해당 service 항목 추출
-    const cpuEntry = cpuRes.find((r) => r.metric.label_app_kubernetes_io_instance === serviceId)
-    const memEntry = memRes.find((r) => r.metric.label_app_kubernetes_io_instance === serviceId)
-    const cpuCores = cpuEntry ? parseFloat(cpuEntry.value[1]) : 0
-    const memBytes = memEntry ? parseFloat(memEntry.value[1]) : 0
+    // D1: Trust the route's app/project authorization here; PromQL is already pinned
+    // to that app's namespace. Re-checking only namespace mappings hides project-only
+    // access. If another caller needs this helper, pass an explicit predicate instead.
+    const matchesService = (r: PromVectorResult) =>
+      r.metric.label_app_kubernetes_io_instance === serviceId &&
+      r.metric.namespace === serviceNamespace
+    const cpuCores = cpuRes.filter(matchesService).reduce((sum, r) => sum + parseFloat(r.value[1]), 0)
+    const memBytes = memRes.filter(matchesService).reduce((sum, r) => sum + parseFloat(r.value[1]), 0)
 
     const base = calcItem(serviceId, cpuCores, memBytes, 0, unitPrices)
 
@@ -462,11 +488,15 @@ export async function getCostByService(serviceId: string): Promise<CostDetailRes
     const podMemMap = new Map<string, number>()
     for (const r of topCpuRes.slice(0, 10)) {
       const pod = r.metric.pod
-      if (pod) podCpuMap.set(pod, parseFloat(r.value[1]))
+      if (pod && r.metric.namespace === serviceNamespace) {
+        podCpuMap.set(`${r.metric.namespace}/${pod}`, parseFloat(r.value[1]))
+      }
     }
     for (const r of topMemRes.slice(0, 10)) {
       const pod = r.metric.pod
-      if (pod) podMemMap.set(pod, parseFloat(r.value[1]))
+      if (pod && r.metric.namespace === serviceNamespace) {
+        podMemMap.set(`${r.metric.namespace}/${pod}`, parseFloat(r.value[1]))
+      }
     }
     const allPods = new Set([...podCpuMap.keys(), ...podMemMap.keys()])
     const topPods: TopPod[] = []
@@ -508,36 +538,31 @@ export async function getCostTrend(
   scope: "cluster" | "namespace" | "service",
   id: string,
   days: number,
-  effScope: EffectiveScope
+  effScope: EffectiveScope,
+  serviceNamespace?: string
 ): Promise<{ points: CostTrendPoint[]; notice?: string }> {
   const pricing = getCostPricing()
   const { unitPrices } = pricing
   const safeDays = Math.min(days, 90)
-  // portal#61: namespace/service scope는 route에서 이미 visibility 검증된 id만
-  // 넘어오지만, cluster scope의 집계는 caller마다 볼 수 있는 namespace가 달라
-  // cache key에 fingerprint가 반드시 필요하다 (getCost의 cluster/namespace 분기와
-  // 동일 이유). namespace/service scope는 id가 곧 정답을 결정하므로 fingerprint를
-  // 붙이지 않는다. pricingCacheKey는 두 경우 모두 필요 — 단가 설정이 바뀌면
-  // scope와 무관하게 과거 응답을 재사용하면 안 된다.
-  const cacheKey =
-    scope === "cluster"
-      ? `cost:trend:cluster:${effScope.fingerprint}:${safeDays}:${pricingCacheKey(pricing)}`
-      : `cost:trend:${scope}:${id}:${safeDays}:${pricingCacheKey(pricing)}`
+  // portal#61: namespace/service scope는 route에서 이미 visibility 검증된 id(+
+  // service scope의 경우 resolved serviceNamespace)만 넘어오지만, cluster scope의
+  // 집계는 caller마다 볼 수 있는 namespace가 달라 cache key에 fingerprint가
+  // 반드시 필요하다 (getCost/getCostByService의 동일 이유). serviceNamespace를
+  // 키에 포함해 동일 service id가 다른 namespace로 재매핑되는 경우도 캐시가
+  // 갈린다. pricingCacheKey는 모든 scope에 필요 — 단가 설정이 바뀌면 과거 응답을
+  // 재사용하면 안 된다.
+  const cacheKey = `cost:trend:${scope}:${effScope.fingerprint}:${serviceNamespace ?? ""}:${id}:${safeDays}:${pricingCacheKey(pricing)}`
   const cached = await cacheGet<{ points: CostTrendPoint[]; notice?: string }>(cacheKey)
   if (cached !== null) return cached
 
   // cluster scope: cluster-admin(all)이 아니면 caller가 볼 수 있는 namespace로만
   // 합산을 제한한다. 볼 수 있는 namespace가 없으면 Prometheus를 호출할 필요 없이
-  // 빈 결과를 반환한다.
-  let nsFilter: string | undefined
-  if (scope === "cluster" && !effScope.all) {
-    const names = [...effScope.namespaces]
-    if (names.length === 0) {
-      const empty = { points: [] }
-      await cacheSet(cacheKey, empty, 3600)
-      return empty
-    }
-    nsFilter = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")
+  // 빈 결과를 반환한다. (실제 필터링은 trendCpuQuery/trendMemQuery 내부의
+  // scopeNamespaceMatcher(effScope)가 수행한다.)
+  if (scope === "cluster" && !effScope.all && effScope.namespaces.size === 0) {
+    const empty = { points: [] }
+    await cacheSet(cacheKey, empty, 3600)
+    return empty
   }
 
   try {
@@ -546,8 +571,8 @@ export async function getCostTrend(
     const step = 86400 // 1일 step
 
     const [cpuRange, memRange] = await Promise.all([
-      queryRangeVector(trendCpuQuery(scope, id, nsFilter), start, end, step),
-      queryRangeVector(trendMemQuery(scope, id, nsFilter), start, end, step),
+      queryRangeVector(trendCpuQuery(scope, id, effScope, serviceNamespace), start, end, step),
+      queryRangeVector(trendMemQuery(scope, id, effScope, serviceNamespace), start, end, step),
     ])
 
     // 첫 번째 series의 values 사용 (sum이라 시리즈 하나)

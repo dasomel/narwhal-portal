@@ -7,10 +7,10 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
-import { CostPricingConfigurationError, getCostByService, getCostPricing } from "@/lib/cost"
 import { getArgoApp } from "@/lib/argocd"
+import { CostPricingConfigurationError, getCostByService, getCostPricing } from "@/lib/cost"
 import { appVisible, getEffectiveScope } from "@/lib/scope"
-import { ValidationError, toValidationErrorBody, K8S_NAME_RE } from "@/lib/validation"
+import { ValidationError, toValidationErrorBody, K8S_NAME_RE, K8S_NAMESPACE_RE } from "@/lib/validation"
 
 export const dynamic = "force-dynamic"
 
@@ -36,17 +36,22 @@ export async function GET(
     // /api/scorecards/[svc] — a guessed/known service id previously returned full
     // cost + top-pod detail regardless of team ownership. Resolve the ArgoCD app the
     // same way scorecards/[svc] does and require it be within the caller's scope.
+    // The resolved namespace is validated (defense against a malformed value reaching
+    // the PromQL query) and passed into getCostByService so the query itself is
+    // pinned to it — a duplicate service label in another team's namespace can't
+    // leak through.
     const app = await getArgoApp(svc)
-    if (!app) {
-      return NextResponse.json({ error: "Service not found" }, { status: 404 })
+    const namespace = app?.spec.destination?.namespace ?? "default"
+    if (!K8S_NAMESPACE_RE.test(namespace)) {
+      throw new ValidationError("invalid service destination namespace: must match RFC 1123 label", "namespace")
     }
-    const scope = await getEffectiveScope(gate.session)
-    if (!appVisible(app.spec.project ?? "default", app.spec.destination?.namespace ?? app.metadata.namespace ?? "default", scope)) {
+    const effScope = await getEffectiveScope(gate.session)
+    if (!app || !appVisible(app.spec.project ?? "default", namespace, effScope)) {
       return NextResponse.json({ error: "Service not found" }, { status: 404 })
     }
 
     const pricing = getCostPricing()
-    const result = await getCostByService(svc)
+    const result = await getCostByService(svc, effScope, namespace)
 
     if ("notice" in result && !("serviceId" in result)) {
       // Prometheus 미응답 — 200 + notice (graceful degradation)

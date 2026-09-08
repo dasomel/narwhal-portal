@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { NextRequest } from "next/server"
 import type { NamespaceInfo } from "@/lib/k8s-client"
+import type { EffectiveScope } from "@/lib/scope"
 
 // portal#28: GET /api/cost authorized via requireRole but never scoped the returned
 // namespace/service items (or the single "cluster" aggregate) to the caller's team —
@@ -18,8 +19,8 @@ vi.mock("@/lib/k8s-client", async (importOriginal) => {
 const { requireRole } = await import("@/lib/auth")
 const { cacheGet, cacheSet } = await import("@/lib/valkey")
 const { getNamespaces } = await import("@/lib/k8s-client")
-const { getCostByService, getCostTrend } = await import("@/lib/cost")
 const { getEffectiveScope } = await import("@/lib/scope")
+const { getCostByService, getCostTrend } = await import("@/lib/cost")
 const { GET } = await import("./route")
 
 const pricingEnvNames = [
@@ -149,6 +150,48 @@ describe("GET /api/cost — scope enforcement", () => {
     expect(new Set(setKeys).size).toBe(2)
   })
 
+  it("keeps detail metrics for a service already authorized through its ArgoCD project", async () => {
+    const projectOnlyScope: EffectiveScope = {
+      all: false,
+      namespaces: new Set(),
+      argocdProjects: ["apps"],
+      hasMapping: true,
+      fingerprint: "project-only",
+      resolved: { all: false, names: new Set(), byLabel: new Set(), byPattern: new Set() },
+      clusterId: "default",
+    }
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => jsonResponse([
+      {
+        metric: {
+          namespace: "frontend-app",
+          label_app_kubernetes_io_instance: "portal",
+          ...(url.includes("container_cpu_usage_seconds_total") ? { pod: "portal-0" } : {}),
+        },
+        value: [0, url.includes("container_cpu_usage_seconds_total") ? "2" : "4000000000"],
+      },
+    ])))
+
+    const result = await getCostByService("portal", projectOnlyScope, "frontend-app")
+
+    expect(result).toMatchObject({ serviceId: "portal", totalHourly: 0.1 })
+  })
+
+  it("changes scoped detail cache keys when resolved namespace visibility is revoked", async () => {
+    vi.mocked(getNamespaces)
+      .mockResolvedValueOnce([namespaces[0]])
+      .mockResolvedValueOnce([namespaces[1]])
+    const beforeRevocation = await getEffectiveScope(platformTeamSession)
+    const afterRevocation = await getEffectiveScope(platformTeamSession)
+
+    await getCostByService("portal", beforeRevocation, "platform-system")
+    await getCostByService("portal", afterRevocation, "platform-system")
+
+    const detailKeys = vi.mocked(cacheSet).mock.calls
+      .map(([key]) => key)
+      .filter((key) => key.startsWith("cost:service:"))
+    expect(new Set(detailKeys).size).toBe(2)
+  })
+
   it("returns estimate and configured pricing provenance to the dashboard", async () => {
     configurePricing()
     vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
@@ -205,18 +248,18 @@ describe("GET /api/cost — scope enforcement", () => {
   it("separates list, detail, and trend caches when pricing changes", async () => {
     configurePricing("2026.06")
     vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
-    const adminScope = await getEffectiveScope(adminSession)
+    const scope = await getEffectiveScope(adminSession)
     await GET(requestUrl())
-    await getCostByService("portal")
-    await getCostTrend("cluster", "cluster", 7, adminScope)
+    await getCostByService("portal", scope, "platform-system")
+    await getCostTrend("cluster", "cluster", 7, scope)
 
     configurePricing("2026.07")
     await GET(requestUrl())
-    await getCostByService("portal")
-    await getCostTrend("cluster", "cluster", 7, adminScope)
+    await getCostByService("portal", scope, "platform-system")
+    await getCostTrend("cluster", "cluster", 7, scope)
 
     const setKeys = vi.mocked(cacheSet).mock.calls.map(([key]) => key)
-    for (const prefix of ["cost:cluster:", "cost:service:portal:", "cost:trend:cluster:"]) {
+    for (const prefix of ["cost:cluster:", "cost:service:", "cost:trend:cluster:"]) {
       const matching = setKeys.filter((key) => key.startsWith(prefix))
       expect(new Set(matching).size).toBe(2)
     }
