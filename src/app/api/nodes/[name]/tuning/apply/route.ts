@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/lib/auth"
+import { auth, getActorId } from "@/lib/auth"
 import { runHostJob } from "@/lib/k8s-job-runner"
 import { getNodeDetail } from "@/lib/k8s-client"
-import { buildJobScript, parseVerification, type ApplyTarget } from "@/lib/tuning-commands"
+import { parseVerification, type ApplyTarget } from "@/lib/tuning-commands"
+import {
+  consumeTuningApproval,
+  validateTuningItems,
+  type TuningApprovalEnvelope,
+} from "@/lib/tuning-approval"
 import { assertK8sNodeName, ValidationError, toValidationErrorBody } from "@/lib/validation"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 
@@ -10,27 +15,37 @@ export const dynamic = "force-dynamic"
 
 interface ApplyBody {
   items: ApplyTarget[]
+  approval: TuningApprovalEnvelope
 }
-
-const VALID_KINDS = new Set([
-  "kernel-param", "kernel-module", "ulimit", "package",
-  "swap-off", "service-enable", "ethtool", "tuning-script",
-])
 
 const CONTROL_PLANE_TAINT = "node-role.kubernetes.io/control-plane"
 const MASTER_TAINT = "node-role.kubernetes.io/master"
 
-function validateBody(body: unknown): ApplyBody | { error: string } {
+function parseBody(body: unknown): ApplyBody | { error: string } {
   if (!body || typeof body !== "object") return { error: "invalid body" }
-  const items = (body as { items?: unknown }).items
-  if (!Array.isArray(items) || items.length === 0) return { error: "items required" }
-  if (items.length > 50) return { error: "too many items (max 50)" }
-  for (const it of items) {
-    if (!it || typeof it !== "object") return { error: "invalid item" }
-    const kind = (it as { kind?: unknown }).kind
-    if (typeof kind !== "string" || !VALID_KINDS.has(kind)) return { error: `invalid kind: ${String(kind)}` }
+  const raw = body as { items?: unknown; approval?: unknown }
+  let items: ApplyTarget[]
+  try {
+    items = validateTuningItems(raw.items)
+  } catch (error) {
+    return { error: (error as Error).message }
   }
-  return { items: items as ApplyTarget[] }
+  if (!raw.approval || typeof raw.approval !== "object") return { error: "approval required" }
+  const approval = raw.approval as Partial<TuningApprovalEnvelope>
+  const fields: Array<keyof TuningApprovalEnvelope> = [
+    "approvalId",
+    "resolutionId",
+    "invocationDigest",
+    "canonicalizationVersion",
+    "approvedAt",
+    "expiresAt",
+  ]
+  for (const field of fields) {
+    if (typeof approval[field] !== "string" || approval[field] === "") {
+      return { error: `invalid approval: ${field}` }
+    }
+  }
+  return { items, approval: approval as TuningApprovalEnvelope }
 }
 
 export async function POST(
@@ -53,8 +68,6 @@ export async function POST(
     throw err
   }
 
-  // H-4: Reject control-plane nodes — refuse if any taint key matches
-  // node-role.kubernetes.io/control-plane.
   const detail = await getNodeDetail(nodeName)
   if (!detail) {
     return NextResponse.json({ error: "Node not found" }, { status: 404 })
@@ -71,23 +84,37 @@ export async function POST(
   }
 
   const body = await req.json().catch(() => null)
-  const parsed = validateBody(body)
+  const parsed = parseBody(body)
   if ("error" in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
 
-  // #55: pre-validate the allowlisted targets up front so a bad item still yields a
-  // 400 (buildJobScript throws on anything outside tuning-commands.ts's per-kind
-  // allowlist). The actual script that runs is built again, from these same targets,
-  // inside runHostJob — the raw shell interface it used to accept was removed, so
-  // there is no separate "script" value to smuggle a difference through here.
-  try {
-    buildJobScript(parsed.items)
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 })
+  // portal#78: the side-effect boundary consumes a one-shot approval only after
+  // recomputing the canonical resolved invocation from the concrete target/args.
+  // Any changed target, changed argument, stale approval, unsupported c14n version,
+  // or replay is rejected before beginOperation/runHostJob.
+  const approvalCheck = await consumeTuningApproval({
+    envelope: parsed.approval,
+    nodeName,
+    items: parsed.items,
+    actor: getActorId(session),
+  })
+  if (!approvalCheck.ok) {
+    return NextResponse.json(
+      { error: "Approval rejected", reason: approvalCheck.reason },
+      { status: 409 },
+    )
   }
 
   const kinds = parsed.items.map((i) => (i as { kind?: string }).kind ?? "?")
+  const evidence = {
+    approvalId: parsed.approval.approvalId,
+    resolutionId: approvalCheck.artifact.resolutionId,
+    invocationDigest: approvalCheck.artifact.invocationDigest,
+    canonicalizationVersion: approvalCheck.artifact.canonicalizationVersion,
+    normalizedInvocationVersion: approvalCheck.artifact.normalizedInvocationVersion,
+  }
+  const evidenceText = `approval=${evidence.approvalId} resolution=${evidence.resolutionId} invocation=${evidence.invocationDigest}`
   const ctx = await beginOperation({
     request: req,
     session,
@@ -95,7 +122,7 @@ export async function POST(
     source: "kubernetes",
     resource: { kind: "Node", name: nodeName },
     title: `Node tuning apply started: ${nodeName}`,
-    description: `${parsed.items.length} item(s): ${kinds.join(", ")}`,
+    description: `${parsed.items.length} item(s): ${kinds.join(", ")} | ${evidenceText}`,
   })
 
   try {
@@ -105,18 +132,19 @@ export async function POST(
       label: "tuning",
       timeoutMs: 5 * 60_000,
     })
-    // #55 item 6: re-read the actual resulting host state (parsed out of the Job's
-    // own log markers, see buildVerifyCommand/parseVerification in tuning-commands.ts)
-    // instead of trusting the apply command's exit code alone.
     const verification = parseVerification(result.logs, parsed.items)
     const verifiedOk = result.ok && verification.every((v) => v.ok)
     if (verifiedOk) {
-      await completeOperation(ctx, `Node tuning apply completed: ${nodeName}`, `Job ${result.jobName}`)
+      await completeOperation(
+        ctx,
+        `Node tuning apply completed: ${nodeName}`,
+        `Job ${result.jobName} | ${evidenceText}`,
+      )
     } else {
       await failOperation(
         ctx,
         `Node tuning apply failed: ${nodeName}`,
-        `Job ${result.jobName}${result.ok ? " (post-apply verification mismatch)" : ""}`,
+        `Job ${result.jobName}${result.ok ? " (post-apply verification mismatch)" : ""} | ${evidenceText}`,
       )
     }
     return NextResponse.json({
@@ -124,11 +152,12 @@ export async function POST(
       jobName: result.jobName,
       logs: result.logs,
       verification,
+      evidence,
       appliedBy: session.user.email ?? session.user.name ?? "unknown",
       appliedAt: new Date().toISOString(),
     }, { status: verifiedOk ? 200 : 500 })
   } catch (e) {
-    await failOperation(ctx, `Node tuning apply failed: ${nodeName}`, (e as Error).message)
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    await failOperation(ctx, `Node tuning apply failed: ${nodeName}`, `${(e as Error).message} | ${evidenceText}`)
+    return NextResponse.json({ error: (e as Error).message, evidence }, { status: 500 })
   }
 }
