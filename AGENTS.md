@@ -10,7 +10,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # Narwhal Portal engineering contract
 
-Read `README.md`, `CLAUDE.md`, relevant design/architecture docs, and the issue/spec before editing. Preserve existing component, auth, API, routing, and state-management conventions.
+Read `README.md`, relevant design/architecture docs, the matching project skill under `.agents/skills/`, and the issue/spec before editing. Preserve existing component, auth, API, routing, and state-management conventions.
+
+## Work contract
 
 - Make the smallest coherent change that solves the requested problem.
 - Do not auto-fix unrelated findings; report them separately.
@@ -18,9 +20,26 @@ Read `README.md`, `CLAUDE.md`, relevant design/architecture docs, and the issue/
 - Treat exported APIs, auth/RBAC changes, routing contracts, destructive actions, and shared component semantics as design changes.
 - Let formatter/linter rules own deterministic style. Do not add prompt-only style rules that tooling already enforces.
 - Comments explain why, invariants, compatibility constraints, or hazards; do not narrate obvious code.
-- For bugs, prefer: reproduce -> failing test/evidence -> minimal fix -> same test passes -> relevant regression suite.
+
+## Companion Narwhal cluster contract
+
+The Portal consumes contracts owned by the Narwhal cluster repository: service endpoints, namespaces, secret paths, OIDC clients, RBAC bindings, routes, and other deployment details.
+
+- Verify those assumptions from the companion Narwhal source rather than memory.
+- When both repositories are checked out in one workspace, resolve the companion repository relatively (normally `../narwhal`) or through the workspace configuration; do not encode a maintainer-specific absolute path.
+- Treat the companion Narwhal repository as read-only during Portal work. Route cluster-owned mutations to that repository instead of editing it from the Portal task.
+- Do not duplicate cluster deployment configuration in Portal merely to make a local integration pass.
+
+## Bug fixes and verification
+
+- Prefer: reproduce -> failing test/evidence -> minimal fix -> same test passes -> relevant regression suite.
 - Use Playwright/integration evidence for browser/auth behavior when unit tests cannot prove the real path.
-- Do not claim completion without build/test/lint evidence; distinguish mocked tests from browser/runtime verification.
-- End substantive work as A) complete/verified, B) meaningful verified progress with the next blocker isolated, or C) stop with evidence when further work requires unjustified scope, fragile patches, or unsupported assumptions.
+- For API/UI seams, compare the actual producer and consumer contracts instead of relying on a stale hand-maintained mapping.
+- Do not claim completion without relevant build/test/lint evidence; distinguish mocked/static evidence from browser/runtime and live integration verification.
+
+## Convergence
+
+End substantive work as A) complete/verified, B) meaningful verified progress with the next blocker isolated, or C) stop with evidence when further work requires unjustified scope, fragile patches, or unsupported assumptions.
 
 Reference: https://github.com/dasomel/openforge/blob/main/docs/agent-engineering.md
+Agent Skills standard: https://github.com/dasomel/openforge/blob/main/docs/agent-skills.md
