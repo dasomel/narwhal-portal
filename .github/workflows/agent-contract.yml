@@ -1,0 +1,53 @@
+name: Agent Contract
+
+on:
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - '.agents/**'
+      - '.claude/**'
+      - '.github/workflows/agent-contract.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - '.agents/**'
+      - '.claude/**'
+      - '.github/workflows/agent-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: OpenForge agent contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Pin the standards repository to the revision used by this contract. Updating
+      # the policy is therefore an explicit, reviewable change instead of a floating
+      # dependency on OpenForge main.
+      - name: Checkout pinned OpenForge auditor
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: dasomel/openforge
+          ref: 44d7efc01ed59d033ac0c774af46196149010702
+          path: .openforge-audit
+          sparse-checkout: |
+            templates/scripts/audit-agent-skills.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Validate Agent Skills and Claude adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .openforge-audit/templates/scripts/audit-agent-skills.py .
