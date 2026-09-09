@@ -6,7 +6,7 @@ compatibility: Requires the Narwhal Portal checkout, pnpm, Next.js 16 project de
 metadata:
   openforge-scope: project
   openforge-owner: dasomel/narwhal-portal
-  openforge-maturity: verified
+  openforge-maturity: draft
   openforge-version: "1"
 ---
 
