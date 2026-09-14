@@ -1,6 +1,6 @@
 # Narwhal IDP Portal
 
-English | [한국어](README_ko.md)
+English | [한국어](README-ko.md)
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
