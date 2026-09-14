@@ -1,6 +1,6 @@
 # 구현 상태
 
-Last verified: 2026-09-09 against `main`
+Last verified: 2026-09-14 against `main`
 
 이 snapshot은 default branch의 실제 기능과 planned work를 구분합니다.
 
