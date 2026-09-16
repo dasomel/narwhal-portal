@@ -14,6 +14,14 @@ export interface EffectivePermissions {
     mappedTeams: string[]
     unmappedClaims: string[]
     fellBackToGuest: boolean
+    /**
+     * narwhal#163: whether the RBAC role claim itself (cluster-admin / developer /
+     * viewer) was rejected by the allowlist, distinct from "no groups claim at all".
+     * `fellBackToGuest` above only reflects TEAM-claim mapping and stays false even
+     * when a role claim like `cluster-admins` (typo) was silently dropped — this
+     * field is the one that actually answers "was a role claim rejected".
+     */
+    groupClaimStatus: "ok" | "unknown_groups" | "no_groups"
   }
   /** Namespaces in scope, each with WHY it is in scope. */
   namespaces: Array<{ name: string; via: "label" | "pattern" | "all"; owner: string | null }>
@@ -70,7 +78,7 @@ export async function GET() {
       email: session.user.email ?? null,
       role: session.user.role ?? "guest",
     },
-    claims: diagnosis,
+    claims: { ...diagnosis, groupClaimStatus: session.groupClaimStatus ?? "no_groups" },
     namespaces: inScope,
     allNamespaces: scope.all,
     argocdProjects: scope.argocdProjects,
