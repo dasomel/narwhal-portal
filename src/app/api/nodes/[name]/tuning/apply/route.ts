@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { auth, getActorId } from "@/lib/auth"
 import { runHostJob } from "@/lib/k8s-job-runner"
 import { getNodeDetail } from "@/lib/k8s-client"
-import { parseVerification, type ApplyTarget } from "@/lib/tuning-commands"
+import { buildJobScript, parseVerification, type ApplyTarget } from "@/lib/tuning-commands"
 import {
   consumeTuningApproval,
   validateTuningItems,
@@ -16,20 +16,36 @@ export const dynamic = "force-dynamic"
 interface ApplyBody {
   items: ApplyTarget[]
   approval: TuningApprovalEnvelope
+  dryRun: false
+}
+
+interface DryRunBody {
+  items: ApplyTarget[]
+  dryRun: true
 }
 
 const CONTROL_PLANE_TAINT = "node-role.kubernetes.io/control-plane"
 const MASTER_TAINT = "node-role.kubernetes.io/master"
 
-function parseBody(body: unknown): ApplyBody | { error: string } {
+function parseBody(body: unknown): ApplyBody | DryRunBody | { error: string } {
   if (!body || typeof body !== "object") return { error: "invalid body" }
-  const raw = body as { items?: unknown; approval?: unknown }
+  const raw = body as { items?: unknown; approval?: unknown; dryRun?: unknown }
   let items: ApplyTarget[]
   try {
     items = validateTuningItems(raw.items)
   } catch (error) {
     return { error: (error as Error).message }
   }
+
+  // #55: preflight/dry-run — validates the payload against the same allowlist
+  // used for a real apply (buildJobScript, via validateTuningItems above) and
+  // returns the planned host script without ever calling runHostJob or
+  // consuming a one-shot approval. No host mutation, no approval/evidence
+  // trail is produced for a dry run.
+  if (raw.dryRun === true) {
+    return { items, dryRun: true }
+  }
+
   if (!raw.approval || typeof raw.approval !== "object") return { error: "approval required" }
   const approval = raw.approval as Partial<TuningApprovalEnvelope>
   const fields: Array<keyof TuningApprovalEnvelope> = [
@@ -45,7 +61,7 @@ function parseBody(body: unknown): ApplyBody | { error: string } {
       return { error: `invalid approval: ${field}` }
     }
   }
-  return { items, approval: approval as TuningApprovalEnvelope }
+  return { items, approval: approval as TuningApprovalEnvelope, dryRun: false }
 }
 
 export async function POST(
@@ -87,6 +103,20 @@ export async function POST(
   const parsed = parseBody(body)
   if ("error" in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 })
+  }
+
+  if (parsed.dryRun) {
+    // #55: preflight — no runHostJob, no approval consumption, no operation
+    // context/evidence trail. Pure validation + a preview of the exact script
+    // that a real apply would run, for the operator to review before approving.
+    const preview = buildJobScript(parsed.items)
+    return NextResponse.json({
+      dryRun: true,
+      ok: true,
+      nodeName,
+      items: parsed.items,
+      preview,
+    })
   }
 
   // portal#78: the side-effect boundary consumes a one-shot approval only after
