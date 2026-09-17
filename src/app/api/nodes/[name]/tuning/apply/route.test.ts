@@ -223,6 +223,39 @@ describe("POST /api/nodes/[name]/tuning/apply — post-apply verification", () =
   })
 })
 
+describe("POST /api/nodes/[name]/tuning/apply — dry run", () => {
+  beforeEach(() => {
+    vi.mocked(auth).mockResolvedValue(adminSession as never)
+  })
+
+  it("previews the planned script without running the job or requiring approval", async () => {
+    const res = await POST(req({ items: [{ kind: "swap-off" }], dryRun: true }, "node-1", false), ctx())
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.dryRun).toBe(true)
+    expect(body.ok).toBe(true)
+    expect(body.preview).toMatch(/swapoff -a/)
+    expect(runHostJob).not.toHaveBeenCalled()
+    expect(consumeTuningApproval).not.toHaveBeenCalled()
+  })
+
+  it("still 400s a tampered payload under dry run", async () => {
+    const res = await POST(
+      req({ items: [{ kind: "kernel-module", module: "evil_module" }], dryRun: true }, "node-1", false),
+      ctx(),
+    )
+    expect(res.status).toBe(400)
+    expect(runHostJob).not.toHaveBeenCalled()
+  })
+
+  it("still 403s a non-cluster-admin session under dry run", async () => {
+    vi.mocked(auth).mockResolvedValue(developerSession as never)
+    const res = await POST(req({ items: [{ kind: "swap-off" }], dryRun: true }, "node-1", false), ctx())
+    expect(res.status).toBe(403)
+    expect(runHostJob).not.toHaveBeenCalled()
+  })
+})
+
 describe("POST /api/nodes/[name]/tuning/apply — job execution failure", () => {
   it("500s and preserves approval evidence when the job rejects", async () => {
     vi.mocked(auth).mockResolvedValue(adminSession as never)
