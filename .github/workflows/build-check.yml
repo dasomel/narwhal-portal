@@ -38,6 +38,22 @@ jobs:
     name: Type-check and build
     runs-on: ubuntu-latest
     steps:
+      # Blocks egress before checkout so a malicious install/build script (transitive,
+      # postinstall-equivalent, or otherwise) cannot reach anything outside this
+      # allowlist. `pnpm install --frozen-lockfile` below only needs the npm registry
+      # and GitHub itself; a real exfiltration attempt fails closed instead of quietly
+      # succeeding. audit mode intentionally off: block is the point of this gate.
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            registry.npmjs.org:443
+            raw.githubusercontent.com:443
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
