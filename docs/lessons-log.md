@@ -74,6 +74,11 @@
 |------|---------|-----|
 | 2026-09-07 | #51 Prometheus 원시 쿼리 실패, 빈 결과, 다중 시리즈, 수집 지연을 `0`, `[]`, 또는 임의의 첫 번째 시리즈로 묵살해버렸다. 특히 스칼라 쿼리 부재나 익스포터 장애 시 CPU/메모리/노드 메트릭이 유효한 0%로 둔갑하여 대시보드와 거버넌스가 '정상 유휴 상태'로 오판(false-green)했고, 노드 IP 매칭 시 `startsWith(nodeIp)` 접두사 비교로 인해 `10.0.0.1`이 `10.0.0.10:9100`과 충돌할 수 있었다. K8s API fallback 역시 소스 전환 표시 없이 메트릭을 교체했다 | 텔레메트리 상태(`TelemetryStatus: "ok" \| "empty" \| "unavailable" \| "partial" \| "ambiguous" \| "stale"`)와 증거 출처(`EvidenceSource: "prometheus" \| "kubernetes" \| "mixed" \| "none"`)를 명시적으로 도입하고, 다중 시리즈 스칼라는 임의 선택 대신 모호성 에러(`ambiguous`)를 반환하게 했다. 노드 식별은 `metric.node`, `metric.nodename`, 정규화된 `instance` 및 포트 경계를 갖는 완전 일치 IP로 결정론화했으며, K8s fallback 사용 시 출처를 응답 메타데이터에 보존했다. 판별자: **"0(유효한 관측값)"과 "unknown/unavailable(측정 불가)"을 혼동하지 마라.** 텔레메트리 레이어에서 기본값 `0` 폴백은 장애를 정상 신호로 은폐한다. 메트릭 부재 시 nullable 필드와 상태 플래그를 보존하고, 다중 시리즈는 단일 스칼라로 자동 축약하지 않아야 한다 |
 
+### Evidence / Freshness Mistakes
+| Date | Mistake | Fix |
+|------|---------|-----|
+| 2026-09-18 | #27 스코어카드 규칙 평가기가 K8s/ArgoCD API 조회 실패(네트워크 오류, 5xx)를 `listK8sResources`/`getPodsForService`의 `catch { return 0 / [] }`로 삼켜서, "쿼리 성공 + 리소스 0개"(정당한 fail)와 "쿼리 자체 실패"(unavailable)가 구분 불가능했다 — #51 Prometheus와 같은 실패 유형("0/[]로 묵살")이지만 텔레메트리가 아니라 컴플라이언스 스코어카드 표면에서 재발했다 | `listK8sResources`/`getPodsForService`가 `{ ok: true, data } \| { ok: false, reason }`를 반환하도록 바꾸고, `CheckResult.status`에 `"pass" \| "fail" \| "unavailable"`을 도입해 규칙별로 `unavailable` 배열에 분리 기록(`failed`/`passed`에 섞지 않음). `ScorecardEvaluation.evaluationComplete`와 응답의 `servicesWithIncompleteEvidence`/`oldestEvaluationAt`으로 "필터링된 집계가 완전하고 신선한 값처럼 보이는" 문제도 같이 노출. 판별자: **같은 "0/[]로 묵살" 실수가 표면마다 다시 나타난다 — 외부 소스를 쿼리하는 모든 헬퍼의 `catch` 블록을 감사 대상으로 취급하라.** 빈 결과와 조회 실패를 같은 타입으로 반환하면 호출부가 구조적으로 구분할 방법이 없다 |
+
 ### Performance / Scale Mistakes
 | Date | Mistake | Fix |
 |------|---------|-----|

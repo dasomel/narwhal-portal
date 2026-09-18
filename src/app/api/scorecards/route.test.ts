@@ -43,7 +43,16 @@ const platformApp = fakeApp("platform-app", "platform", "platform-system")
 const frontendApp = fakeApp("frontend-app", "apps", "frontend-app")
 
 function fakeEval(serviceId: string, tier: ScorecardEvaluation["tier"] = "gold"): ScorecardEvaluation {
-  return { serviceId, score: 90, tier, passed: [], failed: [], evaluatedAt: "2026-01-01T00:00:00Z" }
+  return {
+    serviceId,
+    score: 90,
+    tier,
+    passed: [],
+    failed: [],
+    unavailable: [],
+    evaluatedAt: "2026-01-01T00:00:00Z",
+    evaluationComplete: true,
+  }
 }
 const rulesDoc: ScorecardRulesDoc = { version: 1, rules: [], tiers: { gold: 90, silver: 70, bronze: 50 } }
 
