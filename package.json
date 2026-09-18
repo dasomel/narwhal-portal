@@ -16,7 +16,8 @@
     "notices": "node scripts/generate-third-party-notices.mjs",
     "check:supply-chain": "node scripts/check-supply-chain-policy.mjs",
   "check:cooling": "node scripts/check-lockfile-cooling.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@auth/core": "^0.34.3",
