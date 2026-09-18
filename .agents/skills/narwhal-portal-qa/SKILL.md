@@ -6,7 +6,7 @@ compatibility: Requires the Narwhal Portal checkout and current project test/bui
 metadata:
   openforge-scope: project
   openforge-owner: dasomel/narwhal-portal
-  openforge-maturity: draft
+  openforge-maturity: verified
   openforge-version: "1"
 ---
 

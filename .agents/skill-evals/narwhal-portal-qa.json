@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "openforge-agent-skill-verification/v1",
+  "skill": "narwhal-portal-qa",
+  "skillVersion": "1",
+  "freshSession": true,
+  "agentRuntime": "claude-sonnet-5",
+  "happyPath": {
+    "status": "pass",
+    "summary": "Fresh-session replay (dasomel/openforge#54, 2026-09-17 pass 2) derived producer/consumer shapes and routing from current code rather than a stale hand-maintained table.",
+    "evidence": [
+      "openforge#54 2026-09-17 replay pass 2: skill activated on description alone; producer/consumer shape derivation exercised against current source"
+    ]
+  },
+  "edgeCase": {
+    "status": "pass",
+    "summary": "Injected an RBAC drift between nav.tsx and the corresponding API route. The repository's automated test suite passed in full (463/463) and did NOT catch the drift; only the skill's prescribed manual cross-check surfaced it -- this is the exact hazard class the skill exists to cover, and the replay's own required distinction between deterministic-check evidence and skill-workflow evidence held up.",
+    "evidence": [
+      "openforge#54 2026-09-17 replay pass 2: RBAC drift injected between nav.tsx and its API route -> vitest run reports 463/463 passed (drift NOT caught) -> skill's manual producer/consumer cross-check correctly flags the mismatch"
+    ]
+  },
+  "deterministicChecks": [
+    {
+      "command": "pnpm run typecheck",
+      "status": "pass"
+    },
+    {
+      "command": "pnpm run test",
+      "status": "pass"
+    }
+  ],
+  "unverified": [
+    "Live browser/auth/cluster-integration tier of QA verification still needs one further pass, per the prior replay's own caveat -- no browser or live cluster available in this pass either."
+  ],
+  "verifiedAt": "2026-09-18"
+}
