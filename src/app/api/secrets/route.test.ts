@@ -7,13 +7,13 @@ import { NextRequest } from "next/server"
 // failure indistinguishable from "no secrets exist". listSecrets() itself is
 // mocked here — its metadata-only fetch behavior is covered by openbao.test.ts —
 // so this stays a pure route-boundary test (auth gate, response shape, audit log).
-vi.mock("@/lib/auth", () => ({ auth: vi.fn(), getActorId: vi.fn(() => "actor@example.com") }))
+vi.mock("@/lib/auth", () => ({ requireRole: vi.fn(), getActorId: vi.fn(() => "actor@example.com") }))
 vi.mock("@/lib/openbao", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/openbao")>()
   return { ...actual, listSecrets: vi.fn() }
 })
 
-const { auth } = await import("@/lib/auth")
+const { requireRole } = await import("@/lib/auth")
 const { listSecrets, SecretMetadataError } = await import("@/lib/openbao")
 const { GET } = await import("./route")
 
@@ -30,20 +30,20 @@ beforeEach(() => {
 
 describe("GET /api/secrets", () => {
   it("returns 401 when unauthenticated", async () => {
-    vi.mocked(auth).mockResolvedValue(null as never)
+    vi.mocked(requireRole).mockResolvedValue({ error: "unauthorized" } as never)
     const res = await GET(request())
     expect(res.status).toBe(401)
   })
 
   it("returns 403 for a non-admin caller", async () => {
-    vi.mocked(auth).mockResolvedValue(viewerSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ error: "forbidden" } as never)
     const res = await GET(request())
     expect(res.status).toBe(403)
     expect(listSecrets).not.toHaveBeenCalled()
   })
 
   it("returns the metadata-only entries for a cluster-admin caller", async () => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     const entries = [{ path: "keycloak-token", version: 1, createdTime: "t", updatedTime: "t" }]
     vi.mocked(listSecrets).mockResolvedValue(entries)
 
@@ -54,7 +54,7 @@ describe("GET /api/secrets", () => {
   })
 
   it("logs an auditable actor+correlation record for the read", async () => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     vi.mocked(listSecrets).mockResolvedValue([])
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {})
 
@@ -66,7 +66,7 @@ describe("GET /api/secrets", () => {
   })
 
   it("fails explicitly degraded (502, degraded:true) instead of silently returning an empty list", async () => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     vi.mocked(listSecrets).mockRejectedValue(new SecretMetadataError("Failed to list secret metadata (HTTP 403)"))
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 

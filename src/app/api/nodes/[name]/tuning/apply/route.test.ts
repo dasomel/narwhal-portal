@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest"
 import { NextRequest } from "next/server"
 import type { NodeDetail } from "@/lib/k8s-client"
 
-vi.mock("@/lib/auth", () => ({ auth: vi.fn(), getActorId: vi.fn((s) => s.user.email ?? "unknown") }))
+vi.mock("@/lib/auth", () => ({ requireRole: vi.fn(), getActorId: vi.fn((s) => s.user.email ?? "unknown") }))
 vi.mock("@/lib/k8s-job-runner", () => ({ runHostJob: vi.fn() }))
 vi.mock("@/lib/k8s-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/k8s-client")>()
@@ -18,7 +18,7 @@ vi.mock("@/lib/tuning-approval", async (importOriginal) => {
   return { ...actual, consumeTuningApproval: vi.fn() }
 })
 
-const { auth } = await import("@/lib/auth")
+const { requireRole } = await import("@/lib/auth")
 const { runHostJob } = await import("@/lib/k8s-job-runner")
 const { getNodeDetail } = await import("@/lib/k8s-client")
 const { consumeTuningApproval } = await import("@/lib/tuning-approval")
@@ -85,14 +85,14 @@ beforeEach(() => {
 
 describe("POST /api/nodes/[name]/tuning/apply — auth boundary", () => {
   it("401s an unauthenticated session", async () => {
-    vi.mocked(auth).mockResolvedValue(null as never)
+    vi.mocked(requireRole).mockResolvedValue({ error: "unauthorized" } as never)
     const res = await POST(req({ items: [{ kind: "swap-off" }] }), ctx())
     expect(res.status).toBe(401)
     expect(runHostJob).not.toHaveBeenCalled()
   })
 
   it("403s a non-cluster-admin session", async () => {
-    vi.mocked(auth).mockResolvedValue(developerSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ error: "forbidden" } as never)
     const res = await POST(req({ items: [{ kind: "swap-off" }] }), ctx())
     expect(res.status).toBe(403)
     expect(runHostJob).not.toHaveBeenCalled()
@@ -101,7 +101,7 @@ describe("POST /api/nodes/[name]/tuning/apply — auth boundary", () => {
 
 describe("POST /api/nodes/[name]/tuning/apply — node targeting bypass", () => {
   it("403s when the target node carries the control-plane taint", async () => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     vi.mocked(getNodeDetail).mockResolvedValue(controlPlaneTaintNode)
     const res = await POST(req({ items: [{ kind: "swap-off" }] }), ctx())
     expect(res.status).toBe(403)
@@ -109,7 +109,7 @@ describe("POST /api/nodes/[name]/tuning/apply — node targeting bypass", () => 
   })
 
   it("403s when the target node carries the control-plane/master label", async () => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     vi.mocked(getNodeDetail).mockResolvedValue(controlPlaneLabelNode)
     const res = await POST(req({ items: [{ kind: "swap-off" }] }), ctx())
     expect(res.status).toBe(403)
@@ -119,7 +119,7 @@ describe("POST /api/nodes/[name]/tuning/apply — node targeting bypass", () => 
 
 describe("POST /api/nodes/[name]/tuning/apply — tampered payload", () => {
   beforeEach(() => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
   })
 
   it("400s an invalid kind even with smuggled fields", async () => {
@@ -166,7 +166,7 @@ describe("POST /api/nodes/[name]/tuning/apply — tampered payload", () => {
 
 describe("POST /api/nodes/[name]/tuning/apply — exact approval boundary", () => {
   beforeEach(() => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
   })
 
   it("400s a valid mutation without an approval envelope", async () => {
@@ -190,7 +190,7 @@ describe("POST /api/nodes/[name]/tuning/apply — exact approval boundary", () =
 
 describe("POST /api/nodes/[name]/tuning/apply — positive control", () => {
   it("200s and runs the job only after approval succeeds", async () => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     const res = await POST(req({ items: [{ kind: "swap-off" }] }), ctx("node-1"))
     expect(res.status).toBe(200)
     expect(consumeTuningApproval).toHaveBeenCalled()
@@ -209,7 +209,7 @@ describe("POST /api/nodes/[name]/tuning/apply — positive control", () => {
 
 describe("POST /api/nodes/[name]/tuning/apply — post-apply verification", () => {
   beforeEach(() => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
   })
 
   it("500s when the re-read host state does not match", async () => {
@@ -225,7 +225,7 @@ describe("POST /api/nodes/[name]/tuning/apply — post-apply verification", () =
 
 describe("POST /api/nodes/[name]/tuning/apply — dry run", () => {
   beforeEach(() => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
   })
 
   it("previews the planned script without running the job or requiring approval", async () => {
@@ -249,7 +249,7 @@ describe("POST /api/nodes/[name]/tuning/apply — dry run", () => {
   })
 
   it("still 403s a non-cluster-admin session under dry run", async () => {
-    vi.mocked(auth).mockResolvedValue(developerSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ error: "forbidden" } as never)
     const res = await POST(req({ items: [{ kind: "swap-off" }], dryRun: true }, "node-1", false), ctx())
     expect(res.status).toBe(403)
     expect(runHostJob).not.toHaveBeenCalled()
@@ -258,7 +258,7 @@ describe("POST /api/nodes/[name]/tuning/apply — dry run", () => {
 
 describe("POST /api/nodes/[name]/tuning/apply — job execution failure", () => {
   it("500s and preserves approval evidence when the job rejects", async () => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     vi.mocked(runHostJob).mockRejectedValue(new Error("job timeout"))
     const res = await POST(req({ items: [{ kind: "swap-off" }] }), ctx())
     expect(res.status).toBe(500)
