@@ -4,6 +4,8 @@ import {
   assertAppAccessible,
   ArgoForbiddenError,
   ArgoNotFoundError,
+  getArgoAppFresh,
+  isOperationConverged,
   syncArgoApp,
 } from "@/lib/argocd"
 import { assertK8sName, ValidationError, toValidationErrorBody } from "@/lib/validation"
@@ -58,6 +60,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
         err instanceof Error ? err.message : String(err),
       )
       throw err
+    }
+
+    // portal#59: the sync response above only means ArgoCD *accepted* the sync
+    // request, not that reconciliation finished. Re-read the app and check
+    // operationState.phase before claiming verified success.
+    const fresh = await getArgoAppFresh(name)
+    const converged = fresh !== null && isOperationConverged(fresh)
+    if (!converged) {
+      await completeOperation(
+        ctx,
+        `Catalog sync triggered (pending convergence): ${name}`,
+        `sync accepted; operationState.phase=${fresh?.status.operationState?.phase ?? "unknown"}`,
+      )
+      return NextResponse.json({
+        success: true,
+        pending: true,
+        message: `Sync triggered for ${name}; awaiting convergence`,
+        app: result,
+      })
     }
 
     await completeOperation(

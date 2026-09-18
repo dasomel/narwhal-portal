@@ -4,6 +4,8 @@ import {
   assertAppAccessible,
   ArgoForbiddenError,
   ArgoNotFoundError,
+  getArgoAppFresh,
+  isOperationConverged,
   rollbackArgoApp,
 } from "@/lib/argocd"
 import { assertK8sName, ValidationError, toValidationErrorBody } from "@/lib/validation"
@@ -74,6 +76,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
         `Rollback to #${idRaw} returned false`,
       )
       return NextResponse.json({ error: "Rollback failed" }, { status: 500 })
+    }
+
+    // portal#59: rollbackArgoApp only tells us ArgoCD accepted the rollback
+    // request (HTTP 2xx), not that reconciliation to the target revision
+    // finished. Re-read the app and check operationState.phase before
+    // claiming verified success.
+    const fresh = await getArgoAppFresh(name)
+    const converged = fresh !== null && isOperationConverged(fresh)
+    if (!converged) {
+      await completeOperation(
+        ctx,
+        `Catalog rollback triggered (pending convergence): ${name}`,
+        `rollback accepted; operationState.phase=${fresh?.status.operationState?.phase ?? "unknown"}`,
+      )
+      return NextResponse.json({
+        success: true,
+        pending: true,
+        message: `Rollback triggered for ${name} to #${idRaw}; awaiting convergence`,
+      })
     }
 
     await completeOperation(

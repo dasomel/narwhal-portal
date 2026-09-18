@@ -16,6 +16,7 @@ vi.mock("@/lib/argocd", async (importOriginal) => {
     ...actual,
     assertAppAccessible: vi.fn(),
     syncArgoApp: vi.fn(),
+    getArgoAppFresh: vi.fn(),
   }
 })
 vi.mock("@/lib/valkey", () => ({
@@ -28,7 +29,7 @@ vi.mock("@/lib/valkey", () => ({
 }))
 
 const { auth } = await import("@/lib/auth")
-const { assertAppAccessible, syncArgoApp } = await import("@/lib/argocd")
+const { assertAppAccessible, syncArgoApp, getArgoAppFresh } = await import("@/lib/argocd")
 const { POST } = await import("./route")
 const { getRecentEvents } = await import("@/lib/live-stream")
 
@@ -52,6 +53,15 @@ const mockApp: ArgoApp = {
   status: { sync: { status: "Synced" }, health: { status: "Healthy" } },
 }
 
+const convergedApp: ArgoApp = {
+  ...mockApp,
+  status: {
+    sync: { status: "Synced" },
+    health: { status: "Healthy" },
+    operationState: { phase: "Succeeded" },
+  },
+}
+
 function params(name: string) {
   return { params: Promise.resolve({ name }) }
 }
@@ -61,6 +71,7 @@ describe("POST /api/catalog/[name]/sync", () => {
     vi.mocked(auth).mockResolvedValue(devSession as never)
     vi.mocked(assertAppAccessible).mockResolvedValue(mockApp)
     vi.mocked(syncArgoApp).mockResolvedValue({ name: "checkout-api", syncStatus: "Synced", revision: "rev-100" })
+    vi.mocked(getArgoAppFresh).mockResolvedValue(convergedApp)
   })
 
   it("401s an unauthenticated request", async () => {
@@ -107,5 +118,15 @@ describe("POST /api/catalog/[name]/sync", () => {
       name: "checkout-api",
       cluster: "primary",
     })
+  })
+
+  it("reports pending when the sync is accepted but not yet converged", async () => {
+    vi.mocked(getArgoAppFresh).mockResolvedValue(mockApp) // no operationState -> not converged
+    const req = new Request("http://localhost/api/catalog/checkout-api/sync", { method: "POST" })
+    const res = await POST(req, params("checkout-api"))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.success).toBe(true)
+    expect(body.pending).toBe(true)
   })
 })

@@ -1,4 +1,4 @@
-import { cacheGet, cacheSet } from "./valkey"
+import { cacheDel, cacheGet, cacheSet } from "./valkey"
 import { getUserScope, type OwnershipMismatch } from "./role-filter"
 import { getEffectiveScope, namespaceVisible } from "./scope"
 import { getDependencyUrl } from "./config"
@@ -149,6 +149,27 @@ export interface SyncResult {
   name: string
   syncStatus: string
   revision: string | null
+}
+
+/**
+ * portal#59: the ArgoCD sync/rollback POST response reflects the moment the
+ * operation was *accepted*, not that it *converged* -- ArgoCD reconciles
+ * asynchronously and status.operationState.phase only reaches a terminal
+ * value once the operation actually finishes. Callers must re-read the app
+ * (bypassing the cache populated by earlier GETs) and check this before
+ * reporting verified success.
+ */
+export function isOperationConverged(app: ArgoApp): boolean {
+  const phase = app.status.operationState?.phase
+  if (phase === "Succeeded") return app.status.sync.status === "Synced"
+  return false
+}
+
+/** Re-reads an app's live status, bypassing any cached copy from before the mutation. */
+export async function getArgoAppFresh(name: string): Promise<ArgoApp | null> {
+  const cacheKey = `argocd:app:${name}`
+  await cacheDel(cacheKey)
+  return getArgoApp(name)
 }
 
 export async function syncArgoApp(name: string): Promise<SyncResult> {
