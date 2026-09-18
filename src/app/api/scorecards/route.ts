@@ -10,7 +10,16 @@ export const dynamic = "force-dynamic"
 export interface ScorecardListResponse {
   evaluatedAt: string
   rulesVersion: number
+  // portal#27: `evaluatedAt` is when this response was assembled, not when the
+  // underlying (cached, up to 5min old) per-service evaluations actually ran —
+  // exposing the oldest evaluation timestamp in the returned set lets callers
+  // tell a fresh-looking response from one built on stale evaluation data.
+  oldestEvaluationAt: string | null
   totalServices: number
+  // Count of services in the returned set with at least one rule whose source
+  // (ArgoCD/K8s) could not be queried, so the score/tier for that service is
+  // incomplete rather than a clean pass/fail signal.
+  servicesWithIncompleteEvidence: number
   tierCounts: { gold: number; silver: number; bronze: number; none: number }
   services: Array<{
     id: string
@@ -20,6 +29,8 @@ export interface ScorecardListResponse {
     score: number
     tier: "gold" | "silver" | "bronze" | "none"
     failedRuleIds: string[]
+    unavailableRuleIds: string[]
+    evaluationComplete: boolean
   }>
 }
 
@@ -94,13 +105,21 @@ export async function GET(req: NextRequest) {
         score: e.score,
         tier: e.tier,
         failedRuleIds: e.failed.map((f) => f.ruleId),
+        unavailableRuleIds: e.unavailable.map((u) => u.ruleId),
+        evaluationComplete: e.evaluationComplete,
       }
     })
+
+    const oldestEvaluationAt = filteredEvals.length
+      ? filteredEvals.reduce((oldest, e) => (e.evaluatedAt < oldest ? e.evaluatedAt : oldest), filteredEvals[0].evaluatedAt)
+      : null
 
     const response: ScorecardListResponse = {
       evaluatedAt: new Date().toISOString(),
       rulesVersion,
+      oldestEvaluationAt,
       totalServices: services.length,
+      servicesWithIncompleteEvidence: services.filter((s) => !s.evaluationComplete).length,
       tierCounts,
       services,
     }

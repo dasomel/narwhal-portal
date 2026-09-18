@@ -12,12 +12,13 @@ export interface ScorecardDetailResponse {
   score: number
   tier: "gold" | "silver" | "bronze" | "none"
   evaluatedAt: string
+  evaluationComplete: boolean
   rules: Array<{
     id: string
     name: string
     description: string
     weight: number
-    status: "pass" | "fail"
+    status: "pass" | "fail" | "unavailable"
     failReason?: string
     actionUrl?: string
   }>
@@ -82,13 +83,20 @@ export async function GET(
 
     const passedIds = new Set(evaluation.passed.map((p) => p.ruleId))
     const failedMap = new Map(evaluation.failed.map((f) => [f.ruleId, f.reason]))
+    const unavailableMap = new Map(evaluation.unavailable.map((u) => [u.ruleId, u.reason]))
 
     const rules = rulesDoc.rules.map((rule) => {
       const pass = passedIds.has(rule.id)
+      const unavailableReason = unavailableMap.get(rule.id)
       const failReason = failedMap.get(rule.id)
+      const status: "pass" | "fail" | "unavailable" = pass
+        ? "pass"
+        : unavailableReason !== undefined
+          ? "unavailable"
+          : "fail"
 
       let actionUrl: string | undefined
-      if (!pass) {
+      if (status === "fail") {
         const check = rule.check
         if (check.type === "argocd-status" || check.type === "argocd-history") {
           actionUrl = `${argocdUrl}/applications/${svc}`
@@ -102,8 +110,9 @@ export async function GET(
         name: rule.name,
         description: ruleMap.get(rule.id)?.name ?? rule.id,
         weight: rule.weight,
-        status: (pass ? "pass" : "fail") as "pass" | "fail",
+        status,
         ...(failReason ? { failReason } : {}),
+        ...(unavailableReason ? { failReason: unavailableReason } : {}),
         ...(actionUrl ? { actionUrl } : {}),
       }
     })
@@ -118,6 +127,7 @@ export async function GET(
       score: evaluation.score,
       tier: evaluation.tier,
       evaluatedAt: evaluation.evaluatedAt,
+      evaluationComplete: evaluation.evaluationComplete,
       rules,
     }
 

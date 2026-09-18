@@ -41,7 +41,15 @@ export interface ScorecardEvaluation {
   tier: ScoreTier
   passed: { ruleId: string; weight: number }[]
   failed: { ruleId: string; weight: number; reason: string }[]
+  // D1: a rule whose required source (ArgoCD/K8s API) could not be queried is
+  // reported here, never silently folded into `failed` or `passed` — the issue
+  // is missing evidence, not a known-bad or known-good state. Excluded from
+  // `score`'s denominator-equivalent (only passed weight counts either way),
+  // but callers must check `evaluationComplete` before treating `score`/`tier`
+  // as a trustworthy compliance signal.
+  unavailable: { ruleId: string; weight: number; reason: string }[]
   evaluatedAt: string
+  evaluationComplete: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -128,35 +136,45 @@ interface K8sPodList {
   }>
 }
 
-async function listK8sResources(namespace: string, kind: string): Promise<number> {
+// D2: a K8s/ArgoCD query failure (network error, 5xx, auth) must be
+// distinguishable from a query that succeeded and legitimately found zero
+// resources/pods — collapsing both to "0"/"[]" is exactly the "silently
+// convert missing evidence to failure" bug the issue describes. `kind` not
+// being in kindMap is a config gap, not a source failure, so it stays "ok: 0".
+type SourceResult<T> = { ok: true; data: T } | { ok: false; reason: string }
+
+async function listK8sResources(namespace: string, kind: string): Promise<SourceResult<number>> {
+  const kindMap: Record<string, string> = {
+    PodDisruptionBudget: `/apis/policy/v1/namespaces/${namespace}/poddisruptionbudgets`,
+    NetworkPolicy: `/apis/networking.k8s.io/v1/namespaces/${namespace}/networkpolicies`,
+    HorizontalPodAutoscaler: `/apis/autoscaling/v2/namespaces/${namespace}/horizontalpodautoscalers`,
+  }
+  const path = kindMap[kind]
+  if (!path) return { ok: true, data: 0 }
   try {
-    const kindMap: Record<string, string> = {
-      PodDisruptionBudget: `/apis/policy/v1/namespaces/${namespace}/poddisruptionbudgets`,
-      NetworkPolicy: `/apis/networking.k8s.io/v1/namespaces/${namespace}/networkpolicies`,
-      HorizontalPodAutoscaler: `/apis/autoscaling/v2/namespaces/${namespace}/horizontalpodautoscalers`,
-    }
-    const path = kindMap[kind]
-    if (!path) return 0
     const list = await k8sGet<K8sResourceList>(path)
-    return list.items?.length ?? 0
-  } catch {
-    return 0
+    return { ok: true, data: list.items?.length ?? 0 }
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message ?? "K8s query failed" }
   }
 }
 
-async function getPodsForService(namespace: string, appName: string): Promise<K8sPodList["items"]> {
+async function getPodsForService(
+  namespace: string,
+  appName: string,
+): Promise<SourceResult<K8sPodList["items"]>> {
   try {
     const list = await k8sGet<K8sPodList>(
       `/api/v1/namespaces/${namespace}/pods?labelSelector=app.kubernetes.io%2Finstance%3D${encodeURIComponent(appName)}`,
     )
-    if (list.items?.length > 0) return list.items
+    if (list.items?.length > 0) return { ok: true, data: list.items }
     // fallback: app.kubernetes.io/name
     const list2 = await k8sGet<K8sPodList>(
       `/api/v1/namespaces/${namespace}/pods?labelSelector=app.kubernetes.io%2Fname%3D${encodeURIComponent(appName)}`,
     )
-    return list2.items ?? []
-  } catch {
-    return []
+    return { ok: true, data: list2.items ?? [] }
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message ?? "K8s query failed" }
   }
 }
 
@@ -165,7 +183,7 @@ async function getPodsForService(namespace: string, appName: string): Promise<K8
 // ---------------------------------------------------------------------------
 
 interface CheckResult {
-  pass: boolean
+  status: "pass" | "fail" | "unavailable"
   reason: string
 }
 
@@ -176,7 +194,7 @@ function evalAnnotation(
   const val = annotations[check.key]
   const pass = check.present ? !!val && val.trim() !== "" : !val || val.trim() === ""
   return {
-    pass,
+    status: pass ? "pass" : "fail",
     reason: pass
       ? ""
       : check.present
@@ -189,11 +207,14 @@ async function evalK8sResource(
   check: Extract<ScorecardCheck, { type: "k8s-resource" }>,
   namespace: string,
 ): Promise<CheckResult> {
-  const count = await listK8sResources(namespace, check.kind)
-  const pass = count >= check.minCount
+  const result = await listK8sResources(namespace, check.kind)
+  if (!result.ok) {
+    return { status: "unavailable", reason: `Could not query ${check.kind}: ${result.reason}` }
+  }
+  const pass = result.data >= check.minCount
   return {
-    pass,
-    reason: pass ? "" : `Found ${count} ${check.kind}(s), need at least ${check.minCount}`,
+    status: pass ? "pass" : "fail",
+    reason: pass ? "" : `Found ${result.data} ${check.kind}(s), need at least ${check.minCount}`,
   }
 }
 
@@ -202,15 +223,19 @@ async function evalPodSpec(
   namespace: string,
   appName: string,
 ): Promise<CheckResult> {
-  const pods = await getPodsForService(namespace, appName)
+  const result = await getPodsForService(namespace, appName)
+  if (!result.ok) {
+    return { status: "unavailable", reason: `Could not query pods: ${result.reason}` }
+  }
+  const pods = result.data
   if (pods.length === 0) {
-    return { pass: false, reason: "No pods found for service" }
+    return { status: "fail", reason: "No pods found for service" }
   }
 
   // Support specific jsonPath patterns we need
   const allContainers = pods.flatMap((p) => p.spec.containers ?? [])
   if (allContainers.length === 0) {
-    return { pass: false, reason: "No containers found" }
+    return { status: "fail", reason: "No containers found" }
   }
 
   let pass = false
@@ -228,17 +253,21 @@ async function evalPodSpec(
   }
 
   if (check.required && !pass) {
-    return { pass: false, reason: `pod-spec check '${check.jsonPath}' not satisfied for all containers` }
+    return { status: "fail", reason: `pod-spec check '${check.jsonPath}' not satisfied for all containers` }
   }
-  return { pass: check.required ? pass : true, reason: "" }
+  return { status: check.required ? (pass ? "pass" : "fail") : "pass", reason: "" }
 }
 
 function evalImageSource(
   check: Extract<ScorecardCheck, { type: "image-source" }>,
-  pods: K8sPodList["items"],
+  podsResult: SourceResult<K8sPodList["items"]>,
 ): CheckResult {
+  if (!podsResult.ok) {
+    return { status: "unavailable", reason: `Could not query pods: ${podsResult.reason}` }
+  }
+  const pods = podsResult.data
   if (pods.length === 0) {
-    return { pass: false, reason: "No pods found — cannot verify image source" }
+    return { status: "fail", reason: "No pods found — cannot verify image source" }
   }
   const allContainers = pods.flatMap((p) => p.spec.containers ?? [])
   const badImages = allContainers
@@ -246,11 +275,11 @@ function evalImageSource(
     .filter((img) => !check.allowedPrefixes.some((prefix) => img.startsWith(prefix)))
   if (badImages.length > 0) {
     return {
-      pass: false,
+      status: "fail",
       reason: `Non-trusted images: ${badImages.slice(0, 3).join(", ")}`,
     }
   }
-  return { pass: true, reason: "" }
+  return { status: "pass", reason: "" }
 }
 
 function evalArgoCDStatus(
@@ -264,7 +293,7 @@ function evalArgoCDStatus(
   const reasons: string[] = []
   if (!syncOk) reasons.push(`sync=${syncStatus}`)
   if (!healthOk) reasons.push(`health=${healthStatus}`)
-  return { pass, reason: pass ? "" : `ArgoCD not ready: ${reasons.join(", ")}` }
+  return { status: pass ? "pass" : "fail", reason: pass ? "" : `ArgoCD not ready: ${reasons.join(", ")}` }
 }
 
 function evalArgoCDHistory(
@@ -272,14 +301,14 @@ function evalArgoCDHistory(
   history: Array<{ deployedAt: string }>,
 ): CheckResult {
   if (!history || history.length === 0) {
-    return { pass: false, reason: "No deployment history found" }
+    return { status: "fail", reason: "No deployment history found" }
   }
   const lastDeploy = history[history.length - 1]
   const daysSince =
     (Date.now() - new Date(lastDeploy.deployedAt).getTime()) / (1000 * 60 * 60 * 24)
   const pass = daysSince <= check.maxDaysSinceLastSync
   return {
-    pass,
+    status: pass ? "pass" : "fail",
     reason: pass
       ? ""
       : `Last deploy was ${Math.floor(daysSince)} days ago (max ${check.maxDaysSinceLastSync})`,
@@ -309,10 +338,11 @@ export async function evaluateService(serviceId: string): Promise<ScorecardEvalu
   const history = app.status.history ?? []
 
   // Pre-fetch pods once for image-source + pod-spec checks
-  const pods = await getPodsForService(namespace, serviceId)
+  const podsResult = await getPodsForService(namespace, serviceId)
 
   const passed: ScorecardEvaluation["passed"] = []
   const failed: ScorecardEvaluation["failed"] = []
+  const unavailable: ScorecardEvaluation["unavailable"] = []
 
   for (const rule of rules.rules) {
     let result: CheckResult
@@ -329,7 +359,7 @@ export async function evaluateService(serviceId: string): Promise<ScorecardEvalu
         result = await evalPodSpec(check, namespace, serviceId)
         break
       case "image-source":
-        result = evalImageSource(check, pods)
+        result = evalImageSource(check, podsResult)
         break
       case "argocd-status":
         result = evalArgoCDStatus(check, syncStatus, healthStatus)
@@ -338,11 +368,13 @@ export async function evaluateService(serviceId: string): Promise<ScorecardEvalu
         result = evalArgoCDHistory(check, history)
         break
       default:
-        result = { pass: false, reason: "Unknown check type" }
+        result = { status: "fail", reason: "Unknown check type" }
     }
 
-    if (result.pass) {
+    if (result.status === "pass") {
       passed.push({ ruleId: rule.id, weight: rule.weight })
+    } else if (result.status === "unavailable") {
+      unavailable.push({ ruleId: rule.id, weight: rule.weight, reason: result.reason })
     } else {
       failed.push({ ruleId: rule.id, weight: rule.weight, reason: result.reason })
     }
@@ -362,7 +394,9 @@ export async function evaluateService(serviceId: string): Promise<ScorecardEvalu
     tier,
     passed,
     failed,
+    unavailable,
     evaluatedAt: new Date().toISOString(),
+    evaluationComplete: unavailable.length === 0,
   }
 
   await cacheSet(cacheKey, evaluation, 300) // 5 min
