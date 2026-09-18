@@ -196,6 +196,10 @@ export interface KeycloakGroupDetailed {
   users: string[]
   attributes: Record<string, unknown>
   roles_obj: Array<{ pk: string; name: string }>
+  // Portal #49: true when the per-group members request failed and `users`
+  // is a best-effort empty/incomplete list, not a verified membership of
+  // zero. Callers must not treat a partial group as authoritative.
+  membersPartial: boolean
 }
 
 function mapUser(raw: Record<string, unknown>): KeycloakUser {
@@ -282,12 +286,19 @@ export async function getGroupsDetailed(): Promise<KeycloakGroupDetailed[]> {
 
   const BATCH_SIZE = 10
   const detailed: KeycloakGroupDetailed[] = []
+  // Portal #49: a failed per-group members fetch used to be swallowed into an
+  // empty `members` array indistinguishable from a genuinely empty group,
+  // silently presenting partial data as a complete inventory. Track it here
+  // so the aggregate result is never cached (and callers can see which
+  // groups are incomplete) instead of caching a wrong snapshot for 60s.
+  let anyPartial = false
 
   for (let i = 0; i < groupList.length; i += BATCH_SIZE) {
     const batch = groupList.slice(i, i + BATCH_SIZE)
     const batchResults = await Promise.all(
       batch.map(async (g) => {
         let members: Array<{ id: string }> = []
+        let membersPartial = false
         try {
           members = await fetchAllPages<{ id: string }>(
             `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${g.id}/members`,
@@ -296,6 +307,7 @@ export async function getGroupsDetailed(): Promise<KeycloakGroupDetailed[]> {
           )
         } catch {
           members = []
+          membersPartial = true
         }
         const rawAttrs = g.attributes ?? {}
         const attributes: Record<string, unknown> = {}
@@ -310,6 +322,7 @@ export async function getGroupsDetailed(): Promise<KeycloakGroupDetailed[]> {
             attributes[k] = v
           }
         }
+        if (membersPartial) anyPartial = true
         return {
           pk: g.id,
           name: g.name,
@@ -320,13 +333,19 @@ export async function getGroupsDetailed(): Promise<KeycloakGroupDetailed[]> {
           users: members.map((m) => m.id),
           attributes,
           roles_obj: [],
+          membersPartial,
         }
       })
     )
     detailed.push(...batchResults)
   }
 
-  await cacheSet("keycloak:groups-detailed", detailed, 60)
+  // Never cache a partial inventory as if it were complete — the next
+  // caller re-fetches instead of being served a snapshot with silently
+  // dropped memberships for up to the 60s TTL.
+  if (!anyPartial) {
+    await cacheSet("keycloak:groups-detailed", detailed, 60)
+  }
   return detailed
 }
 

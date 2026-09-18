@@ -244,7 +244,32 @@ describe("keycloak-client pagination and methods", () => {
     expect(detailed[0].users).toEqual(["user-for-0"])
     expect(detailed[11].users).toEqual(["user-for-11"])
     expect(detailed[0].attributes).toEqual({ role: "role-0" })
+    expect(detailed.every((g) => g.membersPartial === false)).toBe(true)
     expect(cacheSet).toHaveBeenCalledWith("keycloak:groups-detailed", detailed, 60)
+  })
+
+  it("marks a group partial and skips caching when its members request fails, instead of silently reporting zero members", async () => {
+    const groupList = [
+      { id: "grp-ok", name: "Group OK", attributes: {} },
+      { id: "grp-fail", name: "Group Fail", attributes: {} },
+    ]
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => groupList })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "user-ok" }] })
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+
+    const detailed = await getGroupsDetailed()
+
+    const ok = detailed.find((g) => g.pk === "grp-ok")
+    const failed = detailed.find((g) => g.pk === "grp-fail")
+
+    expect(ok?.membersPartial).toBe(false)
+    expect(ok?.users).toEqual(["user-ok"])
+    expect(failed?.membersPartial).toBe(true)
+    expect(failed?.users).toEqual([])
+    // A partial inventory must never be cached as if it were complete.
+    expect(cacheSet).not.toHaveBeenCalledWith("keycloak:groups-detailed", expect.anything(), expect.anything())
   })
 
   it("createUser creates a user and invalidates keycloak:users cache", async () => {
