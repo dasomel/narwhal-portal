@@ -65,6 +65,8 @@ export interface ArgoCDSyncRequest {
 export interface ArgoCDSyncResponse {
   ok: boolean
   app?: { name: string; syncStatus: string; revision: string | null }
+  /** portal#59: true when the sync was accepted but not yet observed to converge (operationState.phase != Succeeded). */
+  pending?: boolean
   error?: string
 }
 

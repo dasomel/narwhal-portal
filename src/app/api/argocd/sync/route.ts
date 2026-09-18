@@ -4,6 +4,8 @@ import {
   assertAppAccessible,
   ArgoForbiddenError,
   ArgoNotFoundError,
+  getArgoAppFresh,
+  getOperationOutcome,
   syncArgoApp,
 } from "@/lib/argocd"
 import { cacheDel } from "@/lib/valkey"
@@ -78,11 +80,6 @@ export async function POST(
       )
       throw err
     }
-    await completeOperation(
-      ctx,
-      `ArgoCD sync completed: ${trimmed}`,
-      `Synced to revision ${result.revision ?? "unknown"}`,
-    )
 
     // Invalidate app-list cache so next GET fetches fresh state
     try {
@@ -91,6 +88,31 @@ export async function POST(
     } catch {
       // cache invalidation failure is non-fatal
     }
+
+    // portal#59: the sync response above only means ArgoCD *accepted* the sync
+    // request, not that reconciliation finished. Re-read the app and check
+    // operationState.phase before claiming verified success.
+    const fresh = await getArgoAppFresh(trimmed)
+    const outcome = fresh === null ? "pending" : getOperationOutcome(fresh)
+    if (outcome === "failed") {
+      const message = `sync failed; operationState.phase=${fresh?.status.operationState?.phase ?? "unknown"}`
+      await failOperation(ctx, `ArgoCD sync failed: ${trimmed}`, message)
+      return NextResponse.json({ ok: false, app: result, error: message }, { status: 502 })
+    }
+    if (outcome === "pending") {
+      await completeOperation(
+        ctx,
+        `ArgoCD sync triggered (pending convergence): ${trimmed}`,
+        `sync accepted; operationState.phase=${fresh?.status.operationState?.phase ?? "unknown"}`,
+      )
+      return NextResponse.json({ ok: true, app: result, pending: true })
+    }
+
+    await completeOperation(
+      ctx,
+      `ArgoCD sync completed: ${trimmed}`,
+      `Synced to revision ${result.revision ?? "unknown"}`,
+    )
 
     return NextResponse.json({ ok: true, app: result })
   } catch (err) {
