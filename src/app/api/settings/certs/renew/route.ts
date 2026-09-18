@@ -74,6 +74,14 @@ export async function POST(req: Request) {
             { status: 400 },
           )
         }
+        // portal#35 review: a matching pending claim means an earlier request with
+        // this same key is still in flight -- falling through here would trigger a
+        // second real renewal (no natural collision guard, unlike user creation's
+        // Keycloak username uniqueness). Reject as in-progress instead.
+        return NextResponse.json(
+          { error: "Conflict", message: "A renewal with this Idempotency-Key is already in progress", field: "Idempotency-Key" },
+          { status: 409 },
+        )
       } else {
         return NextResponse.json({ success: true, message: claimed, duplicate: true })
       }

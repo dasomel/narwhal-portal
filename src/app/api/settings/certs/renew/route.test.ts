@@ -165,4 +165,30 @@ describe("POST /api/settings/certs/renew — idempotency", () => {
     expect((await second.json()).duplicate).toBe(true)
     expect(renewCertificate).toHaveBeenCalledTimes(1)
   })
+
+  it("rejects a concurrent request sharing an in-flight Idempotency-Key instead of re-renewing", async () => {
+    let releaseFirst!: () => void
+    const gate = new Promise<boolean>((resolve) => {
+      releaseFirst = () => resolve(true)
+    })
+    vi.mocked(renewCertificate).mockReturnValueOnce(gate)
+
+    const firstPromise = POST(
+      req({ name: "narwhal-tls", namespace: "platform-system" }, { "Idempotency-Key": "concurrent-1" }),
+    )
+    // Let the first request's claim-then-await land before the second fires.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const second = await POST(
+      req({ name: "narwhal-tls", namespace: "platform-system" }, { "Idempotency-Key": "concurrent-1" }),
+    )
+    expect(second.status).toBe(409)
+    expect((await second.json()).error).toBe("Conflict")
+
+    releaseFirst()
+    const first = await firstPromise
+    expect(first.status).toBe(200)
+    expect(renewCertificate).toHaveBeenCalledTimes(1)
+  })
 })

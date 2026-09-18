@@ -91,6 +91,14 @@ export async function POST(req: NextRequest) {
         if (claimed.slice("pending:".length) !== fingerprint) {
           return validationError("Idempotency-Key reused with a different request body", "Idempotency-Key")
         }
+        // portal#35 review: a matching pending claim means an earlier request with
+        // this same key is still in flight -- falling through would call
+        // createUser() a second time. Keycloak's username uniqueness contains most
+        // damage, but reject explicitly rather than relying on that as the guard.
+        return NextResponse.json(
+          { error: "Conflict", message: "A user creation with this Idempotency-Key is already in progress", field: "Idempotency-Key" },
+          { status: 409 },
+        )
       } else {
         return NextResponse.json({ ...JSON.parse(claimed), duplicate: true }, { status: 201 })
       }
