@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest"
 import type { Certificate } from "@/lib/k8s-client"
 
 vi.mock("@/lib/auth", () => ({
-  auth: vi.fn(),
+  requireRole: vi.fn(),
   getActorId: vi.fn((s) => s.user.email ?? "unknown"),
 }))
 vi.mock("@/lib/k8s-client", () => ({
@@ -16,7 +16,7 @@ vi.mock("@/lib/operation-context", () => ({
   failOperation: vi.fn().mockResolvedValue(undefined),
 }))
 
-const { auth } = await import("@/lib/auth")
+const { requireRole } = await import("@/lib/auth")
 const { getCertificate, invalidateCertificatesCache, renewCertificate } = await import("@/lib/k8s-client")
 const { beginOperation, completeOperation, failOperation } = await import("@/lib/operation-context")
 const { POST } = await import("./route")
@@ -51,14 +51,14 @@ beforeEach(() => {
 
 describe("POST /api/settings/certs/renew — auth boundary", () => {
   it("401s an unauthenticated session", async () => {
-    vi.mocked(auth).mockResolvedValue(null as never)
+    vi.mocked(requireRole).mockResolvedValue({ error: "unauthorized" } as never)
     const res = await POST(req({ name: "narwhal-tls", namespace: "platform-system" }))
     expect(res.status).toBe(401)
     expect(renewCertificate).not.toHaveBeenCalled()
   })
 
   it("403s a non-cluster-admin session", async () => {
-    vi.mocked(auth).mockResolvedValue(developerSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ error: "forbidden" } as never)
     const res = await POST(req({ name: "narwhal-tls", namespace: "platform-system" }))
     expect(res.status).toBe(403)
     expect(renewCertificate).not.toHaveBeenCalled()
@@ -67,7 +67,7 @@ describe("POST /api/settings/certs/renew — auth boundary", () => {
 
 describe("POST /api/settings/certs/renew — invalid target", () => {
   beforeEach(() => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
   })
 
   it("400s a missing name", async () => {
@@ -93,7 +93,7 @@ describe("POST /api/settings/certs/renew — invalid target", () => {
 
 describe("POST /api/settings/certs/renew — failed renewal", () => {
   beforeEach(() => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
   })
 
   it("500s and emits operation.failed when renewCertificate returns false", async () => {
@@ -107,7 +107,7 @@ describe("POST /api/settings/certs/renew — failed renewal", () => {
 
 describe("POST /api/settings/certs/renew — cache invalidation and audit/event emission", () => {
   beforeEach(() => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
   })
 
   it("invalidates the certs cache and emits operation.started/completed on a converged renewal", async () => {
@@ -145,7 +145,7 @@ describe("POST /api/settings/certs/renew — cache invalidation and audit/event 
 
 describe("POST /api/settings/certs/renew — idempotency", () => {
   beforeEach(() => {
-    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     vi.mocked(getCertificate)
       .mockResolvedValueOnce(cert)
       .mockResolvedValueOnce({ ...cert, renewalTime: "2026-06-01T00:00:00.000Z" })

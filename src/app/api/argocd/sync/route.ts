@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/lib/auth"
+import { requireRole } from "@/lib/auth"
 import {
   assertAppAccessible,
   ArgoForbiddenError,
@@ -13,18 +13,17 @@ import type { ArgoCDSyncRequest, ArgoCDSyncResponse } from "@/types/api"
 
 export const dynamic = "force-dynamic"
 
-const ALLOWED_ROLES = new Set(["cluster-admin", "developer"])
-
 export async function POST(
   req: NextRequest,
 ): Promise<NextResponse<ArgoCDSyncResponse>> {
-  const session = await auth()
-  if (!session) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
+  const gate = await requireRole("cluster-admin", "developer")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { ok: false, error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
   }
-  if (!ALLOWED_ROLES.has(session.user.role ?? "")) {
-    return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 })
-  }
+  const { session } = gate
 
   let body: Partial<ArgoCDSyncRequest>
   try {

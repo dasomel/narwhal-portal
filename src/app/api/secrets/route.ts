@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server"
-import { auth, getActorId } from "@/lib/auth"
+import { requireRole, getActorId } from "@/lib/auth"
 import { listSecrets, SecretMetadataError } from "@/lib/openbao"
 
 export const dynamic = "force-dynamic"
 
 export async function GET(req: Request) {
-  const session = await auth()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  if (session.user.role !== "cluster-admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  const gate = await requireRole("cluster-admin")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
   }
+  const { session } = gate
 
   // portal#11/portal#19: read access to the secret inventory is auditable —
   // actor + inbound correlation id, logged structurally. This intentionally does

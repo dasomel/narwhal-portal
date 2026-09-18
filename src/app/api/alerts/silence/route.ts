@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/lib/auth"
+import { requireRole } from "@/lib/auth"
 import { createSilence, deleteSilence, getSilence } from "@/lib/alertmanager"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 import { claimIdempotencyKey, fulfillIdempotencyKey, getIdempotencyStore } from "@/lib/idempotency"
@@ -42,11 +42,14 @@ function validateMatchers(input: unknown): SilenceMatcher[] | null {
 }
 
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  if (session.user.role !== "cluster-admin" && session.user.role !== "developer") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  const gate = await requireRole("cluster-admin", "developer")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
   }
+  const { session } = gate
 
   const body = await req.json().catch(() => null)
   if (!body || typeof body !== "object") {
@@ -147,11 +150,14 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const session = await auth()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  if (session.user.role !== "cluster-admin" && session.user.role !== "developer") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  const gate = await requireRole("cluster-admin", "developer")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
   }
+  const { session } = gate
 
   const { searchParams } = new URL(req.url)
   const silenceId = searchParams.get("id")

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/lib/auth"
+import { requireRole } from "@/lib/auth"
 import {
   assertAppAccessible,
   ArgoForbiddenError,
@@ -12,11 +12,14 @@ import { beginOperation, completeOperation, failOperation } from "@/lib/operatio
 export const dynamic = "force-dynamic"
 
 export async function POST(req: Request, { params }: { params: Promise<{ name: string }> }) {
-  const session = await auth()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  if (session.user.role !== "cluster-admin" && session.user.role !== "developer") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  const gate = await requireRole("cluster-admin", "developer")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
   }
+  const { session } = gate
 
   const { name } = await params
   try {
