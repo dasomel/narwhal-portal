@@ -132,8 +132,9 @@ export function DoraMetricsWidget() {
       ? "warning"
       : "danger"
 
-  // Failure Rate: Elite/High/Medium <= 15%
-  const failStatus = data.changeFailureRate <= 15 ? "success" : "danger"
+  // Failure Rate: Elite/High/Medium <= 15%; null = no known-outcome evidence
+  const failStatus =
+    data.changeFailureRate === null ? "normal" : data.changeFailureRate <= 15 ? "success" : "danger"
 
   // MTTR: Elite/High <= 60 minutes
   const mttrStatus =
@@ -172,8 +173,8 @@ export function DoraMetricsWidget() {
         />
         <StatCard
           title={t("dora.failureRate")}
-          value={`${data.changeFailureRate.toFixed(1)}`}
-          unit="%"
+          value={data.changeFailureRate !== null ? data.changeFailureRate.toFixed(1) : "—"}
+          unit={data.changeFailureRate !== null ? "%" : ""}
           desc={t("dora.failureRateDesc")}
           status={failStatus}
         />
@@ -290,7 +291,9 @@ export function DoraMetricsWidget() {
                             className={`text-[10px] font-semibold px-2 py-0.5 ${
                               deploy.status === "Succeeded"
                                 ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/45 dark:text-emerald-400 dark:border-emerald-800/40"
-                                : "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/45 dark:text-rose-400 dark:border-rose-800/40"
+                                : deploy.status === "Failed"
+                                ? "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/45 dark:text-rose-400 dark:border-rose-800/40"
+                                : "bg-muted text-muted-foreground border-border"
                             }`}
                           >
                             {deploy.status}
