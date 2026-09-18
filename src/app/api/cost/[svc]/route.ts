@@ -8,6 +8,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { getCostByService, unitPrices } from "@/lib/cost"
+import { getArgoApp } from "@/lib/argocd"
+import { appVisible, getEffectiveScope } from "@/lib/scope"
 import { ValidationError, toValidationErrorBody, K8S_NAME_RE } from "@/lib/validation"
 
 export const dynamic = "force-dynamic"
@@ -28,6 +30,19 @@ export async function GET(
     const { svc } = await params
     if (!svc || typeof svc !== "string" || svc.length > 253 || !K8S_NAME_RE.test(svc)) {
       throw new ValidationError("invalid svc: must match RFC 1123 label", "svc")
+    }
+
+    // portal#61: same by-name scope bypass as /api/catalog/[name] and
+    // /api/scorecards/[svc] — a guessed/known service id previously returned full
+    // cost + top-pod detail regardless of team ownership. Resolve the ArgoCD app the
+    // same way scorecards/[svc] does and require it be within the caller's scope.
+    const app = await getArgoApp(svc)
+    if (!app) {
+      return NextResponse.json({ error: "Service not found" }, { status: 404 })
+    }
+    const scope = await getEffectiveScope(gate.session)
+    if (!appVisible(app.spec.project ?? "default", app.spec.destination?.namespace ?? app.metadata.namespace ?? "default", scope)) {
+      return NextResponse.json({ error: "Service not found" }, { status: 404 })
     }
 
     const result = await getCostByService(svc)
