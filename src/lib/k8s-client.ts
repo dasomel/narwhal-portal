@@ -1,4 +1,4 @@
-import { cacheGet, cacheSet } from "./valkey"
+import { cacheGet, cacheSet, cacheDel } from "./valkey"
 import { K8S_RECOMMENDED_KERNEL_PARAMS } from "./kernel-params"
 import { assertK8sName, assertK8sNamespace, assertK8sNodeName, safeK8sSegment } from "./validation"
 import { getK8sApiServer } from "./config"
@@ -400,10 +400,16 @@ export interface NamespaceResourceUsage {
 
 // --- Cert renewal ---
 
+// portal#35: renewCertificate used to swallow assertK8sName/assertK8sNamespace
+// failures into the same bare `false` as a transient PATCH failure, so the
+// route couldn't tell "caller gave us a bad name/namespace" (400) apart from
+// "the renewal call itself failed" (500, safe to retry). Validation errors now
+// propagate — the route catches ValidationError the same way other mutation
+// routes do (e.g. PATCH /api/settings/users/[pk]).
 export async function renewCertificate(name: string, namespace: string): Promise<boolean> {
+  assertK8sNamespace(namespace)
+  assertK8sName(name, "certificate")
   try {
-    assertK8sNamespace(namespace)
-    assertK8sName(name, "certificate")
     await k8sFetch(
       `/apis/cert-manager.io/v1/namespaces/${safeK8sSegment(namespace)}/certificates/${safeK8sSegment(name)}`,
       {
@@ -487,20 +493,35 @@ export interface Certificate {
   renewalTime: string | null
 }
 
+interface RawCertificate {
+  metadata: { name: string; namespace: string }
+  spec: {
+    dnsNames?: string[]
+    issuerRef?: { name: string; kind: string }
+  }
+  status?: {
+    conditions?: Array<{ type: string; status: string }>
+    notAfter?: string
+    notBefore?: string
+    renewalTime?: string
+  }
+}
+
 interface CertificateList {
-  items: Array<{
-    metadata: { name: string; namespace: string }
-    spec: {
-      dnsNames?: string[]
-      issuerRef?: { name: string; kind: string }
-    }
-    status?: {
-      conditions?: Array<{ type: string; status: string }>
-      notAfter?: string
-      notBefore?: string
-      renewalTime?: string
-    }
-  }>
+  items: RawCertificate[]
+}
+
+function mapCertificate(item: RawCertificate): Certificate {
+  return {
+    name: item.metadata.name,
+    namespace: item.metadata.namespace,
+    ready: item.status?.conditions?.some((c) => c.type === "Ready" && c.status === "True") ?? false,
+    notAfter: item.status?.notAfter ?? null,
+    notBefore: item.status?.notBefore ?? null,
+    dnsNames: item.spec.dnsNames ?? [],
+    issuer: item.spec.issuerRef?.name ?? "unknown",
+    renewalTime: item.status?.renewalTime ?? null,
+  }
 }
 
 export async function getCertificates(): Promise<Certificate[]> {
@@ -509,22 +530,39 @@ export async function getCertificates(): Promise<Certificate[]> {
 
   try {
     const data = await k8sFetch<CertificateList>("/apis/cert-manager.io/v1/certificates")
-    const certs = data.items.map((item) => ({
-      name: item.metadata.name,
-      namespace: item.metadata.namespace,
-      ready: item.status?.conditions?.some((c) => c.type === "Ready" && c.status === "True") ?? false,
-      notAfter: item.status?.notAfter ?? null,
-      notBefore: item.status?.notBefore ?? null,
-      dnsNames: item.spec.dnsNames ?? [],
-      issuer: item.spec.issuerRef?.name ?? "unknown",
-      renewalTime: item.status?.renewalTime ?? null,
-    }))
+    const certs = data.items.map(mapCertificate)
     await cacheSet("k8s:certs", certs, 60)
     return certs
   } catch (err) {
     console.warn("[k8s] Certificates fetch failed:", (err as Error).message)
     return []
   }
+}
+
+// portal#35: single, always-uncached fetch of one Certificate — used to check
+// renewal eligibility (the target must exist) before mutating, and again
+// afterward as the post-renewal read-back so "success" reflects the object's
+// actual state, not just that the PATCH call returned 2xx. Returns `null` for
+// "not found" (404) so the route can 404 rather than 500.
+export async function getCertificate(name: string, namespace: string): Promise<Certificate | null> {
+  assertK8sNamespace(namespace)
+  assertK8sName(name, "certificate")
+  try {
+    const item = await k8sFetch<RawCertificate>(
+      `/apis/cert-manager.io/v1/namespaces/${safeK8sSegment(namespace)}/certificates/${safeK8sSegment(name)}`,
+    )
+    return mapCertificate(item)
+  } catch (err) {
+    if ((err as Error).message.includes("K8s API 404")) return null
+    throw err
+  }
+}
+
+// portal#35: getCertificates() caches the full list for 60s — a renewal that
+// just mutated one certificate must not be masked by that cache serving the
+// pre-renewal snapshot back to the next GET /api/settings/certs.
+export async function invalidateCertificatesCache(): Promise<void> {
+  await cacheDel("k8s:certs")
 }
 
 export interface KyvernoPolicy {
