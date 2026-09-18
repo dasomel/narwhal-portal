@@ -56,7 +56,15 @@ export function getDependencyUrl(name: DependencyUrlEnvVar, devDefault: string):
 // authentication of the far end, which defeats the point of requiring a token at all.
 // Fails fast at module load (same shape as the H-8 AUTH_MOCK guard in auth.ts) rather
 // than at request time, so a misconfigured deploy never serves a single request.
+//
+// Skipped during `next build`'s page-data collection (NEXT_PHASE=phase-production-build):
+// that phase imports every route module under NODE_ENV=production to statically analyze
+// them, before the real runtime env (which may legitimately set GITEA_URL/KEYCLOAK_ISSUER
+// only at deploy time, not at build time) is available. Throwing there breaks the build
+// itself, not just a misconfigured deploy -- confirmed by reproducing `next build` failing
+// on this check with no GITEA_URL set in the build environment.
 export function assertHttpsInProduction(name: string, url: string | undefined): void {
+  if (process.env.NEXT_PHASE === "phase-production-build") return
   if (!isProduction() || !url) return
   if (!url.startsWith("https://")) {
     const scheme = url.split("://")[0] || "no scheme"
