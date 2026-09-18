@@ -1,28 +1,16 @@
-# ── digest pin (운영 배포 필수) ──────────────────────────────────
-# 아직 미고정 상태. 운영 배포 전 아래 명령으로 digest 확인 후 이 줄을 교체:
-#
-#   docker pull node:22-alpine
-#   docker images --digests node | grep 22-alpine
-#   # sha256 값을 복사해 아래 FROM 줄에 붙여넣기:
-#   FROM node:22-alpine@sha256:<64자 hex digest> AS base
-#
-# 예시 (실제 값으로 교체 필요):
-#   FROM node:22-alpine@sha256:1234abcd...ef AS base
-# ─────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS base
+# digest pin (portal#23): node:22-alpine, digest resolved 2026-09-18 via
+#   registry-1.docker.io/v2/library/node/manifests/22-alpine
+# Re-pin by re-running that manifest HEAD (or `docker pull` + `docker images --digests`)
+# whenever the base image needs a version bump — never drop back to a mutable tag alone.
+FROM node:22-alpine@sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85 AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 
-# ── digest pin (운영 배포 필수) ──────────────────────────────────
-# 아직 미고정 상태. 운영 배포 전 아래 명령으로 digest 확인 후 교체:
-#
-#   docker pull oven/bun:1.3.13-alpine
-#   docker images --digests oven/bun | grep 1.3.13-alpine
-#   FROM oven/bun:1.3.13-alpine@sha256:<digest> AS bun-source
-# ─────────────────────────────────────────────────────────────────
+# digest pin (portal#23): oven/bun:1.3.13-alpine, digest resolved 2026-09-18 via
+#   registry-1.docker.io/v2/oven/bun/manifests/1.3.13-alpine
 # Bun binary을 별도 stage에서 가져옴 (curl 설치보다 훨씬 빠름)
-FROM oven/bun:1.3.13-alpine AS bun-source
+FROM oven/bun:1.3.13-alpine@sha256:4de475389889577f346c636f956b42a5c31501b654664e9ae5726f94d7bb5349 AS bun-source
 
 # 의존성 설치: bun.lock 있으면 bun 사용 (3-5x ↑), 없으면 pnpm fallback
 FROM base AS deps
