@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@/lib/auth"
+import { getDependencyUrl } from "@/lib/config"
 import { isSessionCookieChunk } from "@/lib/session-cookie"
 
 // Valid allowed redirect hosts for post-logout.
@@ -110,8 +111,10 @@ export async function POST(request: NextRequest) {
   const session = await auth()
   const issuer = process.env.KEYCLOAK_ISSUER
   const authUrl = process.env.AUTH_URL ?? ""
-  const sloChainStart =
-    process.env.SLO_CHAIN_START ?? "https://gitea.local.narwhal.internal/apisix/logout"
+  const sloChainStart = getDependencyUrl(
+    "SLO_CHAIN_START",
+    "https://gitea.local.narwhal.internal/apisix/logout"
+  )
   const defaultRedirect = sloChainStart || `${authUrl}/login`
 
   // Allow client to specify post_logout_redirect if permitted

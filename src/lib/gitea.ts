@@ -1,5 +1,5 @@
 import { cacheGet, cacheSet } from "./valkey"
-import { assertHttpsInProduction } from "./config"
+import { assertHttpsInProduction, getDependencyUrl } from "./config"
 
 // Gitea client for the one thing the portal writes: a namespace request.
 //
@@ -15,17 +15,31 @@ import { assertHttpsInProduction } from "./config"
 // "protected branch main", and merging its own PR returns 405 "Does not have enough
 // approvals". If this file were rewritten to push straight to main it would fail.
 
-const GITEA_URL = (process.env.GITEA_URL ?? "http://gitea-http.devtools.svc.cluster.local:3000").replace(/\/+$/, "")
-// narwhal-portal#39: the GITEA_TOKEN below is a scoped machine credential (see the
-// portal-gitops branch-only push whitelist note above) travelling over this URL —
-// require TLS in production so it can't be read or replayed off the wire.
-assertHttpsInProduction("GITEA_URL", GITEA_URL)
+// Read at call-time, not module top level (see 85ca55c / getDependencyUrl's contract
+// in config.ts) so a missing GITEA_URL fails on first use in production instead of
+// silently sending the GITEA_TOKEN machine credential to the in-cluster default.
+function getGiteaUrl(): string {
+  const url = getDependencyUrl(
+    "GITEA_URL",
+    "http://gitea-http.devtools.svc.cluster.local:3000"
+  ).replace(/\/+$/, "")
+  // narwhal-portal#39: the GITEA_TOKEN below is a scoped machine credential (see the
+  // portal-gitops branch-only push whitelist note above) travelling over this URL —
+  // require TLS in production so it can't be read or replayed off the wire.
+  assertHttpsInProduction("GITEA_URL", url)
+  return url
+}
 const GITEA_OWNER = process.env.GITEA_OWNER ?? "gitea-admin"
 const GITEA_REPO = process.env.GITEA_REPO ?? "narwhal-gitops"
 const GITEA_TOKEN = process.env.GITEA_TOKEN ?? ""
 const BASE_BRANCH = process.env.GITEA_BASE_BRANCH ?? "main"
 
-export const giteaConfigured = Boolean(GITEA_URL && GITEA_OWNER && GITEA_REPO && GITEA_TOKEN)
+// Configured check must not throw during build/static analysis, so it reads the raw
+// env var presence rather than calling getGiteaUrl() (which throws in production when
+// unset). "Not configured" here just means GITEA_URL was never set at all.
+export const giteaConfigured = Boolean(
+  process.env.GITEA_URL && GITEA_OWNER && GITEA_REPO && GITEA_TOKEN
+)
 
 export class GiteaError extends Error {
   constructor(
@@ -38,7 +52,7 @@ export class GiteaError extends Error {
 }
 
 async function api<T>(path: string, init: RequestInit): Promise<T> {
-  const res = await fetch(`${GITEA_URL}/api/v1${path}`, {
+  const res = await fetch(`${getGiteaUrl()}/api/v1${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -200,7 +214,7 @@ export async function getCommitTimestamp(sha: string): Promise<string | null> {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 5000)
-    const url = `${GITEA_URL}/api/v1/repos/${GITEA_OWNER}/${GITEA_REPO}/git/commits/${encodeURIComponent(sha)}`
+    const url = `${getGiteaUrl()}/api/v1/repos/${GITEA_OWNER}/${GITEA_REPO}/git/commits/${encodeURIComponent(sha)}`
 
     const res = await fetch(url, {
       next: { revalidate: 0 },
