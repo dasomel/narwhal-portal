@@ -1,9 +1,15 @@
 import "server-only"
 import { cacheGet, cacheSet } from "./valkey"
+import { getDependencyUrl } from "./config"
 import { assertLogQLSafe } from "./validation"
 import type { FalcoEvent, FalcoEventPriority } from "@/types/security"
 
-const LOKI_URL = process.env.LOKI_URL ?? "http://loki.monitoring.svc.cluster.local:3100"
+// Read at call-time, not module top level (see 85ca55c / getDependencyUrl's contract
+// in config.ts) so a missing LOKI_URL fails on first use in production instead of
+// silently sending requests to the in-cluster default.
+function getLokiUrl(): string {
+  return getDependencyUrl("LOKI_URL", "http://loki.monitoring.svc.cluster.local:3100")
+}
 
 // FalcoEventPriority is Capitalized; Loki label values from Falcosidekick are lowercase
 function toLokiPriority(p: FalcoEventPriority): string {
@@ -87,7 +93,7 @@ async function queryLoki(logql: string, sinceMinutes: number, limit: number): Pr
     direction: "BACKWARD",
   })
 
-  const url = `${LOKI_URL}/loki/api/v1/query_range?${params.toString()}`
+  const url = `${getLokiUrl()}/loki/api/v1/query_range?${params.toString()}`
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 5000)
   const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer))

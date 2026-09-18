@@ -1,8 +1,15 @@
 import { cacheGet, cacheSet, cacheDel } from "./valkey"
-import { isProduction } from "./config"
+import { getDependencyUrl, isProduction } from "./config"
 
-const KEYCLOAK_INTERNAL_URL =
-  process.env.KEYCLOAK_INTERNAL_URL ?? "http://keycloak-service.iam.svc.cluster.local:8080"
+// Read at call-time, not module top level (see 85ca55c / getDependencyUrl's contract
+// in config.ts) so a missing KEYCLOAK_INTERNAL_URL fails on first admin API call in
+// production instead of silently sending realm-admin requests to the in-cluster default.
+function getKeycloakInternalUrl(): string {
+  return getDependencyUrl(
+    "KEYCLOAK_INTERNAL_URL",
+    "http://keycloak-service.iam.svc.cluster.local:8080"
+  )
+}
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM ?? "narwhal"
 
 // C-6: admin grant uses OIDC client_credentials (service account) — NOT ROPC.
@@ -80,7 +87,7 @@ async function fetchAdminToken(): Promise<CachedAdminToken> {
   let res: Response
   try {
     res = await fetch(
-      `${KEYCLOAK_INTERNAL_URL}/realms/${keycloakAdminRealm()}/protocol/openid-connect/token`,
+      `${getKeycloakInternalUrl()}/realms/${keycloakAdminRealm()}/protocol/openid-connect/token`,
       {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -247,7 +254,7 @@ export async function getUsers(): Promise<KeycloakUser[]> {
   if (cached) return cached
 
   const data = await fetchAllPages<Record<string, unknown>>(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/users`,
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/users`,
     100,
     "Keycloak API"
   )
@@ -261,7 +268,7 @@ export async function getGroups(): Promise<KeycloakGroup[]> {
   if (cached) return cached
 
   const data = await fetchAllPages<{ id: string; name: string }>(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups`,
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/groups`,
     100,
     "Keycloak groups"
   )
@@ -279,7 +286,7 @@ export async function getGroupsDetailed(): Promise<KeycloakGroupDetailed[]> {
     name: string
     attributes?: Record<string, string[]>
   }>(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups`,
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/groups`,
     100,
     "Keycloak groups"
   )
@@ -301,7 +308,7 @@ export async function getGroupsDetailed(): Promise<KeycloakGroupDetailed[]> {
         let membersPartial = false
         try {
           members = await fetchAllPages<{ id: string }>(
-            `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${g.id}/members`,
+            `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/groups/${g.id}/members`,
             100,
             "Get group members"
           )
@@ -359,7 +366,7 @@ export async function createUser(payload: {
   const lastName = rest.join(" ")
 
   const res = await kcFetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/users`,
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/users`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -380,7 +387,7 @@ export async function createUser(payload: {
   if (!newId) throw new Error("Could not parse new user ID from Location header")
 
   const getRes = await kcFetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/users/${newId}`
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/users/${newId}`
   )
   if (!getRes.ok) throw new Error(`Get new user failed: ${getRes.status}`)
   await cacheDel("keycloak:users")
@@ -389,7 +396,7 @@ export async function createUser(payload: {
 
 export async function setUserActive(pk: string, isActive: boolean): Promise<void> {
   const res = await kcFetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/users/${pk}`,
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/users/${pk}`,
     {
       method: "PUT",
       body: JSON.stringify({ enabled: isActive }),
@@ -401,7 +408,7 @@ export async function setUserActive(pk: string, isActive: boolean): Promise<void
 
 export async function getGroupMembers(groupPk: string): Promise<KeycloakUser[]> {
   const data = await fetchAllPages<Record<string, unknown>>(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${groupPk}/members`,
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/groups/${groupPk}/members`,
     100,
     "Get group members"
   )
@@ -410,7 +417,7 @@ export async function getGroupMembers(groupPk: string): Promise<KeycloakUser[]> 
 
 export async function addUserToGroup(groupPk: string, userPk: string): Promise<void> {
   const res = await kcFetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/users/${userPk}/groups/${groupPk}`,
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/users/${userPk}/groups/${groupPk}`,
     { method: "PUT" }
   )
   if (!res.ok) throw new Error(`Add user to group failed: ${res.status}`)
@@ -422,7 +429,7 @@ export async function addUserToGroup(groupPk: string, userPk: string): Promise<v
 
 export async function removeUserFromGroup(groupPk: string, userPk: string): Promise<void> {
   const res = await kcFetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/users/${userPk}/groups/${groupPk}`,
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/users/${userPk}/groups/${groupPk}`,
     { method: "DELETE" }
   )
   if (!res.ok) throw new Error(`Remove user from group failed: ${res.status}`)
@@ -437,7 +444,7 @@ export async function updateGroupAttributes(
   attributes: Record<string, unknown>
 ): Promise<void> {
   const getRes = await kcFetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${groupPk}`
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/groups/${groupPk}`
   )
   if (!getRes.ok) throw new Error(`Get group failed: ${getRes.status}`)
   const group = await getRes.json()
@@ -449,7 +456,7 @@ export async function updateGroupAttributes(
   }
 
   const putRes = await kcFetch(
-    `${KEYCLOAK_INTERNAL_URL}/admin/realms/${KEYCLOAK_REALM}/groups/${groupPk}`,
+    `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/groups/${groupPk}`,
     {
       method: "PUT",
       body: JSON.stringify({ ...group, attributes: kcAttributes }),
