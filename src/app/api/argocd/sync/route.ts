@@ -5,7 +5,7 @@ import {
   ArgoForbiddenError,
   ArgoNotFoundError,
   getArgoAppFresh,
-  isOperationConverged,
+  getOperationOutcome,
   syncArgoApp,
 } from "@/lib/argocd"
 import { cacheDel } from "@/lib/valkey"
@@ -94,8 +94,13 @@ export async function POST(
     // request, not that reconciliation finished. Re-read the app and check
     // operationState.phase before claiming verified success.
     const fresh = await getArgoAppFresh(trimmed)
-    const converged = fresh !== null && isOperationConverged(fresh)
-    if (!converged) {
+    const outcome = fresh === null ? "pending" : getOperationOutcome(fresh)
+    if (outcome === "failed") {
+      const message = `sync failed; operationState.phase=${fresh?.status.operationState?.phase ?? "unknown"}`
+      await failOperation(ctx, `ArgoCD sync failed: ${trimmed}`, message)
+      return NextResponse.json({ ok: false, app: result, error: message }, { status: 502 })
+    }
+    if (outcome === "pending") {
       await completeOperation(
         ctx,
         `ArgoCD sync triggered (pending convergence): ${trimmed}`,

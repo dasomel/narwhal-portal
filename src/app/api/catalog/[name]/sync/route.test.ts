@@ -129,4 +129,17 @@ describe("POST /api/catalog/[name]/sync", () => {
     expect(body.success).toBe(true)
     expect(body.pending).toBe(true)
   })
+
+  it("reports failure (not pending) when the operation reaches a terminal Failed phase", async () => {
+    vi.mocked(getArgoAppFresh).mockResolvedValue({
+      ...mockApp,
+      status: { ...mockApp.status, operationState: { phase: "Failed" } },
+    })
+    const req = new Request("http://localhost/api/catalog/checkout-api/sync", { method: "POST" })
+    const res = await POST(req, params("checkout-api"))
+    expect(res.status).toBe(502)
+    const body = await res.json()
+    expect(body.success).toBe(false)
+    expect(body.pending).toBeUndefined()
+  })
 })

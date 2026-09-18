@@ -5,7 +5,7 @@ import {
   ArgoForbiddenError,
   ArgoNotFoundError,
   getArgoAppFresh,
-  isOperationConverged,
+  getOperationOutcome,
   rollbackArgoApp,
 } from "@/lib/argocd"
 import { assertK8sName, ValidationError, toValidationErrorBody } from "@/lib/validation"
@@ -83,8 +83,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
     // finished. Re-read the app and check operationState.phase before
     // claiming verified success.
     const fresh = await getArgoAppFresh(name)
-    const converged = fresh !== null && isOperationConverged(fresh)
-    if (!converged) {
+    const outcome = fresh === null ? "pending" : getOperationOutcome(fresh)
+    if (outcome === "failed") {
+      const message = `rollback failed; operationState.phase=${fresh?.status.operationState?.phase ?? "unknown"}`
+      await failOperation(ctx, `Catalog rollback failed: ${name}`, message)
+      return NextResponse.json({ success: false, message }, { status: 502 })
+    }
+    if (outcome === "pending") {
       await completeOperation(
         ctx,
         `Catalog rollback triggered (pending convergence): ${name}`,

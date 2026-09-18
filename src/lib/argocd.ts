@@ -159,10 +159,25 @@ export interface SyncResult {
  * (bypassing the cache populated by earlier GETs) and check this before
  * reporting verified success.
  */
-export function isOperationConverged(app: ArgoApp): boolean {
+export type OperationOutcome = "converged" | "failed" | "pending"
+
+/**
+ * portal#59 review: an earlier version of this function only special-cased
+ * "Succeeded" and returned false for everything else, including terminal
+ * "Failed"/"Error" phases -- callers treated that bare false as pending:true,
+ * silently reporting real failures as still-in-progress. Distinguish the three
+ * outcomes explicitly so a failed operation is never mistaken for a pending one.
+ */
+export function getOperationOutcome(app: ArgoApp): OperationOutcome {
   const phase = app.status.operationState?.phase
-  if (phase === "Succeeded") return app.status.sync.status === "Synced"
-  return false
+  if (phase === "Succeeded") return app.status.sync.status === "Synced" ? "converged" : "pending"
+  if (phase === "Failed" || phase === "Error") return "failed"
+  return "pending"
+}
+
+/** @deprecated use getOperationOutcome() -- kept only so any lingering caller fails loud, not silent. */
+export function isOperationConverged(app: ArgoApp): boolean {
+  return getOperationOutcome(app) === "converged"
 }
 
 /** Re-reads an app's live status, bypassing any cached copy from before the mutation. */
