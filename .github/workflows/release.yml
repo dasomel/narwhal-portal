@@ -2,10 +2,40 @@ name: Release
 
 # Publishes a GitHub Release whose body is the CHANGELOG.md section for the tag.
 #
-# Runs alongside "Build & Publish Container (GHCR)" on the same v*.*.* tag; the
-# two are independent (this one touches no registry, that one creates no
-# release), so they are deliberately not chained — a slow arm64 build must not
-# hold up the release notes, and a bad changelog must not block the image.
+# GATED ON THE CONTAINER PUBLISH (narwhal-portal#65). This used to run on the
+# same `push: tags` event as "Build & Publish Container (GHCR)", independently
+# of it — a tag could become a GitHub Release even when the multi-arch image
+# build, manifest merge, or cosign signing failed, so a release could exist
+# with no (or a broken) deployable image behind it. It now runs via
+# `workflow_run` AFTER that workflow *completes*, and the `release` job's
+# `if:` requires `conclusion == 'success'`. That single condition is the
+# gate: docker-publish.yml already hard-fails the whole run (and therefore
+# this trigger's conclusion) on a missing architecture
+# ("Verify both architectures are present"), on a merge/push failure, and on
+# a v*.*.* tag published without cosign signing secrets configured ("Fail —
+# release build published without signing secrets") — provenance and SBOM are
+# generated unconditionally by `docker/build-push-action` as part of that same
+# successful build. So gating on that workflow's success transitively gates
+# on manifest completeness, arch verification, and provenance/SBOM/signing,
+# without re-implementing (and risking drifting from) those checks here.
+#
+# A failed or in-progress container publish therefore leaves this workflow
+# not run at all (shown as "skipped" for the tag in the Actions tab) — no
+# release, completed or partial, is ever created. That is the "clear
+# failed/partial state" the issue asks for: the absence of a Release is the
+# signal, not a Release with a misleading body.
+#
+# RECOVERY PROCEDURE for a tag whose container publish failed partway (e.g.
+# one arch built, merge/sign did not): tags are immutable version pins here
+# by design (see docker-publish.yml's tagging-strategy comment and the
+# package.json-vs-tag guard), so never force-push or reuse the failed tag.
+# Fix the underlying issue, bump package.json to the next patch/minor version,
+# add the corresponding CHANGELOG.md entry, and push a NEW `vX.Y.Z` tag. The
+# failed tag's commit is still in history and untagged; delete the failed git
+# tag locally/remote only for hygiene (`git push --delete origin vX.Y.Z`) —
+# never re-push it to trigger a retry, since GHCR's `type=raw,value=latest`
+# tag and any `:X.Y` floating tag must only ever move forward to a verified
+# build.
 #
 # MISSING ENTRY IS A FAILURE, NOT A PLACEHOLDER. The sibling narwhal repo's
 # version writes "No changelog entry found" into the body and exits 0; its
@@ -16,23 +46,78 @@ name: Release
 # repo, so the repo has to back it up before the tag goes out.
 
 on:
-  push:
-    tags: ['v*.*.*']
+  workflow_run:
+    workflows: ['Build & Publish Container (GHCR)']
+    types: [completed]
 
 permissions:
   contents: write
+  packages: read # to inspect the published manifest before releasing
 
 jobs:
   release:
     name: publish release notes
     runs-on: ubuntu-latest
+    # Only a successful container publish on an actual version tag may produce
+    # a release. workflow_run always fires on completion (success, failure, or
+    # cancellation) — without this guard a failed docker-publish run would
+    # still execute this job. head_branch is the tag ref name for a
+    # tag-triggered run (there is no head_branch-native tag filter on
+    # workflow_run, so it is re-checked here as a defense-in-depth prefix
+    # match; docker-publish.yml itself only builds v*.*.* tags or
+    # workflow_dispatch, and workflow_dispatch runs never satisfy this).
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    env:
+      TAG_NAME: ${{ github.event.workflow_run.head_branch }}
+      IMAGE: ghcr.io/${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Pin to the exact commit docker-publish.yml built, not whatever
+          # HEAD of the tag happens to resolve to at release time.
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Re-verify the manifest independently of docker-publish.yml's own
+      # "Verify both architectures are present" step rather than trusting its
+      # conclusion alone — this is the release gate, so it confirms the
+      # artifact it is about to attach a Release to actually exists and is
+      # complete, and captures the immutable digest for the release body.
+      - name: Verify published image manifest and capture digest
+        run: |
+          set -euo pipefail
+          ref="${IMAGE}:${TAG_NAME#v}"
+          echo "inspecting ${ref}"
+          raw=$(docker buildx imagetools inspect --raw "$ref")
+          for arch in amd64 arm64; do
+            jq -e --arg a "$arch" \
+              '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a)' \
+              >/dev/null <<< "$raw" \
+              || { echo "::error::${arch} missing from ${ref} — refusing to publish a release for an incomplete image."; exit 1; }
+          done
+          digest=$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -r '.digest')
+          if [ -z "$digest" ] || [ "$digest" = "null" ]; then
+            echo "::error::could not resolve a manifest digest for ${ref}"
+            exit 1
+          fi
+          echo "IMAGE_DIGEST=${digest}" >> "$GITHUB_ENV"
+          echo "resolved digest ${digest}"
 
       - name: Extract the changelog section for this tag
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${TAG_NAME#v}"
           echo "building release notes for ${version}"
 
           # Everything between `## [VERSION]` and the next `## [` heading, with
@@ -66,8 +151,13 @@ jobs:
             exit 1
           fi
 
+          # Immutable image digest, not the mutable :X.Y.Z tag — this is the
+          # exact manifest verified in the previous step, so anyone reading
+          # the release can pin GitOps/deploy configs to it directly.
+          printf '\n**Container image**: `%s@%s`\n' "${IMAGE}" "${IMAGE_DIGEST}" >> release_notes.md
+
           printf '\n---\n\n한국어 릴리스 노트: [CHANGELOG_ko.md](https://github.com/%s/blob/%s/CHANGELOG_ko.md)\n' \
-            "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" >> release_notes.md
+            "${GITHUB_REPOSITORY}" "${TAG_NAME}" >> release_notes.md
 
           echo "--- release_notes.md ---"
           cat release_notes.md
@@ -89,6 +179,11 @@ jobs:
       - name: Create the GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
+          # Explicit: the triggering event is workflow_run (release.yml no
+          # longer runs on the tag push itself), so GITHUB_REF no longer
+          # resolves to the tag and the action's default tag inference would
+          # target the wrong ref.
+          tag_name: ${{ env.TAG_NAME }}
           body_path: release_notes.md
           generate_release_notes: true
           # Attribution and provenance travel with the artifact, not just with the
