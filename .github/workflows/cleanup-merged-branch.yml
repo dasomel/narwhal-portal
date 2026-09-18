@@ -30,9 +30,29 @@ jobs:
           print(urllib.parse.quote(os.environ['HEAD_REF'], safe=''))
           PY
           )"
-          curl --fail-with-body --silent --show-error \
+          http_status="$(curl --silent --show-error --output /tmp/delete-ref-response.json \
+            --write-out '%{http_code}' \
             -X DELETE \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "${API_URL}/repos/${REPOSITORY}/git/refs/heads/${encoded_ref}"
+            "${API_URL}/repos/${REPOSITORY}/git/refs/heads/${encoded_ref}")"
+
+          if [ "${http_status}" = "204" ]; then
+            echo "Deleted ${HEAD_REF}."
+            exit 0
+          fi
+
+          # A merge tool (e.g. `gh pr merge --delete-branch`) may have already deleted this
+          # ref before this workflow ran -- GitHub's REST delete-a-ref returns 422 "Reference
+          # does not exist" for that race, not a real failure of this cleanup job. Only that
+          # specific response is treated as success; any other non-204 status still fails the
+          # job so a genuine deletion problem (permissions, protected branch, etc.) is caught.
+          if [ "${http_status}" = "422" ] && grep -q "Reference does not exist" /tmp/delete-ref-response.json; then
+            echo "${HEAD_REF} was already deleted (e.g. by the merge itself) -- nothing to do."
+            exit 0
+          fi
+
+          echo "Failed to delete ${HEAD_REF}: HTTP ${http_status}" >&2
+          cat /tmp/delete-ref-response.json >&2
+          exit 1
