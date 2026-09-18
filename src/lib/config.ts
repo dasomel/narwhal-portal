@@ -50,6 +50,20 @@ export function getDependencyUrl(name: DependencyUrlEnvVar, devDefault: string):
   throw new Error(`Missing required production configuration: ${name}`)
 }
 
+// narwhal-portal#39: Portal/Gateway → Keycloak/Gitea integrations must be TLS-verified
+// in production. A plain http:// URL means the OIDC handshake or the Gitea machine
+// token travels — and can be intercepted or replayed — without transport-level
+// authentication of the far end, which defeats the point of requiring a token at all.
+// Fails fast at module load (same shape as the H-8 AUTH_MOCK guard in auth.ts) rather
+// than at request time, so a misconfigured deploy never serves a single request.
+export function assertHttpsInProduction(name: string, url: string | undefined): void {
+  if (!isProduction() || !url) return
+  if (!url.startsWith("https://")) {
+    const scheme = url.split("://")[0] || "no scheme"
+    throw new Error(`${name} must use https:// in production (got ${scheme}://...)`)
+  }
+}
+
 export interface ConfigValidationResult {
   valid: boolean
   environment: string
@@ -110,6 +124,21 @@ export function validateRuntimeConfig(): ConfigValidationResult {
     } else {
       details[key] = "missing"
       missingOptional.push(key)
+    }
+  }
+
+  // narwhal-portal#39: surface a non-TLS Keycloak/Gitea URL as a validation failure
+  // too, not just the module-load throw — validateRuntimeConfig() also backs the
+  // /api/health/status diagnostics view, and an operator should see this without
+  // having to crash-loop the deployment first.
+  if (isProd) {
+    for (const [key, url] of [
+      ["KEYCLOAK_ISSUER", process.env.KEYCLOAK_ISSUER],
+      ["GITEA_URL", process.env.GITEA_URL],
+    ] as const) {
+      if (url && !url.startsWith("https://")) {
+        missingRequired.push(`${key} (must be https://)`)
+      }
     }
   }
 
