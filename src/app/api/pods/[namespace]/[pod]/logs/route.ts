@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { getK8sApiServer } from "@/lib/config"
+import { getK8sBearerToken } from "@/lib/k8s-token"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import {
   assertK8sName,
@@ -19,8 +20,6 @@ export interface PodLogsResponse {
   pod: string
   namespace: string
 }
-
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
 
 const ALLOWED_ROLES = ["cluster-admin", "developer", "viewer"]
 const CONTAINER_NAME_RE = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/
@@ -80,7 +79,10 @@ export async function GET(
     const path = `/api/v1/namespaces/${safeK8sSegment(namespace)}/pods/${safeK8sSegment(pod)}/log?${query}`
     const res = await fetch(`${getK8sApiServer()}${path}`, {
       headers: {
-        Authorization: `Bearer ${K8S_TOKEN}`,
+        // Reads the projected serviceAccountToken file each call (cached briefly,
+        // auto-refreshed) instead of a token captured once at module load — see
+        // src/lib/k8s-token.ts (Portal #20).
+        Authorization: `Bearer ${getK8sBearerToken()}`,
         // K8s pod-log subresource rejects `Accept: text/plain` with 406 on this API server;
         // `*/*` returns the plain-text log body (we read it via res.text() below).
         Accept: "*/*",
