@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { auth, getActorId } from "@/lib/auth"
+import { requireRole, getActorId } from "@/lib/auth"
 import { runHostJob } from "@/lib/k8s-job-runner"
 import { getNodeDetail } from "@/lib/k8s-client"
 import { buildJobScript, parseVerification, type ApplyTarget } from "@/lib/tuning-commands"
@@ -68,11 +68,14 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ name: string }> }
 ) {
-  const session = await auth()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  if (session.user.role !== "cluster-admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  const gate = await requireRole("cluster-admin")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
   }
+  const { session } = gate
 
   const { name: nodeName } = await params
   try {

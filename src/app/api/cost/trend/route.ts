@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { getCostTrend } from "@/lib/cost"
+import { getArgoApp } from "@/lib/argocd"
+import { appVisible, getEffectiveScope, namespaceVisible } from "@/lib/scope"
 import { ValidationError, toValidationErrorBody } from "@/lib/validation"
 
 export const dynamic = "force-dynamic"
@@ -48,10 +50,31 @@ export async function GET(req: NextRequest) {
       throw new ValidationError(`invalid days: maximum is ${MAX_DAYS}`, "days")
     }
 
+    // portal#61: id was passed straight to Prometheus with no ownership check — a
+    // caller with a valid role but out-of-scope id could read another team's
+    // namespace/service cost trend. namespace scope checks the id directly;
+    // service scope resolves it through ArgoCD the same way cost/[svc] and
+    // scorecards/[svc] do. cluster scope is restricted to visible namespaces inside
+    // getCostTrend itself (a non-admin has no single id to deny on).
+    const effScope = await getEffectiveScope(gate.session)
+    if (scope === "namespace" && !namespaceVisible(id, effScope)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
+    if (scope === "service") {
+      const app = await getArgoApp(id)
+      if (!app) {
+        return NextResponse.json({ error: "Service not found" }, { status: 404 })
+      }
+      if (!appVisible(app.spec.project ?? "default", app.spec.destination?.namespace ?? app.metadata.namespace ?? "default", effScope)) {
+        return NextResponse.json({ error: "Service not found" }, { status: 404 })
+      }
+    }
+
     const { points, notice } = await getCostTrend(
       scope as "cluster" | "namespace" | "service",
       id,
-      days
+      days,
+      effScope
     )
 
     const body: Record<string, unknown> = {

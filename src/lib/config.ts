@@ -36,6 +36,10 @@ export type DependencyUrlEnvVar =
   | "ARGOCD_URL"
   | "OPENBAO_ADDR"
   | "ALERTMANAGER_URL"
+  | "LOKI_URL"
+  | "GITEA_URL"
+  | "KEYCLOAK_INTERNAL_URL"
+  | "SLO_CHAIN_START"
 
 // Generic fail-fast accessor for dependency base URLs: env var → in production
 // throw, otherwise fall back to the dev-only default. Mirrors getK8sApiServer's
@@ -124,6 +128,8 @@ export function validateRuntimeConfig(): ConfigValidationResult {
     "GITEA_URL",
     "OPENBAO_ADDR",
     "LOKI_URL",
+    "KEYCLOAK_INTERNAL_URL",
+    "SLO_CHAIN_START",
   ]
 
   for (const key of optionalServices) {

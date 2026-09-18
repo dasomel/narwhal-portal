@@ -9,7 +9,7 @@ vi.mock("next-auth/providers/credentials", () => ({
   default: (opts: unknown) => opts,
 }))
 
-vi.mock("@/lib/auth", () => ({ auth: vi.fn(), getActorId: (s: Session) => s.user?.email ?? "unknown" }))
+vi.mock("@/lib/auth", () => ({ requireRole: vi.fn(), getActorId: (s: Session) => s.user?.email ?? "unknown" }))
 vi.mock("@/lib/argocd", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/argocd")>()
   return {
@@ -28,7 +28,7 @@ vi.mock("@/lib/valkey", () => ({
   }),
 }))
 
-const { auth } = await import("@/lib/auth")
+const { requireRole } = await import("@/lib/auth")
 const { assertAppAccessible, syncArgoApp, getArgoAppFresh } = await import("@/lib/argocd")
 const { POST } = await import("./route")
 const { getRecentEvents } = await import("@/lib/live-stream")
@@ -68,21 +68,21 @@ function params(name: string) {
 
 describe("POST /api/catalog/[name]/sync", () => {
   beforeEach(() => {
-    vi.mocked(auth).mockResolvedValue(devSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ session: devSession } as never)
     vi.mocked(assertAppAccessible).mockResolvedValue(mockApp)
     vi.mocked(syncArgoApp).mockResolvedValue({ name: "checkout-api", syncStatus: "Synced", revision: "rev-100" })
     vi.mocked(getArgoAppFresh).mockResolvedValue(convergedApp)
   })
 
   it("401s an unauthenticated request", async () => {
-    vi.mocked(auth).mockResolvedValue(null as never)
+    vi.mocked(requireRole).mockResolvedValue({ error: "unauthorized" } as never)
     const req = new Request("http://localhost/api/catalog/checkout-api/sync", { method: "POST" })
     const res = await POST(req, params("checkout-api"))
     expect(res.status).toBe(401)
   })
 
   it("403s a guest role caller", async () => {
-    vi.mocked(auth).mockResolvedValue(guestSession as never)
+    vi.mocked(requireRole).mockResolvedValue({ error: "forbidden" } as never)
     const req = new Request("http://localhost/api/catalog/checkout-api/sync", { method: "POST" })
     const res = await POST(req, params("checkout-api"))
     expect(res.status).toBe(403)

@@ -153,7 +153,11 @@ function topPodMemQuery(serviceId: string): string {
 }
 
 // 추이: 일별 avg_over_time — days일 치 24h 슬라이딩 윈도
-function trendCpuQuery(scope: string, id: string): string {
+//
+// portal#61: cluster scope의 추이는 caller의 effective scope 밖 namespace까지
+// 합산해 노출했다 — nsFilter(effScope.namespaces로 만든 regex alternation)를 넣으면
+// cluster-admin이 아닌 caller가 볼 수 있는 namespace로만 합산을 제한한다.
+function trendCpuQuery(scope: string, id: string, nsFilter?: string): string {
   if (scope === "service") {
     return `sum(avg_over_time(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[1h])[24h:1h]) * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance="${id}"})`
   }
@@ -161,17 +165,19 @@ function trendCpuQuery(scope: string, id: string): string {
     return `sum(avg_over_time(rate(container_cpu_usage_seconds_total{container!="POD",container!="",namespace="${id}"}[1h])[24h:1h]))`
   }
   // cluster
-  return `sum(avg_over_time(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[1h])[24h:1h]))`
+  const nsMatcher = nsFilter ? `,namespace=~"${nsFilter}"` : ""
+  return `sum(avg_over_time(rate(container_cpu_usage_seconds_total{container!="POD",container!=""${nsMatcher}}[1h])[24h:1h]))`
 }
 
-function trendMemQuery(scope: string, id: string): string {
+function trendMemQuery(scope: string, id: string, nsFilter?: string): string {
   if (scope === "service") {
     return `sum(avg_over_time(container_memory_working_set_bytes{container!="POD",container!=""}[24h]) * on(pod, namespace) group_left(label_app_kubernetes_io_instance) kube_pod_labels{label_app_kubernetes_io_instance="${id}"})`
   }
   if (scope === "namespace") {
     return `sum(avg_over_time(container_memory_working_set_bytes{container!="POD",container!="",namespace="${id}"}[24h]))`
   }
-  return `sum(avg_over_time(container_memory_working_set_bytes{container!="POD",container!=""}[24h]))`
+  const nsMatcher = nsFilter ? `,namespace=~"${nsFilter}"` : ""
+  return `sum(avg_over_time(container_memory_working_set_bytes{container!="POD",container!=""${nsMatcher}}[24h]))`
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +326,11 @@ export async function getCost(
 
 /**
  * getCostByService: 단일 service 비용 + top 5 pods
+ *
+ * portal#61: 호출자의 scope 안에 있는 service인지는 route 레벨에서 getArgoApp +
+ * appVisible로 이미 검증됐다는 전제. 캐시 키는 service 단위이므로(팀마다 다른
+ * 값을 보는 게 아니라 하나의 service는 하나의 정답만 있음) scope fingerprint가
+ * 필요 없다 — namespace/cluster 집계처럼 caller마다 다른 결과가 나오지 않는다.
  */
 export async function getCostByService(serviceId: string): Promise<CostDetailResult | { notice: string }> {
   const cacheKey = `cost:service:${serviceId}`
@@ -392,12 +403,35 @@ export async function getCostByService(serviceId: string): Promise<CostDetailRes
 export async function getCostTrend(
   scope: "cluster" | "namespace" | "service",
   id: string,
-  days: number
+  days: number,
+  effScope: EffectiveScope
 ): Promise<{ points: CostTrendPoint[]; notice?: string }> {
   const safeDays = Math.min(days, 90)
-  const cacheKey = `cost:trend:${scope}:${id}:${safeDays}`
+  // portal#61: namespace/service scope는 route에서 이미 visibility 검증된 id만
+  // 넘어오지만, cluster scope의 집계는 caller마다 볼 수 있는 namespace가 달라
+  // cache key에 fingerprint가 반드시 필요하다 (getCost의 cluster/namespace 분기와
+  // 동일 이유). namespace/service scope는 id가 곧 정답을 결정하므로 fingerprint를
+  // 붙이지 않는다.
+  const cacheKey =
+    scope === "cluster"
+      ? `cost:trend:cluster:${effScope.fingerprint}:${safeDays}`
+      : `cost:trend:${scope}:${id}:${safeDays}`
   const cached = await cacheGet<{ points: CostTrendPoint[]; notice?: string }>(cacheKey)
   if (cached !== null) return cached
+
+  // cluster scope: cluster-admin(all)이 아니면 caller가 볼 수 있는 namespace로만
+  // 합산을 제한한다. 볼 수 있는 namespace가 없으면 Prometheus를 호출할 필요 없이
+  // 빈 결과를 반환한다.
+  let nsFilter: string | undefined
+  if (scope === "cluster" && !effScope.all) {
+    const names = [...effScope.namespaces]
+    if (names.length === 0) {
+      const empty = { points: [] }
+      await cacheSet(cacheKey, empty, 3600)
+      return empty
+    }
+    nsFilter = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")
+  }
 
   try {
     const end = Math.floor(Date.now() / 1000)
@@ -405,8 +439,8 @@ export async function getCostTrend(
     const step = 86400 // 1일 step
 
     const [cpuRange, memRange] = await Promise.all([
-      queryRangeVector(trendCpuQuery(scope, id), start, end, step),
-      queryRangeVector(trendMemQuery(scope, id), start, end, step),
+      queryRangeVector(trendCpuQuery(scope, id, nsFilter), start, end, step),
+      queryRangeVector(trendMemQuery(scope, id, nsFilter), start, end, step),
     ])
 
     // 첫 번째 series의 values 사용 (sum이라 시리즈 하나)

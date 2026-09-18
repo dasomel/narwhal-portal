@@ -1,0 +1,99 @@
+import { describe, expect, it, vi, beforeEach } from "vitest"
+import { NextRequest } from "next/server"
+import type { ArgoApp } from "@/lib/argocd"
+import type { NamespaceInfo } from "@/lib/k8s-client"
+
+// portal#61: GET /api/cost/trend accepted scope=namespace|service&id=<anything> with
+// no ownership check — a caller with a valid role could read another team's
+// namespace/service cost trend by guessing an id. namespace scope now checks
+// namespaceVisible(id) directly; service scope resolves id via ArgoCD like
+// cost/[svc] and scorecards/[svc] do.
+vi.mock("@/lib/auth", () => ({ requireRole: vi.fn() }))
+vi.mock("@/lib/argocd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/argocd")>()
+  return { ...actual, getArgoApp: vi.fn() }
+})
+vi.mock("@/lib/cost", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/cost")>()
+  return { ...actual, getCostTrend: vi.fn() }
+})
+vi.mock("@/lib/k8s-client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/k8s-client")>()
+  return { ...actual, getNamespaces: vi.fn() }
+})
+
+const { requireRole } = await import("@/lib/auth")
+const { getArgoApp } = await import("@/lib/argocd")
+const { getCostTrend } = await import("@/lib/cost")
+const { getNamespaces } = await import("@/lib/k8s-client")
+const { GET } = await import("./route")
+
+const platformTeamSession = { groups: ["developer"], teams: ["platform-team"], user: { role: "developer" } }
+const frontendTeamSession = { groups: ["developer"], teams: ["frontend-team"], user: { role: "developer" } }
+
+const namespaces: NamespaceInfo[] = [
+  { name: "platform-system", status: "Active", labels: {}, createdAt: "2026-01-01T00:00:00Z" },
+  { name: "frontend-app", status: "Active", labels: {}, createdAt: "2026-01-01T00:00:00Z" },
+]
+
+const platformApp: ArgoApp = {
+  metadata: { name: "platform-app" },
+  spec: { project: "platform", destination: { namespace: "platform-system" } },
+  status: { sync: { status: "Synced" }, health: { status: "Healthy" } },
+}
+
+beforeEach(() => {
+  vi.mocked(getCostTrend).mockClear()
+  vi.mocked(getNamespaces).mockResolvedValue(namespaces)
+  vi.mocked(getArgoApp).mockImplementation(async (name: string) => (name === "platform-app" ? platformApp : null))
+  vi.mocked(getCostTrend).mockResolvedValue({ points: [] })
+})
+
+describe("GET /api/cost/trend — scope enforcement", () => {
+  it("403s scope=namespace with an id outside the caller's scope", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: frontendTeamSession } as never)
+    const res = await GET(new NextRequest("http://localhost/api/cost/trend?scope=namespace&id=platform-system"))
+    expect(res.status).toBe(403)
+    expect(getCostTrend).not.toHaveBeenCalled()
+  })
+
+  it("allows scope=namespace with an id inside the caller's scope (positive control)", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: platformTeamSession } as never)
+    const res = await GET(new NextRequest("http://localhost/api/cost/trend?scope=namespace&id=platform-system"))
+    expect(res.status).toBe(200)
+    expect(getCostTrend).toHaveBeenCalled()
+  })
+
+  it("404s scope=service with a guessed id outside the caller's scope", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: frontendTeamSession } as never)
+    const res = await GET(new NextRequest("http://localhost/api/cost/trend?scope=service&id=platform-app"))
+    expect(res.status).toBe(404)
+    expect(getCostTrend).not.toHaveBeenCalled()
+  })
+
+  it("404s scope=service with an id that resolves to no ArgoCD app", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: platformTeamSession } as never)
+    const res = await GET(new NextRequest("http://localhost/api/cost/trend?scope=service&id=unknown-app"))
+    expect(res.status).toBe(404)
+  })
+
+  it("allows scope=service with an id the caller's team owns (positive control)", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: platformTeamSession } as never)
+    const res = await GET(new NextRequest("http://localhost/api/cost/trend?scope=service&id=platform-app"))
+    expect(res.status).toBe(200)
+    expect(getCostTrend).toHaveBeenCalled()
+  })
+
+  it("allows scope=cluster for any authenticated caller (aggregate, filtered inside getCostTrend)", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: frontendTeamSession } as never)
+    const res = await GET(new NextRequest("http://localhost/api/cost/trend?scope=cluster"))
+    expect(res.status).toBe(200)
+    expect(getCostTrend).toHaveBeenCalled()
+  })
+
+  it("401s an unauthenticated caller", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ error: "unauthorized" } as never)
+    const res = await GET(new NextRequest("http://localhost/api/cost/trend?scope=cluster"))
+    expect(res.status).toBe(401)
+  })
+})
