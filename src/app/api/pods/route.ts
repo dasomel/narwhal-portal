@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { getK8sApiServer } from "@/lib/config"
+import { getK8sBearerToken } from "@/lib/k8s-token"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import { ValidationError, toValidationErrorBody, assertK8sNamespace } from "@/lib/validation"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
@@ -18,8 +19,6 @@ export interface PodSummary {
 export interface PodsResponse {
   pods: PodSummary[]
 }
-
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
 
 interface K8sPodList {
   items: Array<{
@@ -49,7 +48,10 @@ async function fetchPodsByNamespace(namespace: string, instance?: string): Promi
   const path = `/api/v1/namespaces/${namespace}/pods${query}`
   const res = await fetch(`${getK8sApiServer()}${path}`, {
     headers: {
-      Authorization: `Bearer ${K8S_TOKEN}`,
+      // Reads the projected serviceAccountToken file each call (cached briefly,
+      // auto-refreshed) instead of a token captured once at module load — see
+      // src/lib/k8s-token.ts (Portal #20).
+      Authorization: `Bearer ${getK8sBearerToken()}`,
       Accept: "application/json",
     },
   })
