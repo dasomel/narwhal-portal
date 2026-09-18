@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { validateRuntimeConfig, getK8sApiServer, getDependencyUrl } from "./config"
+import { validateRuntimeConfig, getK8sApiServer, getDependencyUrl, assertHttpsInProduction } from "./config"
 
 describe("Runtime Configuration Validation (Issue #60)", () => {
   const originalEnv = { ...process.env }
@@ -94,5 +94,55 @@ describe("getDependencyUrl (Issue #60 phase 3)", () => {
     expect(() => getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")).toThrow(
       "Missing required production configuration: PROMETHEUS_URL",
     )
+  })
+})
+
+describe("assertHttpsInProduction (narwhal-portal#39)", () => {
+  const originalEnv = { ...process.env }
+
+  beforeEach(() => {
+    process.env = { ...originalEnv }
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+  })
+
+  it("throws in production for a plain http:// URL", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    expect(() => assertHttpsInProduction("GITEA_URL", "http://gitea-http.devtools.svc.cluster.local:3000")).toThrow(
+      /GITEA_URL must use https:\/\/ in production/,
+    )
+  })
+
+  it("passes in production for an https:// URL", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    expect(() => assertHttpsInProduction("GITEA_URL", "https://gitea.narwhal.internal")).not.toThrow()
+  })
+
+  it("does not enforce scheme outside production", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
+    expect(() => assertHttpsInProduction("GITEA_URL", "http://localhost:3000")).not.toThrow()
+  })
+
+  it("is a no-op when the URL is unset (the required-var check owns that case)", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    expect(() => assertHttpsInProduction("GITEA_URL", undefined)).not.toThrow()
+  })
+
+  it("flags a non-https KEYCLOAK_ISSUER/GITEA_URL in validateRuntimeConfig", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.AUTH_MOCK
+    process.env.AUTH_SECRET = "secret"
+    process.env.KEYCLOAK_ISSUER = "http://keycloak.narwhal.internal"
+    process.env.KEYCLOAK_CLIENT_ID = "portal"
+    process.env.KEYCLOAK_CLIENT_SECRET = "secret"
+    process.env.K8S_API_SERVER = "https://k8s.narwhal.internal:6443"
+    process.env.GITEA_URL = "http://gitea.narwhal.internal"
+
+    const result = validateRuntimeConfig()
+    expect(result.valid).toBe(false)
+    expect(result.missingRequired).toContain("KEYCLOAK_ISSUER (must be https://)")
+    expect(result.missingRequired).toContain("GITEA_URL (must be https://)")
   })
 })

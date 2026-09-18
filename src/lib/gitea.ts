@@ -1,4 +1,5 @@
 import { cacheGet, cacheSet } from "./valkey"
+import { assertHttpsInProduction } from "./config"
 
 // Gitea client for the one thing the portal writes: a namespace request.
 //
@@ -15,6 +16,10 @@ import { cacheGet, cacheSet } from "./valkey"
 // approvals". If this file were rewritten to push straight to main it would fail.
 
 const GITEA_URL = (process.env.GITEA_URL ?? "http://gitea-http.devtools.svc.cluster.local:3000").replace(/\/+$/, "")
+// narwhal-portal#39: the GITEA_TOKEN below is a scoped machine credential (see the
+// portal-gitops branch-only push whitelist note above) travelling over this URL —
+// require TLS in production so it can't be read or replayed off the wire.
+assertHttpsInProduction("GITEA_URL", GITEA_URL)
 const GITEA_OWNER = process.env.GITEA_OWNER ?? "gitea-admin"
 const GITEA_REPO = process.env.GITEA_REPO ?? "narwhal-gitops"
 const GITEA_TOKEN = process.env.GITEA_TOKEN ?? ""

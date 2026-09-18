@@ -2,11 +2,17 @@ import NextAuth from "next-auth"
 import type { NextAuthConfig, Session } from "next-auth"
 import type { JWT } from "next-auth/jwt"
 import Credentials from "next-auth/providers/credentials"
+import { assertHttpsInProduction } from "./config"
 
 // H-8: AUTH_MOCK production guard — module-load-time check
 if (process.env.NODE_ENV === "production" && process.env.AUTH_MOCK === "true") {
   throw new Error("AUTH_MOCK cannot be enabled in production (NODE_ENV=production)")
 }
+
+// narwhal-portal#39: the OIDC handshake with Keycloak — including the id_token this
+// portal trusts for the caller's identity and group claims — must be TLS-verified in
+// production. A plain http:// issuer is a downgrade of the whole auth boundary.
+assertHttpsInProduction("KEYCLOAK_ISSUER", process.env.KEYCLOAK_ISSUER)
 
 // See narwhal/docs/common/oidc-rbac-contract.md for the canonical OIDC groups-claim
 // contract (raw bare-name values, apiserver-side "oidc:" prefixing) this file implements.
