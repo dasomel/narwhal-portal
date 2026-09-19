@@ -1,5 +1,7 @@
 @AGENTS.md
 
+> Claude specialist agents and compatibility routing under `.claude/` make this adapter intentionally retained; native `AGENTS.md` fallback does not replace the team harness.
+
 # Narwhal Portal Claude adapter
 
 Repository-wide engineering rules live in `AGENTS.md`. Portable project workflows live under `.agents/skills/`. Keep this file limited to Claude-specific routing and harness behavior.
