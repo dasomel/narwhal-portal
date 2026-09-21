@@ -167,35 +167,80 @@ export function CostBreakdownTable() {
               <TableRow>
                 <TableHead
                   className="cursor-pointer select-none"
+                  role="button"
+                  tabIndex={0}
+                  aria-sort={sortKey === "id" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                   onClick={() => toggleSort("id")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleSort("id")
+                    }
+                  }}
                 >
                   {scopeView === "namespace" ? t("cost.namespace") : t("cost.service")}
                   <SortIcon col="id" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
+                  role="button"
+                  tabIndex={0}
+                  aria-sort={sortKey === "cpu" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                   onClick={() => toggleSort("cpu")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleSort("cpu")
+                    }
+                  }}
                 >
                   {t("cost.cpuHourlyShort")}
                   <SortIcon col="cpu" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
+                  role="button"
+                  tabIndex={0}
+                  aria-sort={sortKey === "memory" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                   onClick={() => toggleSort("memory")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleSort("memory")
+                    }
+                  }}
                 >
                   {t("cost.memoryHourlyShort")}
                   <SortIcon col="memory" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
+                  role="button"
+                  tabIndex={0}
+                  aria-sort={sortKey === "storage" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                   onClick={() => toggleSort("storage")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleSort("storage")
+                    }
+                  }}
                 >
                   {t("cost.storageHourlyShort")}
                   <SortIcon col="storage" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
+                  role="button"
+                  tabIndex={0}
+                  aria-sort={sortKey === "monthly" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                   onClick={() => toggleSort("monthly")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleSort("monthly")
+                    }
+                  }}
                 >
                   {t("cost.monthlyEstimate")}
                   <SortIcon col="monthly" />
