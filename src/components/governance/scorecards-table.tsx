@@ -347,7 +347,16 @@ export function ScorecardsTable() {
                 <TableRow
                   key={svc.id}
                   className="cursor-pointer hover:bg-muted/50"
+                  role="link"
+                  tabIndex={0}
+                  aria-label={t("scorecard.openService", { name: svc.name })}
                   onClick={() => router.push(`/catalog/${svc.id}?tab=quality`)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      router.push(`/catalog/${svc.id}?tab=quality`)
+                    }
+                  }}
                 >
                   <TableCell><TierBadge tier={svc.tier} /></TableCell>
                   <TableCell>

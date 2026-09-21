@@ -941,6 +941,7 @@ const ko = {
   "scorecard.sort.name": "이름순",
   "scorecard.servicesCount": "{count}개 서비스",
   "scorecard.noResults": "검색 결과가 없습니다",
+  "scorecard.openService": "{name} 서비스 품질 상세 열기",
 
   // time additions
   "time.years": "{count}년",
@@ -2091,6 +2092,7 @@ const en: Record<keyof typeof ko, string> = {
   "scorecard.sort.name": "By Name",
   "scorecard.servicesCount": "{count} services",
   "scorecard.noResults": "No results found",
+  "scorecard.openService": "Open quality details for {name}",
 
   // time additions
   "time.years": "{count}y",
