@@ -167,6 +167,7 @@ const ko = {
   // common
   "common.loading": "확인하는 중...",
   "common.cancel": "취소",
+  "common.retry": "다시 시도",
   "common.loadError": "데이터를 불러올 수 없습니다",
 
   // certs table
@@ -280,6 +281,7 @@ const ko = {
   "events.description": "설명",
   "events.viewInCatalog": "카탈로그에서 보기",
   "events.checkAlertmanager": "Alertmanager에서 확인하세요",
+  "events.partialUnavailable": "알림 또는 이벤트 데이터를 불러오지 못했습니다.",
   "events.relative.justNow": "방금 전",
   "events.relative.minutesAgo": "{n}분 전",
   "events.relative.hoursAgo": "{n}시간 전",
@@ -1319,6 +1321,7 @@ const en: Record<keyof typeof ko, string> = {
   // common
   "common.loading": "Loading...",
   "common.cancel": "Cancel",
+  "common.retry": "Retry",
   "common.loadError": "Failed to load data",
 
   // certs table
@@ -1432,6 +1435,7 @@ const en: Record<keyof typeof ko, string> = {
   "events.description": "Description",
   "events.viewInCatalog": "View in Catalog",
   "events.checkAlertmanager": "Check in Alertmanager",
+  "events.partialUnavailable": "Alert or event data is unavailable.",
   "events.relative.justNow": "just now",
   "events.relative.minutesAgo": "{n}m ago",
   "events.relative.hoursAgo": "{n}h ago",
