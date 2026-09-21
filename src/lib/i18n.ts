@@ -899,6 +899,7 @@ const ko = {
   "cost.cpuHourlyShort": "CPU $/h",
   "cost.memoryHourlyShort": "Mem $/h",
   "cost.storageHourlyShort": "Stor $/h",
+  "cost.openDetails": "{name} 비용 상세 열기",
   "cost.cores": "코어",
   "cost.gb": "GB",
 
@@ -2050,6 +2051,7 @@ const en: Record<keyof typeof ko, string> = {
   "cost.cpuHourlyShort": "CPU $/h",
   "cost.memoryHourlyShort": "Mem $/h",
   "cost.storageHourlyShort": "Stor $/h",
+  "cost.openDetails": "Open cost details for {name}",
   "cost.cores": "cores",
   "cost.gb": "GB",
 

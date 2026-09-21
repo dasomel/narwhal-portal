@@ -93,9 +93,9 @@ export function CostBreakdownTable() {
   function handleRowClick(item: CostItem) {
     if (scopeView === "service") {
       router.push(`/catalog/${item.id}?tab=cost`)
+      return
     }
-    // namespace 클릭 시 service 뷰로 전환
-    // TODO(wrap-up): namespace → /catalog?namespace=X 라우팅 연결
+    router.push(`/catalog?namespace=${encodeURIComponent(item.id)}`)
   }
 
   function SortIcon({ col }: { col: SortKey }) {
@@ -251,12 +251,17 @@ export function CostBreakdownTable() {
               {sorted.map((item) => (
                 <TableRow
                   key={item.id}
-                  className={
-                    scopeView === "service"
-                      ? "cursor-pointer hover:bg-muted/50"
-                      : "cursor-default"
-                  }
+                  className="cursor-pointer hover:bg-muted/50"
+                  role="link"
+                  tabIndex={0}
+                  aria-label={t("cost.openDetails", { name: item.id })}
                   onClick={() => handleRowClick(item)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      handleRowClick(item)
+                    }
+                  }}
                 >
                   <TableCell className="font-mono text-xs">
                     <div className="flex items-center gap-2">
