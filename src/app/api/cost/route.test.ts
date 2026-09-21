@@ -63,6 +63,13 @@ function fakeFetch(url: string) {
       { metric: { namespace: "frontend-app" }, value: [0, "2000000000"] },
     ])
   }
+  if (url.includes("kubelet_volume_stats_used_bytes")) {
+    return jsonResponse([
+      // Regression fixture: a namespace with PVC usage but no CPU/memory
+      // sample must still appear in namespace cost results.
+      { metric: { namespace: "storage-only" }, value: [0, "1000000000"] },
+    ])
+  }
   return jsonResponse([])
 }
 function jsonResponse(result: unknown) {
@@ -102,6 +109,20 @@ afterEach(() => {
 })
 
 describe("GET /api/cost — scope enforcement", () => {
+  it("includes namespaces represented only by storage metrics", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
+    const res = await GET(requestUrl("namespace"))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    const storageOnly = body.items.find((item: { id: string }) => item.id === "storage-only")
+    expect(storageOnly).toMatchObject({
+      id: "storage-only",
+      cpu: { cores: 0 },
+      memory: { gb: 0 },
+      storage: { gb: 1 },
+    })
+  })
+
   it("does not leak another team's namespace cost to a cross-scope caller", async () => {
     vi.mocked(requireRole).mockResolvedValue({ session: frontendTeamSession } as never)
     const res = await GET(requestUrl("namespace"))
@@ -126,7 +147,7 @@ describe("GET /api/cost — scope enforcement", () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     const ids = body.items.map((i: { id: string }) => i.id).sort()
-    expect(ids).toEqual(["frontend-app", "platform-system"])
+    expect(ids).toEqual(["frontend-app", "platform-system", "storage-only"])
   })
 
   it("scopes the aggregated cluster total too, not just the namespace/service list", async () => {
@@ -138,7 +159,7 @@ describe("GET /api/cost — scope enforcement", () => {
     vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     const full = await GET(requestUrl())
     const fullBody = await full.json()
-    expect(fullBody.items).toEqual([expect.objectContaining({ id: "cluster", totalHourly: 0.15 })])
+    expect(fullBody.items).toEqual([expect.objectContaining({ id: "cluster", totalHourly: 0.1501 })])
   })
 
   it("keys the cache by scope fingerprint, not one shared literal key", async () => {

@@ -384,7 +384,9 @@ export async function getCost(
         const ns = r.metric.namespace
         if (ns && ns !== "unknown" && namespaceVisible(ns, effScope)) storMap.set(ns, (storMap.get(ns) ?? 0) + parseFloat(r.value[1]))
       }
-      const namespaces = new Set([...cpuMap.keys(), ...memMap.keys()])
+      // Storage-only namespaces still represent billable resources. Excluding
+      // storMap here silently hides PVC cost when no CPU/memory sample exists.
+      const namespaces = new Set([...cpuMap.keys(), ...memMap.keys(), ...storMap.keys()])
       const items: CostItem[] = []
       for (const ns of namespaces) {
         items.push(calcItem(ns, cpuMap.get(ns) ?? 0, memMap.get(ns) ?? 0, storMap.get(ns) ?? 0, unitPrices))
