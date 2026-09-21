@@ -431,7 +431,10 @@ export async function getCost(
       return result
     }
     items.sort((a, b) => b.totalHourly - a.totalHourly)
-    const result = { items }
+    const result = {
+      items,
+      notice: "서비스별 비용에는 PVC/storage가 포함되지 않습니다. namespace 비용에서 미할당 storage를 확인하세요.",
+    }
     await cacheSet(cacheKey, result, 300)
     return result
   } catch (err) {

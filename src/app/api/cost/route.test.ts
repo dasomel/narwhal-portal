@@ -20,7 +20,7 @@ const { requireRole } = await import("@/lib/auth")
 const { cacheGet, cacheSet } = await import("@/lib/valkey")
 const { getNamespaces } = await import("@/lib/k8s-client")
 const { getEffectiveScope } = await import("@/lib/scope")
-const { getCostByService, getCostTrend } = await import("@/lib/cost")
+const { getCost, getCostByService, getCostTrend } = await import("@/lib/cost")
 const { GET } = await import("./route")
 
 const pricingEnvNames = [
@@ -121,6 +121,25 @@ describe("GET /api/cost — scope enforcement", () => {
       memory: { gb: 0 },
       storage: { gb: 1 },
     })
+  })
+
+  it("exposes the service-scope storage exclusion", async () => {
+    const scope = await getEffectiveScope(adminSession)
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (url.includes("container_cpu_usage_seconds_total")) {
+        return Promise.resolve(jsonResponse([{
+          metric: { namespace: "frontend-app", label_app_kubernetes_io_instance: "portal" },
+          value: [0, "1"],
+        }]))
+      }
+      return Promise.resolve(jsonResponse([{
+        metric: { namespace: "frontend-app", label_app_kubernetes_io_instance: "portal" },
+        value: [0, "1000000000"],
+      }]))
+    }))
+
+    const result = await getCost("service", scope)
+    expect(result.notice).toContain("PVC/storage")
   })
 
   it("does not leak another team's namespace cost to a cross-scope caller", async () => {
