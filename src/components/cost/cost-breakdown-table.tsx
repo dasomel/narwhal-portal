@@ -118,6 +118,7 @@ export function CostBreakdownTable() {
           <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
             <button
               onClick={() => setScopeView("namespace")}
+              aria-pressed={scopeView === "namespace"}
               className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
                 scopeView === "namespace"
                   ? "bg-primary text-primary-foreground"
@@ -128,6 +129,7 @@ export function CostBreakdownTable() {
             </button>
             <button
               onClick={() => setScopeView("service")}
+              aria-pressed={scopeView === "service"}
               className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
                 scopeView === "service"
                   ? "bg-primary text-primary-foreground"
