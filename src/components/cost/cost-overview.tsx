@@ -3,7 +3,6 @@
 /**
  * CostOverview — spec §5.5 상단 카드(시간당/월 + CPU/Mem/Storage 분해) + 30일 추이 라인차트
  * 차트: Recharts (resource-chart.tsx 동일 라이브러리)
- * TODO(wrap-up): i18n
  */
 
 import { useQuery } from "@tanstack/react-query"
@@ -179,7 +178,7 @@ export function CostOverview() {
                   {formatCurrency(cpuHourly)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {item?.cpu.cores.toFixed(3) ?? "0"} cores
+                  {item?.cpu.cores.toFixed(3) ?? "0"} {t("cost.cores")}
                 </p>
               </div>
             )}
@@ -201,7 +200,7 @@ export function CostOverview() {
                   {formatCurrency(memHourly)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {item?.memory.gb.toFixed(2) ?? "0"} GB
+                  {item?.memory.gb.toFixed(2) ?? "0"} {t("cost.gb")}
                 </p>
               </div>
             )}
@@ -223,7 +222,7 @@ export function CostOverview() {
                 {formatCurrency(storHourly)}
               </p>
               <p className="text-xs text-muted-foreground">
-                {item?.storage.gb.toFixed(2) ?? "0"} GB
+                {item?.storage.gb.toFixed(2) ?? "0"} {t("cost.gb")}
               </p>
             </CardContent>
           </Card>

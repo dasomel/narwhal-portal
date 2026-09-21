@@ -899,6 +899,8 @@ const ko = {
   "cost.cpuHourlyShort": "CPU $/h",
   "cost.memoryHourlyShort": "Mem $/h",
   "cost.storageHourlyShort": "Stor $/h",
+  "cost.cores": "코어",
+  "cost.gb": "GB",
 
   // scorecard page additions
   "scorecard.pageTitle": "서비스 품질 점수 (Scorecard)",
@@ -2047,6 +2049,8 @@ const en: Record<keyof typeof ko, string> = {
   "cost.cpuHourlyShort": "CPU $/h",
   "cost.memoryHourlyShort": "Mem $/h",
   "cost.storageHourlyShort": "Stor $/h",
+  "cost.cores": "cores",
+  "cost.gb": "GB",
 
   // scorecard page additions
   "scorecard.pageTitle": "Service Quality Scorecard",
