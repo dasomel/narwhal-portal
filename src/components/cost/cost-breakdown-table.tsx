@@ -2,7 +2,6 @@
 
 /**
  * CostBreakdownTable — spec §5.5 Namespace/Service 토글, 표 정렬, 행 클릭 → 상세
- * TODO(wrap-up): i18n
  */
 
 import { useState, useMemo } from "react"
@@ -125,7 +124,7 @@ export function CostBreakdownTable() {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Namespace
+              {t("cost.namespace")}
             </button>
             <button
               onClick={() => setScopeView("service")}
@@ -135,7 +134,7 @@ export function CostBreakdownTable() {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Service
+              {t("cost.service")}
             </button>
           </div>
         </div>
@@ -168,28 +167,28 @@ export function CostBreakdownTable() {
                   className="cursor-pointer select-none"
                   onClick={() => toggleSort("id")}
                 >
-                  {scopeView === "namespace" ? "Namespace" : "Service"}
+                  {scopeView === "namespace" ? t("cost.namespace") : t("cost.service")}
                   <SortIcon col="id" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
                   onClick={() => toggleSort("cpu")}
                 >
-                  CPU $/h
+                  {t("cost.cpuHourlyShort")}
                   <SortIcon col="cpu" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
                   onClick={() => toggleSort("memory")}
                 >
-                  Mem $/h
+                  {t("cost.memoryHourlyShort")}
                   <SortIcon col="memory" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
                   onClick={() => toggleSort("storage")}
                 >
-                  Stor $/h
+                  {t("cost.storageHourlyShort")}
                   <SortIcon col="storage" />
                 </TableHead>
                 <TableHead
@@ -215,7 +214,7 @@ export function CostBreakdownTable() {
                   <TableCell className="font-mono text-xs">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-xs">
-                        {scopeView === "namespace" ? "ns" : "svc"}
+                        {scopeView === "namespace" ? t("cost.namespaceShort") : t("cost.serviceShort")}
                       </Badge>
                       {item.id}
                     </div>

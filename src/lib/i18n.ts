@@ -892,6 +892,13 @@ const ko = {
   "cost.developmentPricing": "개발 환경 기본 단가가 사용 중입니다. 운영 배포에는 가격 구성이 필요합니다.",
   "cost.pricingUnavailable": "비용 단가 구성이 없어 비용 데이터를 표시할 수 없습니다.",
   "cost.dataUnavailable": "비용 데이터를 불러올 수 없습니다. 잠시 후 다시 시도하세요.",
+  "cost.namespace": "네임스페이스",
+  "cost.service": "서비스",
+  "cost.namespaceShort": "ns",
+  "cost.serviceShort": "svc",
+  "cost.cpuHourlyShort": "CPU $/h",
+  "cost.memoryHourlyShort": "Mem $/h",
+  "cost.storageHourlyShort": "Stor $/h",
 
   // scorecard page additions
   "scorecard.pageTitle": "서비스 품질 점수 (Scorecard)",
@@ -2033,6 +2040,13 @@ const en: Record<keyof typeof ko, string> = {
   "cost.developmentPricing": "Development placeholder prices are in use. Production deployments require pricing configuration.",
   "cost.pricingUnavailable": "Cost data cannot be displayed because pricing is not configured.",
   "cost.dataUnavailable": "Cost data is unavailable. Please try again shortly.",
+  "cost.namespace": "Namespace",
+  "cost.service": "Service",
+  "cost.namespaceShort": "ns",
+  "cost.serviceShort": "svc",
+  "cost.cpuHourlyShort": "CPU $/h",
+  "cost.memoryHourlyShort": "Mem $/h",
+  "cost.storageHourlyShort": "Stor $/h",
 
   // scorecard page additions
   "scorecard.pageTitle": "Service Quality Scorecard",
