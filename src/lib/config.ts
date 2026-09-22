@@ -8,12 +8,29 @@ export function isProduction(): boolean {
   return process.env.NODE_ENV === "production"
 }
 
-// Centralized K8S_API_SERVER configuration
+// In-cluster API server for the portal's OWN server-side calls (proxying pod logs,
+// job submission, live informers, etc). Prefers KUBERNETES_SERVICE_HOST (kubelet-injected,
+// always correct in-cluster) over K8S_API_SERVER (the provisioner's VIP, correct only when
+// VIP_ADDRESS was exported at provisioning time — see WO-D05 in the seam-drift audit).
 export function getK8sApiServer(): string {
   if (process.env.KUBERNETES_SERVICE_HOST) {
     const port = process.env.KUBERNETES_SERVICE_PORT || "443"
     return `https://${process.env.KUBERNETES_SERVICE_HOST}:${port}`
   }
+  if (process.env.K8S_API_SERVER) {
+    return process.env.K8S_API_SERVER
+  }
+  if (process.env.NODE_ENV !== "production") {
+    // Development-only fallback for local VM cluster
+    return "https://192.168.56.100:6443"
+  }
+  throw new Error("Missing required production configuration: K8S_API_SERVER")
+}
+
+// External-facing API server for artifacts a HUMAN uses outside the cluster (downloaded
+// kubeconfig). Must NOT resolve to the in-cluster ClusterIP/KUBERNETES_SERVICE_HOST — that
+// address is unreachable off-cluster. Always the provisioner's VIP.
+export function getExternalK8sApiServer(): string {
   if (process.env.K8S_API_SERVER) {
     return process.env.K8S_API_SERVER
   }
