@@ -92,9 +92,7 @@ function validateIssuerAudience(profile: Record<string, unknown>): boolean {
   if (process.env.AUTH_MOCK === "true") return true
 
   const expectedIssuer = process.env.KEYCLOAK_ISSUER
-  const expectedAudience =
-    process.env.KEYCLOAK_CLIENT_ID ??
-    process.env.OIDC_CLIENT_ID
+  const expectedAudience = process.env.KEYCLOAK_CLIENT_ID
 
   if (!expectedIssuer || !expectedAudience) {
     console.error("[auth] OIDC issuer/audience env not configured", {
