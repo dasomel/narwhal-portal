@@ -10,12 +10,12 @@ export function isProduction(): boolean {
 
 // Centralized K8S_API_SERVER configuration
 export function getK8sApiServer(): string {
-  if (process.env.K8S_API_SERVER) {
-    return process.env.K8S_API_SERVER
-  }
   if (process.env.KUBERNETES_SERVICE_HOST) {
     const port = process.env.KUBERNETES_SERVICE_PORT || "443"
     return `https://${process.env.KUBERNETES_SERVICE_HOST}:${port}`
+  }
+  if (process.env.K8S_API_SERVER) {
+    return process.env.K8S_API_SERVER
   }
   if (process.env.NODE_ENV !== "production") {
     // Development-only fallback for local VM cluster
