@@ -18,6 +18,10 @@ on:
       - "DESIGN.md"
       - "src/app/globals.css"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # Least privilege: this workflow only reads the checkout.
 permissions:
   contents: read

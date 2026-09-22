@@ -29,6 +29,10 @@ on:
       - "tsconfig.json"
       - "Dockerfile"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # Read-only: this job inspects the checkout and produces no artifact.
 permissions:
   contents: read
