@@ -143,7 +143,9 @@ export function computeVulnDbFreshness(lastSyncIso?: string): VulnDbFreshness {
     lastSyncTime: syncTime,
     dbAgeDays,
     status,
-    dbRegistry: process.env.TRIVY_DB_REGISTRY || "harbor.kakao.narwhal.internal/library/trivy-db",
+    dbRegistry:
+      process.env.TRIVY_DB_REGISTRY ||
+      `harbor.${process.env.CLUSTER_BASE_DOMAIN ?? process.env.NEXT_PUBLIC_CLUSTER_BASE_DOMAIN ?? "local.narwhal.internal"}/library/trivy-db`,
   }
 }
 
