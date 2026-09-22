@@ -1,23 +1,15 @@
 import { readFileSync } from "fs"
-import { join } from "path"
 import { cacheGet, cacheSet } from "./valkey"
 import { getDependencyUrl, isProduction } from "./config"
 
-const VAULT_SECRETS_PATH = "/vault/secrets"
-
 /**
- * OpenBao Agent Injector가 마운트한 시크릿 파일 읽기. 파일이 없으면 환경변수 폴백.
+ * 환경변수에서 시크릿 읽기. OpenBao Agent Injector 애노테이션이 클러스터 배포에
+ * 존재하지 않으므로(파일 마운트 경로 사용 불가) 환경변수 폴백만 지원한다.
  */
 export function getSecret(name: string, envFallback?: string): string {
-  const filePath = join(VAULT_SECRETS_PATH, name)
-  try {
-    return readFileSync(filePath, "utf-8").trim()
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err
-  }
   const envVal = envFallback ? process.env[envFallback] : undefined
   if (envVal) return envVal
-  throw new Error(`Secret '${name}' not found in OpenBao or environment`)
+  throw new Error(`Secret '${name}' not found in environment`)
 }
 
 // --- HTTP 클라이언트 ---
