@@ -41,6 +41,10 @@ on:
       - "scripts/generate-third-party-notices.mjs"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # Read-only: both jobs inspect the checkout. The SBOM leaves as a build artifact,
 # not as a commit.
 permissions:
