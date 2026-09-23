@@ -10,6 +10,7 @@
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken, invalidateK8sBearerToken } from "./k8s-token"
 import { pushEvent } from "./live-stream"
+import { claimIdempotencyKey, getIdempotencyStore } from "./idempotency"
 import type { LiveEventIngest, LiveEventType, LiveSeverity } from "@/types/live"
 import type { EventResource } from "@/types/event-envelope"
 
@@ -28,6 +29,15 @@ function hasBearerToken(apiServer: string): boolean {
 }
 
 let started = false
+let informerAbortController: AbortController | null = null
+
+export function stopLiveK8sInformerForTesting(): void {
+  started = false
+  if (informerAbortController) {
+    informerAbortController.abort()
+    informerAbortController = null
+  }
+}
 
 // Warning events are always surfaced. Normal events are mostly noise (probes,
 // image pulls, sandbox churn) — only forward a curated set of meaningful reasons.
@@ -97,11 +107,14 @@ function toIngest(ev: K8sEvent): LiveEventIngest | null {
     description: (ev.message ?? "").slice(0, 500),
     resource,
     visibility: io.namespace ? "namespace" : "cluster",
+    source_event_id: ev.metadata?.uid && ev.metadata?.resourceVersion
+      ? `${ev.metadata.uid}:${ev.metadata.resourceVersion}`
+      : undefined,
   }
 }
 
-async function getLatestResourceVersion(apiServer: string): Promise<string> {
-  const res = await fetch(`${apiServer}/api/v1/events?limit=1`, { headers: headers(apiServer) })
+async function getLatestResourceVersion(apiServer: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(`${apiServer}/api/v1/events?limit=1`, { headers: headers(apiServer), signal })
   if (!res.ok) {
     // Rotated/expired token — drop the cache so the next retry (outer loop's
     // backoff in startLiveK8sInformer) re-reads the projected token file.
@@ -113,41 +126,66 @@ async function getLatestResourceVersion(apiServer: string): Promise<string> {
 }
 
 /** Runs one watch connection; returns the last-seen resourceVersion when it ends. */
-async function watchOnce(apiServer: string, resourceVersion: string): Promise<string> {
+async function watchOnce(apiServer: string, resourceVersion: string, signal?: AbortSignal): Promise<string> {
   const url =
     `${apiServer}/api/v1/events` +
     `?watch=1&resourceVersion=${encodeURIComponent(resourceVersion)}&timeoutSeconds=300`
-  const res = await fetch(url, { headers: headers(apiServer) })
+  const res = await fetch(url, { headers: headers(apiServer), signal })
   if (!res.ok || !res.body) {
     if (res.status === 401) invalidateK8sBearerToken()
     throw new Error(`watch events ${res.status}`)
   }
 
   const reader = res.body.getReader()
+  const onAbort = () => { void reader.cancel() }
+  signal?.addEventListener("abort", onAbort, { once: true })
   const decoder = new TextDecoder()
   let buf = ""
   let rv = resourceVersion
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    let nl: number
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim()
-      buf = buf.slice(nl + 1)
-      if (!line) continue
-      try {
-        const evt = JSON.parse(line) as { type: string; object: K8sEvent }
-        const obj = evt.object
-        if (obj?.metadata?.resourceVersion) rv = obj.metadata.resourceVersion
-        // Only surface newly-created events (skip MODIFIED/DELETED/BOOKMARK/ERROR).
-        if (evt.type === "ADDED") {
-          const ingest = toIngest(obj)
-          if (ingest) void pushEvent(ingest).catch(() => {})
+  try {
+    for (;;) {
+      if (signal?.aborted) break
+      const { value, done } = await reader.read()
+      if (done || signal?.aborted) break
+      buf += decoder.decode(value, { stream: true })
+      let nl: number
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim()
+        buf = buf.slice(nl + 1)
+        if (!line) continue
+        try {
+          const evt = JSON.parse(line) as { type: string; object: K8sEvent }
+          const obj = evt.object
+          if (obj?.metadata?.resourceVersion) rv = obj.metadata.resourceVersion
+          // Only surface newly-created events (skip MODIFIED/DELETED/BOOKMARK/ERROR).
+          if (evt.type === "ADDED") {
+            const ingest = toIngest(obj)
+            if (ingest) {
+              const uid = obj?.metadata?.uid
+              const rvKey = obj?.metadata?.resourceVersion
+              if (uid && rvKey) {
+                const claimed = await claimIdempotencyKey(
+                  getIdempotencyStore(),
+                  `k8s:${uid}:${rvKey}`,
+                  "1",
+                  3600,
+                )
+                if (claimed) continue
+              }
+              void pushEvent(ingest).catch(() => {})
+            }
+          }
+        } catch {
+          // malformed line — skip
         }
-      } catch {
-        // malformed line — skip
       }
+    }
+  } finally {
+    signal?.removeEventListener("abort", onAbort)
+    try {
+      reader.releaseLock()
+    } catch {
+      // ignore
     }
   }
   return rv
@@ -162,17 +200,23 @@ export function startLiveK8sInformer(): void {
     return
   }
   started = true
+  const controller = new AbortController()
+  informerAbortController = controller
+  const { signal } = controller
   console.log("[live-k8s-informer] starting core/v1 Events watch")
 
   void (async () => {
     let rv = "0"
     let backoff = 1000
     for (;;) {
+      if (signal.aborted) break
       try {
-        if (rv === "0") rv = await getLatestResourceVersion(apiServer)
-        rv = await watchOnce(apiServer, rv)
+        if (rv === "0") rv = await getLatestResourceVersion(apiServer, signal)
+        if (signal.aborted) break
+        rv = await watchOnce(apiServer, rv, signal)
         backoff = 1000 // clean cycle — reset backoff
       } catch (e) {
+        if (signal.aborted) break
         const msg = e instanceof Error ? e.message : String(e)
         // 410 Gone: resourceVersion too old — resync from the latest.
         if (msg.includes("410")) {
@@ -181,6 +225,7 @@ export function startLiveK8sInformer(): void {
         }
         console.warn("[live-k8s-informer] watch error, retrying:", msg)
         await new Promise((r) => setTimeout(r, backoff))
+        if (signal.aborted) break
         backoff = Math.min(backoff * 2, 30_000)
       }
     }
