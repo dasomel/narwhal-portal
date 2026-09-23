@@ -108,11 +108,22 @@ export async function getArgoAppsOrThrow(): Promise<ArgoApp[]> {
   return loadArgoApps()
 }
 
+// D1 (#54 review): read helpers keep their pre-existing non-throwing contracts —
+// getArgoApps/getArgoApp swallow ArgoCDCredentialError into []/null, same as any
+// other connectivity failure, because callers assume that (governance/dora and
+// events/route Promise.all fan-outs, the unguarded architecture/service-graph SSE
+// reads). Only WRITE paths (syncArgoApp/rollbackArgoApp below) throw it, so a
+// caller mutating state can fail closed and surface a 503 instead of silently
+// no-opping. argoFetch still throws internally so this catch can log credential
+// rejection distinctly from a plain connectivity failure.
 export async function getArgoApps(): Promise<ArgoApp[]> {
   try {
     return await loadArgoApps()
   } catch (err) {
-    if (err instanceof ArgoCDCredentialError) throw err
+    if (err instanceof ArgoCDCredentialError) {
+      console.error("[argocd] credential rejected/missing — check ARGOCD_TOKEN", err.message)
+      return []
+    }
     console.warn("[argocd] Connection failed, returning empty:", (err as Error).message)
     return []
   }
@@ -130,7 +141,10 @@ export async function getArgoApp(name: string): Promise<ArgoApp | null> {
     await cacheSet(cacheKey, app, 10)
     return app
   } catch (err) {
-    if (err instanceof ArgoCDCredentialError) throw err
+    if (err instanceof ArgoCDCredentialError) {
+      console.error("[argocd] credential rejected/missing — check ARGOCD_TOKEN", err.message)
+      return null
+    }
     return null
   }
 }

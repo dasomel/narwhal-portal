@@ -74,7 +74,7 @@ describe("gitea credential handling", () => {
     global.fetch = originalFetch
   })
 
-  it("throws GiteaCredentialError in production when GITEA_TOKEN is unset, without calling fetch", async () => {
+  it("throws GiteaCredentialError in production when GITEA_TOKEN is unset for the write path (requestTenantNamespace)", async () => {
     ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
     delete process.env.GITEA_TOKEN
 
@@ -86,9 +86,22 @@ describe("gitea credential handling", () => {
       })
     ).rejects.toBeInstanceOf(GiteaCredentialError)
     expect(mockFetch).not.toHaveBeenCalled()
+  })
 
-    await expect(getCommitTimestamp("sha123")).rejects.toBeInstanceOf(GiteaCredentialError)
+  it("returns null (not a throw) in production when GITEA_TOKEN is unset for getCommitTimestamp, and logs it distinctly", async () => {
+    // D1 (#54 review): getCommitTimestamp restores its documented "returns null,
+    // never throws" contract — the DORA route's Promise.all fan-out over commit
+    // shas must not lose every other sha's timestamp because one token is missing.
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.GITEA_TOKEN
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    await expect(getCommitTimestamp("sha123")).resolves.toBeNull()
     expect(mockFetch).not.toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("check GITEA_TOKEN"),
+      expect.anything(),
+    )
   })
 
   it("picks up GITEA_TOKEN change between calls (rotation without restart)", async () => {
@@ -123,7 +136,7 @@ describe("gitea credential handling", () => {
     )
   })
 
-  it("throws GiteaCredentialError on 401", async () => {
+  it("throws GiteaCredentialError on 401 for the write path (requestTenantNamespace)", async () => {
     process.env.GITEA_TOKEN = "some-token"
     mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
 
@@ -134,9 +147,18 @@ describe("gitea credential handling", () => {
         requestedBy: "alice",
       })
     ).rejects.toBeInstanceOf(GiteaCredentialError)
+  })
 
+  it("returns null on 401 for getCommitTimestamp (read helper stays non-throwing) and logs it distinctly", async () => {
+    process.env.GITEA_TOKEN = "some-token"
     mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
-    await expect(getCommitTimestamp("sha123")).rejects.toBeInstanceOf(GiteaCredentialError)
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    await expect(getCommitTimestamp("sha123")).resolves.toBeNull()
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("check GITEA_TOKEN"),
+      expect.anything(),
+    )
   })
 
   it("treats 403 as a permission error (GiteaError), not a credential failure", async () => {

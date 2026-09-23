@@ -25,6 +25,7 @@ import {
   ArgoForbiddenError,
   ArgoNotFoundError,
   ArgoCDCredentialError,
+  getArgoApp,
   getArgoApps,
   getArgoAppsOrThrow,
   getArgoToken,
@@ -144,12 +145,22 @@ describe("argocd credential handling", () => {
     global.fetch = originalFetch
   })
 
-  it("throws ArgoCDCredentialError in production when ARGOCD_TOKEN is unset, without calling fetch", async () => {
+  it("returns [] (not a throw) in production when ARGOCD_TOKEN is unset, and logs it distinctly", async () => {
+    // D1 (#54 review): read helpers keep their non-throwing contract — the
+    // governance/dora and events/route Promise.all fan-outs, and the unguarded
+    // architecture/service-graph SSE callers, depend on getArgoApps never
+    // rejecting. A credential problem is still surfaced, just via console.error
+    // instead of a rejection, so it doesn't look like a plain empty inventory.
     ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
     delete process.env.ARGOCD_TOKEN
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-    await expect(getArgoApps()).rejects.toBeInstanceOf(ArgoCDCredentialError)
+    await expect(getArgoApps()).resolves.toEqual([])
     expect(mockFetch).not.toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("check ARGOCD_TOKEN"),
+      expect.anything(),
+    )
   })
 
   it("picks up ARGOCD_TOKEN change between calls (rotation without restart)", async () => {
@@ -184,11 +195,31 @@ describe("argocd credential handling", () => {
     )
   })
 
-  it("throws ArgoCDCredentialError on 401 and getArgoApps does not return []", async () => {
+  it("returns [] on 401 (read helper stays non-throwing) and logs the credential rejection distinctly", async () => {
     process.env.ARGOCD_TOKEN = "some-token"
     mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
-    await expect(getArgoApps()).rejects.toBeInstanceOf(ArgoCDCredentialError)
+    await expect(getArgoApps()).resolves.toEqual([])
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("check ARGOCD_TOKEN"),
+      expect.anything(),
+    )
+    // Distinct from the plain-connectivity-failure warn path below.
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it("returns null on 401 for getArgoApp (read helper stays non-throwing) and logs it distinctly", async () => {
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    await expect(getArgoApp("checkout-api")).resolves.toBeNull()
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("check ARGOCD_TOKEN"),
+      expect.anything(),
+    )
   })
 
   it("treats 403 as an RBAC denial, not a credential failure (keeps previous behavior)", async () => {
@@ -216,21 +247,18 @@ describe("argocd credential handling", () => {
     expect(apps).toEqual([])
   })
 
-  it("does not include token value in thrown error messages", async () => {
+  it("does not include the token value in the credential-rejection log", async () => {
     const secretToken = "super-secret-argo-jwt-token-999"
     process.env.ARGOCD_TOKEN = secretToken
     mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-    let thrownError: Error | null = null
-    try {
-      await getArgoApps()
-    } catch (err) {
-      thrownError = err as Error
-    }
+    const apps = await getArgoApps()
 
-    expect(thrownError).toBeInstanceOf(ArgoCDCredentialError)
-    expect(thrownError?.message).not.toContain(secretToken)
-    expect(thrownError?.message).toContain("ARGOCD_TOKEN")
+    expect(apps).toEqual([])
+    const loggedArgs = errorSpy.mock.calls.flat().map(String)
+    expect(loggedArgs.some((a) => a.includes(secretToken))).toBe(false)
+    expect(loggedArgs.some((a) => a.includes("ARGOCD_TOKEN"))).toBe(true)
   })
 
   it("throws ArgoCDCredentialError in production when ARGOCD_TOKEN is unset for sync and rollback", async () => {

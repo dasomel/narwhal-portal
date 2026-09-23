@@ -29,7 +29,7 @@ vi.mock("@/lib/valkey", () => ({
 }))
 
 const { requireRole } = await import("@/lib/auth")
-const { assertAppAccessible, rollbackArgoApp, getArgoAppFresh } = await import("@/lib/argocd")
+const { assertAppAccessible, rollbackArgoApp, getArgoAppFresh, ArgoCDCredentialError } = await import("@/lib/argocd")
 const { POST } = await import("./route")
 const { getRecentEvents } = await import("@/lib/live-stream")
 
@@ -157,5 +157,24 @@ describe("POST /api/catalog/[name]/rollback", () => {
     const body = await res.json()
     expect(body.success).toBe(false)
     expect(body.pending).toBeUndefined()
+  })
+
+  // D1 (#54 review): rollbackArgoApp is a WRITE path and keeps throwing
+  // ArgoCDCredentialError; the route fails closed with 503 instead of a bare
+  // 500, so a rejected/missing ARGOCD_TOKEN reads as "unavailable", not a
+  // generic rollback failure.
+  it("returns 503 when rollbackArgoApp throws ArgoCDCredentialError", async () => {
+    vi.mocked(rollbackArgoApp).mockRejectedValue(
+      new ArgoCDCredentialError("ArgoCD rollback rejected (HTTP 401): check ARGOCD_TOKEN"),
+    )
+    const req = new Request("http://localhost/api/catalog/checkout-api/rollback", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 2 }),
+    })
+    const res = await POST(req, params("checkout-api"))
+    expect(res.status).toBe(503)
+    const body = await res.json()
+    expect(body.error).toContain("Catalog rollback is unavailable")
   })
 })

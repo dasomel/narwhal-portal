@@ -228,6 +228,12 @@ export async function requestTenantNamespace(req: TenantRequest): Promise<Tenant
  * would have degraded into "no timestamp" rather than an error, quietly emptying the
  * DORA lead-time metric. Same shape as ArgoCD's missing repository Secret: a consumer
  * with no credentials is a consumer relying on the repo being public.
+ *
+ * D1 (#54 review): stays non-throwing even for a rejected/missing credential — the
+ * DORA route fans this out over Promise.all per commit sha, and one rejected token
+ * must not fail every other sha's lookup. A credential rejection is logged
+ * distinctly from a plain connectivity failure so it doesn't read as "commit not
+ * found"; requestTenantNamespace (a write) still throws GiteaCredentialError.
  */
 export async function getCommitTimestamp(sha: string): Promise<string | null> {
   if (!sha) return null
@@ -273,7 +279,10 @@ export async function getCommitTimestamp(sha: string): Promise<string | null> {
       return commitDate
     }
   } catch (err) {
-    if (err instanceof GiteaCredentialError) throw err
+    if (err instanceof GiteaCredentialError) {
+      console.error("[gitea] credential rejected/missing — check GITEA_TOKEN", `commit ${sha}`)
+      return null
+    }
     console.warn(`[gitea] Error fetching commit ${sha}:`, err)
   }
   return null

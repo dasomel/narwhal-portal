@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
+import { NextRequest } from "next/server"
 import type { Session } from "next-auth"
 import type { ArgoApp } from "@/lib/argocd"
 
@@ -31,19 +32,11 @@ vi.mock("@/lib/valkey", () => ({
 const { requireRole } = await import("@/lib/auth")
 const { assertAppAccessible, syncArgoApp, getArgoAppFresh, ArgoCDCredentialError } = await import("@/lib/argocd")
 const { POST } = await import("./route")
-const { getRecentEvents } = await import("@/lib/live-stream")
 
 const devSession: Session = {
   user: { email: "dev@example.com", name: "Dev User", role: "developer" },
   groups: ["developer"],
   teams: ["app-team"],
-  expires: "2026-12-31T23:59:59Z",
-}
-
-const guestSession: Session = {
-  user: { email: "guest@example.com", name: "Guest User", role: "guest" },
-  groups: [],
-  teams: [],
   expires: "2026-12-31T23:59:59Z",
 }
 
@@ -62,11 +55,14 @@ const convergedApp: ArgoApp = {
   },
 }
 
-function params(name: string) {
-  return { params: Promise.resolve({ name }) }
+function req(body: unknown) {
+  return new NextRequest("http://localhost/api/argocd/sync", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
 }
 
-describe("POST /api/catalog/[name]/sync", () => {
+describe("POST /api/argocd/sync", () => {
   beforeEach(() => {
     vi.mocked(requireRole).mockResolvedValue({ session: devSession } as never)
     vi.mocked(assertAppAccessible).mockResolvedValue(mockApp)
@@ -76,71 +72,51 @@ describe("POST /api/catalog/[name]/sync", () => {
 
   it("401s an unauthenticated request", async () => {
     vi.mocked(requireRole).mockResolvedValue({ error: "unauthorized" } as never)
-    const req = new Request("http://localhost/api/catalog/checkout-api/sync", { method: "POST" })
-    const res = await POST(req, params("checkout-api"))
+    const res = await POST(req({ appName: "checkout-api" }))
     expect(res.status).toBe(401)
   })
 
   it("403s a guest role caller", async () => {
     vi.mocked(requireRole).mockResolvedValue({ error: "forbidden" } as never)
-    const req = new Request("http://localhost/api/catalog/checkout-api/sync", { method: "POST" })
-    const res = await POST(req, params("checkout-api"))
+    const res = await POST(req({ appName: "checkout-api" }))
     expect(res.status).toBe(403)
   })
 
-  it("400s an invalid app name", async () => {
-    const req = new Request("http://localhost/api/catalog/INVALID_NAME!/sync", { method: "POST" })
-    const res = await POST(req, params("INVALID_NAME!"))
+  it("400s when appName is missing", async () => {
+    const res = await POST(req({}))
     expect(res.status).toBe(400)
   })
 
-  it("triggers sync and emits operation.started and operation.completed events", async () => {
-    const correlationId = "sync-corr-456"
-    const req = new Request("http://localhost/api/catalog/checkout-api/sync", {
-      method: "POST",
-      headers: { "x-correlation-id": correlationId },
-    })
+  it("400s an invalid app name", async () => {
+    const res = await POST(req({ appName: "INVALID_NAME!" }))
+    expect(res.status).toBe(400)
+  })
 
-    const res = await POST(req, params("checkout-api"))
+  it("syncs and reports ok on convergence", async () => {
+    const res = await POST(req({ appName: "checkout-api" }))
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.success).toBe(true)
-
-    const events = await getRecentEvents(10)
-    const started = events.find((e) => e.correlation_id === correlationId && e.event_type === "operation.started")
-    const completed = events.find((e) => e.correlation_id === correlationId && e.event_type === "operation.completed")
-
-    expect(started).toBeDefined()
-    expect(completed).toBeDefined()
-    expect(started!.resource).toEqual({
-      kind: "Application",
-      namespace: "storefront",
-      name: "checkout-api",
-      cluster: "primary",
-    })
+    expect(body.ok).toBe(true)
   })
 
   it("reports pending when the sync is accepted but not yet converged", async () => {
     vi.mocked(getArgoAppFresh).mockResolvedValue(mockApp) // no operationState -> not converged
-    const req = new Request("http://localhost/api/catalog/checkout-api/sync", { method: "POST" })
-    const res = await POST(req, params("checkout-api"))
+    const res = await POST(req({ appName: "checkout-api" }))
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body.success).toBe(true)
+    expect(body.ok).toBe(true)
     expect(body.pending).toBe(true)
   })
 
-  it("reports failure (not pending) when the operation reaches a terminal Failed phase", async () => {
+  it("reports failure (502) when the operation reaches a terminal Failed phase", async () => {
     vi.mocked(getArgoAppFresh).mockResolvedValue({
       ...mockApp,
       status: { ...mockApp.status, operationState: { phase: "Failed" } },
     })
-    const req = new Request("http://localhost/api/catalog/checkout-api/sync", { method: "POST" })
-    const res = await POST(req, params("checkout-api"))
+    const res = await POST(req({ appName: "checkout-api" }))
     expect(res.status).toBe(502)
     const body = await res.json()
-    expect(body.success).toBe(false)
-    expect(body.pending).toBeUndefined()
+    expect(body.ok).toBe(false)
   })
 
   // D1 (#54 review): syncArgoApp is a WRITE path and keeps throwing
@@ -151,10 +127,10 @@ describe("POST /api/catalog/[name]/sync", () => {
     vi.mocked(syncArgoApp).mockRejectedValue(
       new ArgoCDCredentialError("ArgoCD sync rejected (HTTP 401): check ARGOCD_TOKEN"),
     )
-    const req = new Request("http://localhost/api/catalog/checkout-api/sync", { method: "POST" })
-    const res = await POST(req, params("checkout-api"))
+    const res = await POST(req({ appName: "checkout-api" }))
     expect(res.status).toBe(503)
     const body = await res.json()
-    expect(body.error).toContain("Catalog sync is unavailable")
+    expect(body.ok).toBe(false)
+    expect(body.error).toContain("ArgoCD sync is unavailable")
   })
 })
