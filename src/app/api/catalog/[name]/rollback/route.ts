@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import {
   assertAppAccessible,
+  ArgoCDCredentialError,
   ArgoForbiddenError,
   ArgoNotFoundError,
   getArgoAppFresh,
@@ -118,6 +119,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
     }
     if (err instanceof ArgoForbiddenError) {
       return NextResponse.json({ error: err.message }, { status: 403 })
+    }
+    // D1 (#54 review): the inner try/catch around rollbackArgoApp already recorded
+    // failOperation before rethrowing; this only maps the error to a response.
+    if (err instanceof ArgoCDCredentialError) {
+      const message = `Catalog rollback is unavailable: ${err.message}`
+      console.error("[api/catalog/rollback]", message)
+      return NextResponse.json({ error: message }, { status: 503 })
     }
     const message = err instanceof Error ? err.message : "Rollback failed"
     return NextResponse.json({ error: message }, { status: 500 })

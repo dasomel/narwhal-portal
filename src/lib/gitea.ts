@@ -1,5 +1,5 @@
 import { cacheGet, cacheSet } from "./valkey"
-import { assertHttpsInProduction, getDependencyUrl } from "./config"
+import { assertHttpsInProduction, getDependencyUrl, isProduction } from "./config"
 
 // Gitea client for the one thing the portal writes: a namespace request.
 //
@@ -31,15 +31,37 @@ function getGiteaUrl(): string {
 }
 const GITEA_OWNER = process.env.GITEA_OWNER ?? "gitea-admin"
 const GITEA_REPO = process.env.GITEA_REPO ?? "narwhal-gitops"
-const GITEA_TOKEN = process.env.GITEA_TOKEN ?? ""
 const BASE_BRANCH = process.env.GITEA_BASE_BRANCH ?? "main"
+
+// Portal #54: distinguishes "the Gitea auth credential is missing/rejected"
+// from "Gitea is unreachable" (mirrors ApisixCredentialError /
+// KeycloakCredentialError).
+export class GiteaCredentialError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "GiteaCredentialError"
+  }
+}
+
+// Read at call-time (not a module-level const) — mirrors apisix-client / keycloak-client
+// so credential rotation via a re-mounted env/secret takes effect on the next call
+// without a process restart.
+export function getGiteaToken(): string {
+  const token = process.env.GITEA_TOKEN
+  if (token) return token
+  if (!isProduction()) return ""
+  throw new GiteaCredentialError(
+    "GITEA_TOKEN is not configured. Set GITEA_TOKEN to a Gitea access token."
+  )
+}
 
 // Configured check must not throw during build/static analysis, so it reads the raw
 // env var presence rather than calling getGiteaUrl() (which throws in production when
-// unset). "Not configured" here just means GITEA_URL was never set at all.
-export const giteaConfigured = Boolean(
-  process.env.GITEA_URL && GITEA_OWNER && GITEA_REPO && GITEA_TOKEN
-)
+// unset). "Not configured" here just means GITEA_URL was never set at all. Evaluated
+// per call (portal#54) so a token mounted after startup counts.
+export function isGiteaConfigured(): boolean {
+  return Boolean(process.env.GITEA_URL && GITEA_OWNER && GITEA_REPO && process.env.GITEA_TOKEN)
+}
 
 export class GiteaError extends Error {
   constructor(
@@ -52,14 +74,20 @@ export class GiteaError extends Error {
 }
 
 async function api<T>(path: string, init: RequestInit): Promise<T> {
+  const token = getGiteaToken()
   const res = await fetch(`${getGiteaUrl()}/api/v1${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `token ${GITEA_TOKEN}`,
+      Authorization: `token ${token}`,
       ...(init.headers as Record<string, string> | undefined),
     },
   })
+  if (res.status === 401) {
+    throw new GiteaCredentialError(
+      `Gitea request rejected (HTTP ${res.status}): check GITEA_TOKEN`
+    )
+  }
   if (!res.ok) {
     // Gitea answers with {"message": "..."}; keep it, since "namespace already
     // requested" and "token expired" are different problems for the caller.
@@ -200,6 +228,12 @@ export async function requestTenantNamespace(req: TenantRequest): Promise<Tenant
  * would have degraded into "no timestamp" rather than an error, quietly emptying the
  * DORA lead-time metric. Same shape as ArgoCD's missing repository Secret: a consumer
  * with no credentials is a consumer relying on the repo being public.
+ *
+ * D1 (#54 review): stays non-throwing even for a rejected/missing credential — the
+ * DORA route fans this out over Promise.all per commit sha, and one rejected token
+ * must not fail every other sha's lookup. A credential rejection is logged
+ * distinctly from a plain connectivity failure so it doesn't read as "commit not
+ * found"; requestTenantNamespace (a write) still throws GiteaCredentialError.
  */
 export async function getCommitTimestamp(sha: string): Promise<string | null> {
   if (!sha) return null
@@ -212,6 +246,7 @@ export async function getCommitTimestamp(sha: string): Promise<string | null> {
   }
 
   try {
+    const token = getGiteaToken()
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 5000)
     const url = `${getGiteaUrl()}/api/v1/repos/${GITEA_OWNER}/${GITEA_REPO}/git/commits/${encodeURIComponent(sha)}`
@@ -219,8 +254,14 @@ export async function getCommitTimestamp(sha: string): Promise<string | null> {
     const res = await fetch(url, {
       next: { revalidate: 0 },
       signal: controller.signal,
-      headers: GITEA_TOKEN ? { Authorization: `token ${GITEA_TOKEN}` } : {},
+      headers: token ? { Authorization: `token ${token}` } : {},
     }).finally(() => clearTimeout(timer))
+
+    if (res.status === 401) {
+      throw new GiteaCredentialError(
+        `Gitea request rejected (HTTP ${res.status}): check GITEA_TOKEN`
+      )
+    }
 
     if (!res.ok) {
       console.warn(`[gitea] Failed to fetch commit ${sha}: status ${res.status}`)
@@ -238,6 +279,10 @@ export async function getCommitTimestamp(sha: string): Promise<string | null> {
       return commitDate
     }
   } catch (err) {
+    if (err instanceof GiteaCredentialError) {
+      console.error("[gitea] credential rejected/missing — check GITEA_TOKEN", `commit ${sha}`)
+      return null
+    }
     console.warn(`[gitea] Error fetching commit ${sha}:`, err)
   }
   return null
