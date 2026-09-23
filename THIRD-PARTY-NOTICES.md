@@ -20431,7 +20431,7 @@ Apache License
 
 </details>
 
-### @playwright/test@1.62.1
+### @playwright/test@1.63.0
 
 - License: `Apache-2.0`
 - Author: Microsoft Corporation
@@ -23088,7 +23088,7 @@ MIT License
 
 </details>
 
-### @types/node@22.20.1
+### @types/node@22.20.4
 
 - License: `MIT`
 - Homepage: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node
@@ -23121,7 +23121,7 @@ MIT License
 
 </details>
 
-### @types/node@24.12.0
+### @types/node@24.13.6
 
 - License: `MIT`
 - Homepage: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node
@@ -36191,7 +36191,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 </details>
 
-### picomatch@4.0.4
+### picomatch@4.0.7
 
 - License: `MIT`
 - Author: Jon Schlinkert
@@ -36259,7 +36259,7 @@ SOFTWARE.
 
 </details>
 
-### playwright@1.62.1
+### playwright@1.63.0
 
 - License: `Apache-2.0`
 - Author: Microsoft Corporation
@@ -36486,7 +36486,7 @@ available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/b
 
 </details>
 
-### playwright-core@1.62.1
+### playwright-core@1.63.0
 
 - License: `Apache-2.0`
 - Author: Microsoft Corporation
@@ -40366,7 +40366,7 @@ SOFTWARE.
 
 </details>
 
-### undici-types@7.16.0
+### undici-types@7.18.2
 
 - License: `MIT`
 - Homepage: https://undici.nodejs.org
