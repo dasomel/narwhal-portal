@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getGroupsDetailed, getUsers, addUserToGroup, removeUserFromGroup } from "@/lib/keycloak-client"
+import {
+  getGroupsDetailed,
+  getUsers,
+  addUserToGroup,
+  removeUserFromGroup,
+  updateGroupAttributes,
+  KEYCLOAK_CACHE_KEYS,
+  invalidateKeycloakCaches,
+} from "@/lib/keycloak-client"
 import type { KeycloakUser } from "@/lib/keycloak-client"
 import { requireAdmin } from "@/lib/auth"
-import { cacheGet, cacheSet, cacheDel } from "@/lib/valkey"
+import { cacheGet, cacheSet } from "@/lib/valkey"
 
 export const dynamic = "force-dynamic"
 
@@ -13,7 +21,7 @@ export async function GET() {
     return NextResponse.json({ error: result.error === "unauthorized" ? "Unauthorized" : "Forbidden" }, { status })
   }
   try {
-    const cached = await cacheGet<object[]>("api:groups-enriched")
+    const cached = await cacheGet<object[]>(KEYCLOAK_CACHE_KEYS.groupsEnriched)
     if (cached) return NextResponse.json(cached)
 
     const [groups, users] = await Promise.all([getGroupsDetailed(), getUsers()])
@@ -25,7 +33,7 @@ export async function GET() {
         .filter((u): u is KeycloakUser => !!u)
         .map((u) => ({ pk: u.pk, username: u.username, email: u.email })),
     }))
-    await cacheSet("api:groups-enriched", enriched, 60)
+    await cacheSet(KEYCLOAK_CACHE_KEYS.groupsEnriched, enriched, 60)
     return NextResponse.json(enriched)
   } catch (err) {
     console.error("GET /api/settings/groups error:", err)
@@ -52,10 +60,9 @@ export async function PATCH(req: NextRequest) {
       await removeUserFromGroup(groupPk, userPk)
     } else if (action === "update-attributes") {
       if (!attributes) return NextResponse.json({ error: "attributes required" }, { status: 400 })
-      const { updateGroupAttributes } = await import("@/lib/keycloak-client")
       await updateGroupAttributes(groupPk, attributes)
     }
-    await cacheDel("api:groups-enriched")
+    await invalidateKeycloakCaches([KEYCLOAK_CACHE_KEYS.groupsEnriched])
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error("PATCH /api/settings/groups error:", err)

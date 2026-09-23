@@ -24,6 +24,8 @@ import {
   getKeycloakAdminToken,
   KeycloakCredentialError,
   KeycloakUnavailableError,
+  KEYCLOAK_CACHE_KEYS,
+  invalidateKeycloakCaches,
 } from "./keycloak-client"
 
 describe("keycloak-client pagination and methods", () => {
@@ -110,7 +112,7 @@ describe("keycloak-client pagination and methods", () => {
     expect(call2Url).toContain("/admin/realms/narwhal/users?first=200&max=100")
     expect(users[0].pk).toBe("u-0")
     expect(users[249].pk).toBe("u-249")
-    expect(cacheSet).toHaveBeenCalledWith("keycloak:users", users, 300)
+    expect(cacheSet).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.users, users, 300)
   })
 
   it("stops after fetching second page when first page has exactly 100 users and second page is empty", async () => {
@@ -163,7 +165,7 @@ describe("keycloak-client pagination and methods", () => {
       },
     ]
     vi.mocked(cacheGet).mockImplementation(async (key: string) => {
-      if (key === "keycloak:users") return cachedUsers
+      if (key === KEYCLOAK_CACHE_KEYS.users) return cachedUsers
       if (key === "keycloak:admin-token") return "mock-admin-token"
       return null
     })
@@ -192,7 +194,7 @@ describe("keycloak-client pagination and methods", () => {
     expect(mockFetch).toHaveBeenCalledTimes(2)
     expect(mockFetch.mock.calls[0][0]).toContain("/admin/realms/narwhal/groups?first=0&max=100")
     expect(mockFetch.mock.calls[1][0]).toContain("/admin/realms/narwhal/groups?first=100&max=100")
-    expect(cacheSet).toHaveBeenCalledWith("keycloak:groups", groups, 60)
+    expect(cacheSet).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groups, groups, 60)
   })
 
   it("paginates getGroupMembers correctly", async () => {
@@ -245,7 +247,7 @@ describe("keycloak-client pagination and methods", () => {
     expect(detailed[11].users).toEqual(["user-for-11"])
     expect(detailed[0].attributes).toEqual({ role: "role-0" })
     expect(detailed.every((g) => g.membersPartial === false)).toBe(true)
-    expect(cacheSet).toHaveBeenCalledWith("keycloak:groups-detailed", detailed, 60)
+    expect(cacheSet).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsDetailed, detailed, 60)
   })
 
   it("marks a group partial and skips caching when its members request fails, instead of silently reporting zero members", async () => {
@@ -269,7 +271,7 @@ describe("keycloak-client pagination and methods", () => {
     expect(failed?.membersPartial).toBe(true)
     expect(failed?.users).toEqual([])
     // A partial inventory must never be cached as if it were complete.
-    expect(cacheSet).not.toHaveBeenCalledWith("keycloak:groups-detailed", expect.anything(), expect.anything())
+    expect(cacheSet).not.toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsDetailed, expect.anything(), expect.anything())
   })
 
   it("createUser creates a user and invalidates keycloak:users cache", async () => {
@@ -298,7 +300,8 @@ describe("keycloak-client pagination and methods", () => {
     })
 
     expect(user.pk).toBe("new-user-123")
-    expect(cacheDel).toHaveBeenCalledWith("keycloak:users")
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.users)
+    expect(cacheDel).toHaveBeenCalledTimes(1)
   })
 
   it("setUserActive updates user status and invalidates keycloak:users cache", async () => {
@@ -315,32 +318,43 @@ describe("keycloak-client pagination and methods", () => {
         body: JSON.stringify({ enabled: false }),
       })
     )
-    expect(cacheDel).toHaveBeenCalledWith("keycloak:users")
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.users)
+    expect(cacheDel).toHaveBeenCalledTimes(1)
   })
 
-  it("addUserToGroup invalidates keycloak:groups-detailed and keycloak:users caches", async () => {
+  it("addUserToGroup invalidates keycloak:groups-detailed, keycloak:users, and api:groups-enriched caches", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
     })
 
     await addUserToGroup("group-123", "user-456")
 
-    expect(cacheDel).toHaveBeenCalledWith("keycloak:groups-detailed")
-    expect(cacheDel).toHaveBeenCalledWith("keycloak:users")
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsDetailed)
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.users)
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsEnriched)
+    expect(cacheDel).toHaveBeenCalledTimes(3)
+    expect(vi.mocked(cacheDel).mock.calls.map((c) => c[0]).sort()).toEqual(
+      [KEYCLOAK_CACHE_KEYS.groupsDetailed, KEYCLOAK_CACHE_KEYS.users, KEYCLOAK_CACHE_KEYS.groupsEnriched].sort()
+    )
   })
 
-  it("removeUserFromGroup invalidates keycloak:groups-detailed and keycloak:users caches", async () => {
+  it("removeUserFromGroup invalidates keycloak:groups-detailed, keycloak:users, and api:groups-enriched caches", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
     })
 
     await removeUserFromGroup("group-123", "user-456")
 
-    expect(cacheDel).toHaveBeenCalledWith("keycloak:groups-detailed")
-    expect(cacheDel).toHaveBeenCalledWith("keycloak:users")
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsDetailed)
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.users)
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsEnriched)
+    expect(cacheDel).toHaveBeenCalledTimes(3)
+    expect(vi.mocked(cacheDel).mock.calls.map((c) => c[0]).sort()).toEqual(
+      [KEYCLOAK_CACHE_KEYS.groupsDetailed, KEYCLOAK_CACHE_KEYS.users, KEYCLOAK_CACHE_KEYS.groupsEnriched].sort()
+    )
   })
 
-  it("updateGroupAttributes invalidates keycloak:groups and keycloak:groups-detailed caches", async () => {
+  it("updateGroupAttributes invalidates keycloak:groups, keycloak:groups-detailed, and api:groups-enriched caches", async () => {
     mockFetch
       .mockResolvedValueOnce({
         ok: true,
@@ -356,8 +370,24 @@ describe("keycloak-client pagination and methods", () => {
 
     await updateGroupAttributes("group-123", { env: "prod" })
 
-    expect(cacheDel).toHaveBeenCalledWith("keycloak:groups")
-    expect(cacheDel).toHaveBeenCalledWith("keycloak:groups-detailed")
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groups)
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsDetailed)
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsEnriched)
+    expect(cacheDel).toHaveBeenCalledTimes(3)
+    expect(vi.mocked(cacheDel).mock.calls.map((c) => c[0]).sort()).toEqual(
+      [KEYCLOAK_CACHE_KEYS.groups, KEYCLOAK_CACHE_KEYS.groupsDetailed, KEYCLOAK_CACHE_KEYS.groupsEnriched].sort()
+    )
+  })
+
+  it("invalidateKeycloakCaches deletes provided keys and dedupes multiple occurrences", async () => {
+    await invalidateKeycloakCaches([
+      KEYCLOAK_CACHE_KEYS.groupsDetailed,
+      KEYCLOAK_CACHE_KEYS.groupsEnriched,
+      KEYCLOAK_CACHE_KEYS.groupsDetailed,
+    ])
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsDetailed)
+    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsEnriched)
+    expect(cacheDel).toHaveBeenCalledTimes(2)
   })
 })
 
