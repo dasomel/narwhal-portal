@@ -161,12 +161,14 @@ async function watchOnce(apiServer: string, resourceVersion: string, signal?: Ab
           if (evt.type === "ADDED") {
             const ingest = toIngest(obj)
             if (ingest) {
-              const uid = obj?.metadata?.uid
-              const rvKey = obj?.metadata?.resourceVersion
-              if (uid && rvKey) {
+              // Built from the same source_event_id toIngest() sets, in the same
+              // `source-event:${source}:${source_event_id}` shape /api/events/ingest
+              // dedups on — so an event delivered both via this informer and via the
+              // ingest webhook is deduped against the other, not just against itself.
+              if (ingest.source_event_id) {
                 const claimed = await claimIdempotencyKey(
                   getIdempotencyStore(),
-                  `k8s:${uid}:${rvKey}`,
+                  `source-event:${ingest.source}:${ingest.source_event_id}`,
                   "1",
                   3600,
                 )

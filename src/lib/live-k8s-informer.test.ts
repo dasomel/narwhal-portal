@@ -1,7 +1,25 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { setIdempotencyStoreForTesting, InMemoryIdempotencyStore } from "./idempotency"
+import { setIdempotencyStoreForTesting, InMemoryIdempotencyStore, idempotencyStoreKey } from "./idempotency"
+import type { IdempotencyStore } from "./idempotency"
 
 import type { LiveEventIngest } from "@/types/live"
+
+/** Wraps InMemoryIdempotencyStore to record every raw key passed to claim() — used
+ * to assert the informer builds the same `source-event:<source>:<id>` shape
+ * /api/events/ingest dedups on (portal#18-64), not just that dedup happens at all. */
+class SpyIdempotencyStore implements IdempotencyStore {
+  claimedKeys: string[] = []
+  private inner = new InMemoryIdempotencyStore()
+
+  async claim(key: string, value: string, ttlSeconds: number): Promise<string | null> {
+    this.claimedKeys.push(key)
+    return this.inner.claim(key, value, ttlSeconds)
+  }
+
+  async fulfill(key: string, value: string, ttlSeconds: number): Promise<void> {
+    return this.inner.fulfill(key, value, ttlSeconds)
+  }
+}
 
 const mockGetK8sApiServer = vi.fn(() => "https://kubernetes.default.svc")
 const mockGetK8sBearerToken = vi.fn(() => "initial-token")
@@ -178,6 +196,9 @@ describe("live-k8s-informer", () => {
   })
 
   it("deduplicates duplicate delivery: same uid/resourceVersion delivered twice results in at most one ingested event", async () => {
+    const spyStore = new SpyIdempotencyStore()
+    setIdempotencyStoreForTesting(spyStore)
+
     const duplicateEvent = {
       type: "ADDED",
       object: {
@@ -258,6 +279,10 @@ describe("live-k8s-informer", () => {
 
     expect(app1Calls.length).toBe(1)
     expect(app2Calls.length).toBe(1)
+
+    // The claimed key must equal the ingest-format key so an event delivered both
+    // via this informer and via /api/events/ingest dedups against the other.
+    expect(spyStore.claimedKeys).toContain(idempotencyStoreKey("source-event:kubernetes:uid-dup-1:500"))
   })
 
   it("handles watch 401: invalidates token and retries watch with refreshed token", async () => {
