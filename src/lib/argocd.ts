@@ -1,12 +1,34 @@
 import { cacheDel, cacheGet, cacheSet } from "./valkey"
 import { getUserScope, type OwnershipMismatch } from "./role-filter"
 import { getEffectiveScope, namespaceVisible } from "./scope"
-import { getDependencyUrl } from "./config"
+import { getDependencyUrl, isProduction } from "./config"
 
 function argocdUrl(): string {
   return getDependencyUrl("ARGOCD_URL", "http://localhost:8080")
 }
-const ARGOCD_TOKEN = process.env.ARGOCD_TOKEN ?? ""
+
+// Portal #54: distinguishes "the ArgoCD auth credential is missing/rejected"
+// from "ArgoCD is unreachable" so callers don't mistake a credential gap for an
+// outage or an empty application inventory (mirrors ApisixCredentialError /
+// KeycloakCredentialError).
+export class ArgoCDCredentialError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ArgoCDCredentialError"
+  }
+}
+
+// Read at call-time (not a module-level const) — mirrors apisix-client / keycloak-client
+// so credential rotation via a re-mounted env/secret takes effect on the next call
+// without a process restart.
+export function getArgoToken(): string {
+  const token = process.env.ARGOCD_TOKEN
+  if (token) return token
+  if (!isProduction()) return ""
+  throw new ArgoCDCredentialError(
+    "ARGOCD_TOKEN is not configured. Set ARGOCD_TOKEN to an ArgoCD auth token."
+  )
+}
 
 // H-3: ArgoCD project allowlist for the `developer` role.
 // Empty (default) means developers are denied any sync/rollback unless
@@ -55,13 +77,20 @@ export interface ArgoApp {
   }
 }
 
-function argoFetch(path: string, timeout = 5000): Promise<Response> {
+async function argoFetch(path: string, timeout = 5000): Promise<Response> {
+  const token = getArgoToken()
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout)
-  return fetch(`${argocdUrl()}${path}`, {
-    headers: { Authorization: `Bearer ${ARGOCD_TOKEN}` },
+  const res = await fetch(`${argocdUrl()}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
     signal: controller.signal,
   }).finally(() => clearTimeout(timer))
+  if (res.status === 401) {
+    throw new ArgoCDCredentialError(
+      `ArgoCD request rejected (HTTP ${res.status}): check ARGOCD_TOKEN`
+    )
+  }
+  return res
 }
 
 async function loadArgoApps(): Promise<ArgoApp[]> {
@@ -83,6 +112,7 @@ export async function getArgoApps(): Promise<ArgoApp[]> {
   try {
     return await loadArgoApps()
   } catch (err) {
+    if (err instanceof ArgoCDCredentialError) throw err
     console.warn("[argocd] Connection failed, returning empty:", (err as Error).message)
     return []
   }
@@ -99,7 +129,8 @@ export async function getArgoApp(name: string): Promise<ArgoApp | null> {
     const app: ArgoApp = await res.json()
     await cacheSet(cacheKey, app, 10)
     return app
-  } catch {
+  } catch (err) {
+    if (err instanceof ArgoCDCredentialError) throw err
     return null
   }
 }
@@ -188,14 +219,21 @@ export async function getArgoAppFresh(name: string): Promise<ArgoApp | null> {
 }
 
 export async function syncArgoApp(name: string): Promise<SyncResult> {
+  const token = getArgoToken()
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 10000)
   const res = await fetch(`${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/sync`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${ARGOCD_TOKEN}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({}),
     signal: controller.signal,
   }).finally(() => clearTimeout(timer))
+
+  if (res.status === 401) {
+    throw new ArgoCDCredentialError(
+      `ArgoCD sync rejected (HTTP ${res.status}): check ARGOCD_TOKEN`
+    )
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => "")
@@ -211,14 +249,21 @@ export async function syncArgoApp(name: string): Promise<SyncResult> {
 }
 
 export async function rollbackArgoApp(name: string, id: number): Promise<boolean> {
+  const token = getArgoToken()
   try {
     const res = await fetch(`${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/rollback`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${ARGOCD_TOKEN}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
     })
+    if (res.status === 401) {
+      throw new ArgoCDCredentialError(
+        `ArgoCD rollback rejected (HTTP ${res.status}): check ARGOCD_TOKEN`
+      )
+    }
     return res.ok
-  } catch {
+  } catch (err) {
+    if (err instanceof ArgoCDCredentialError) throw err
     return false
   }
 }

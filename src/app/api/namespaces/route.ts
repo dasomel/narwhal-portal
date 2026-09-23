@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth, requireRole } from "@/lib/auth"
 import { getNamespacesForScope } from "@/lib/k8s-client"
-import { GiteaError, giteaConfigured, requestTenantNamespace } from "@/lib/gitea"
+import { GiteaError, GiteaCredentialError, isGiteaConfigured, requestTenantNamespace } from "@/lib/gitea"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 import { resolveNamespaceOwner } from "@/lib/namespace-ownership"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
@@ -67,7 +67,7 @@ export async function POST(req: Request) {
   // namespace carries an owner, a quota and a group that may deploy into it, and
   // those are a decision, not a form submission. The merge is where the decision
   // gets made, by a person, with a record of who asked.
-  if (!giteaConfigured) {
+  if (!isGiteaConfigured()) {
     return NextResponse.json(
       { error: "Namespace requests are unavailable: the portal has no GitOps credentials configured" },
       { status: 503 },
@@ -104,6 +104,11 @@ export async function POST(req: Request) {
       pullRequestNumber: result.pullRequestNumber,
     })
   } catch (err) {
+    if (err instanceof GiteaCredentialError) {
+      const message = `Namespace requests are unavailable: ${err.message}`
+      await failOperation(ctx, `Namespace request failed: ${name}`, message)
+      return NextResponse.json({ error: message }, { status: 503 })
+    }
     if (err instanceof GiteaError) {
       // 409/422 from the contents API means the branch or file is already there —
       // that is a duplicate request, not a server fault, and the caller can act on it.

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest"
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 
 // assertAppAccessible's two network dependencies get stubbed so this stays a pure
 // unit test: cacheGet stands in for the ArgoCD API call (getArgoApp always hits the
@@ -10,19 +10,26 @@ import { describe, expect, it, vi, beforeEach } from "vitest"
 vi.mock("./valkey", () => ({
   cacheGet: vi.fn(),
   cacheSet: vi.fn(),
+  cacheDel: vi.fn(),
 }))
 vi.mock("./scope", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./scope")>()
   return { ...actual, getEffectiveScope: vi.fn() }
 })
 
-import { cacheGet } from "./valkey"
+import { cacheGet, cacheSet, cacheDel } from "./valkey"
 import { getEffectiveScope, type EffectiveScope } from "./scope"
 import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 import {
   assertAppAccessible,
   ArgoForbiddenError,
   ArgoNotFoundError,
+  ArgoCDCredentialError,
+  getArgoApps,
+  getArgoAppsOrThrow,
+  getArgoToken,
+  syncArgoApp,
+  rollbackArgoApp,
   type ArgoActor,
   type ArgoApp,
 } from "./argocd"
@@ -115,5 +122,138 @@ describe("assertAppAccessible", () => {
 
     await expect(assertAppAccessible("missing", developerOnPlatformTeam)).rejects.toThrow(ArgoNotFoundError)
     vi.unstubAllGlobals()
+  })
+})
+
+describe("argocd credential handling", () => {
+  const originalEnv = { ...process.env }
+  const originalFetch = global.fetch
+  const mockFetch = vi.fn()
+
+  beforeEach(() => {
+    process.env = { ...originalEnv }
+    process.env.ARGOCD_URL = "http://argocd.local:8080"
+    global.fetch = mockFetch
+    mockFetch.mockReset()
+    vi.mocked(cacheGet).mockResolvedValue(null)
+    vi.mocked(cacheSet).mockResolvedValue(undefined as never)
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+    global.fetch = originalFetch
+  })
+
+  it("throws ArgoCDCredentialError in production when ARGOCD_TOKEN is unset, without calling fetch", async () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.ARGOCD_TOKEN
+
+    await expect(getArgoApps()).rejects.toBeInstanceOf(ArgoCDCredentialError)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it("picks up ARGOCD_TOKEN change between calls (rotation without restart)", async () => {
+    process.env.ARGOCD_TOKEN = "token-1"
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ items: [] }),
+    })
+
+    await getArgoApps()
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/applications"),
+      expect.objectContaining({
+        headers: { Authorization: "Bearer token-1" },
+      })
+    )
+
+    process.env.ARGOCD_TOKEN = "token-2"
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ items: [] }),
+    })
+
+    await getArgoApps()
+
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/api/v1/applications"),
+      expect.objectContaining({
+        headers: { Authorization: "Bearer token-2" },
+      })
+    )
+  })
+
+  it("throws ArgoCDCredentialError on 401 and getArgoApps does not return []", async () => {
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
+
+    await expect(getArgoApps()).rejects.toBeInstanceOf(ArgoCDCredentialError)
+  })
+
+  it("treats 403 as an RBAC denial, not a credential failure (keeps previous behavior)", async () => {
+    // A valid token that portal-reader RBAC does not allow for this resource is
+    // not "check ARGOCD_TOKEN" — only 401 means the credential itself is bad.
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403 })
+
+    await expect(getArgoApps()).resolves.toEqual([])
+  })
+
+  it("returns [] on a non-auth 5xx error, keeping previous behavior", async () => {
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 })
+
+    const apps = await getArgoApps()
+    expect(apps).toEqual([])
+  })
+
+  it("returns [] on network failure, keeping previous behavior", async () => {
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockRejectedValueOnce(new TypeError("fetch failed"))
+
+    const apps = await getArgoApps()
+    expect(apps).toEqual([])
+  })
+
+  it("does not include token value in thrown error messages", async () => {
+    const secretToken = "super-secret-argo-jwt-token-999"
+    process.env.ARGOCD_TOKEN = secretToken
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
+
+    let thrownError: Error | null = null
+    try {
+      await getArgoApps()
+    } catch (err) {
+      thrownError = err as Error
+    }
+
+    expect(thrownError).toBeInstanceOf(ArgoCDCredentialError)
+    expect(thrownError?.message).not.toContain(secretToken)
+    expect(thrownError?.message).toContain("ARGOCD_TOKEN")
+  })
+
+  it("throws ArgoCDCredentialError in production when ARGOCD_TOKEN is unset for sync and rollback", async () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.ARGOCD_TOKEN
+
+    await expect(syncArgoApp("app-1")).rejects.toBeInstanceOf(ArgoCDCredentialError)
+    await expect(rollbackArgoApp("app-1", 1)).rejects.toBeInstanceOf(ArgoCDCredentialError)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it("throws ArgoCDCredentialError on 401 for sync and rollback", async () => {
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
+    await expect(syncArgoApp("app-1")).rejects.toBeInstanceOf(ArgoCDCredentialError)
+
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
+    await expect(rollbackArgoApp("app-1", 1)).rejects.toBeInstanceOf(ArgoCDCredentialError)
+  })
+
+  it("does not report a 403 RBAC denial on rollback as a credential error", async () => {
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403 })
+    await expect(rollbackArgoApp("app-1", 1)).resolves.toBe(false)
   })
 })
