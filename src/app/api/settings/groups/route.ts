@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getGroupsDetailed, getUsers, addUserToGroup, removeUserFromGroup } from "@/lib/keycloak-client"
+import {
+  getGroupsDetailed,
+  getUsers,
+  addUserToGroup,
+  removeUserFromGroup,
+  updateGroupAttributes,
+  KEYCLOAK_CACHE_KEYS,
+} from "@/lib/keycloak-client"
 import type { KeycloakUser } from "@/lib/keycloak-client"
 import { requireAdmin } from "@/lib/auth"
-import { cacheGet, cacheSet, cacheDel } from "@/lib/valkey"
+import { cacheGet, cacheSet } from "@/lib/valkey"
 
 export const dynamic = "force-dynamic"
 
@@ -13,7 +20,7 @@ export async function GET() {
     return NextResponse.json({ error: result.error === "unauthorized" ? "Unauthorized" : "Forbidden" }, { status })
   }
   try {
-    const cached = await cacheGet<object[]>("api:groups-enriched")
+    const cached = await cacheGet<object[]>(KEYCLOAK_CACHE_KEYS.groupsEnriched)
     if (cached) return NextResponse.json(cached)
 
     const [groups, users] = await Promise.all([getGroupsDetailed(), getUsers()])
@@ -25,7 +32,14 @@ export async function GET() {
         .filter((u): u is KeycloakUser => !!u)
         .map((u) => ({ pk: u.pk, username: u.username, email: u.email })),
     }))
-    await cacheSet("api:groups-enriched", enriched, 60)
+    // Portal #49: getGroupsDetailed() marks a group membersPartial when its
+    // member fetch failed. Never cache that projection as complete — the
+    // next caller must re-fetch instead of being served dropped memberships
+    // for the TTL window.
+    const anyPartial = enriched.some((g) => g.membersPartial)
+    if (!anyPartial) {
+      await cacheSet(KEYCLOAK_CACHE_KEYS.groupsEnriched, enriched, 60)
+    }
     return NextResponse.json(enriched)
   } catch (err) {
     console.error("GET /api/settings/groups error:", err)
@@ -52,10 +66,11 @@ export async function PATCH(req: NextRequest) {
       await removeUserFromGroup(groupPk, userPk)
     } else if (action === "update-attributes") {
       if (!attributes) return NextResponse.json({ error: "attributes required" }, { status: 400 })
-      const { updateGroupAttributes } = await import("@/lib/keycloak-client")
       await updateGroupAttributes(groupPk, attributes)
     }
-    await cacheDel("api:groups-enriched")
+    // Portal #49: each keycloak-client mutation above already invalidates
+    // KEYCLOAK_CACHE_KEYS.groupsEnriched itself — keep invalidation
+    // single-owner there instead of duplicating it in this route.
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error("PATCH /api/settings/groups error:", err)
