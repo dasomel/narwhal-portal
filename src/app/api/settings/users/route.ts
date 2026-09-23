@@ -102,6 +102,55 @@ export async function POST(req: NextRequest) {
   const requestedGroups: UserRole[] = raw.groups ? (raw.groups as UserRole[]) : []
   const payload = { username: raw.username, email: raw.email, name: raw.name, password: raw.password }
 
+  // portal#35 review: resolve every requested group against Keycloak's live group
+  // list BEFORE createUser runs, so an unresolvable group never leaves a user
+  // created without its roles. groupIdMap is null when no groups were requested.
+  let groupIdMap: Map<string, string> | null = null
+  if (requestedGroups.length > 0) {
+    let allGroups
+    try {
+      allGroups = await getGroups()
+    } catch (err) {
+      console.error("POST /api/settings/users getGroups error:", err)
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    }
+    // getGroups() returns Keycloak's top-level groups only (no subgroup flattening),
+    // but sibling group names aren't guaranteed unique across the whole tree, so
+    // build a name -> [ids] map rather than assuming one id per name.
+    const nameToIds = new Map<string, string[]>()
+    for (const g of allGroups) {
+      const ids = nameToIds.get(g.name)
+      if (ids) {
+        ids.push(g.pk)
+      } else {
+        nameToIds.set(g.name, [g.pk])
+      }
+    }
+    const missing: string[] = []
+    const ambiguous: string[] = []
+    const resolved = new Map<string, string>()
+    for (const name of requestedGroups) {
+      const ids = nameToIds.get(name)
+      if (!ids || ids.length === 0) {
+        missing.push(name)
+      } else if (ids.length > 1) {
+        ambiguous.push(name)
+      } else {
+        resolved.set(name, ids[0])
+      }
+    }
+    if (missing.length > 0) {
+      return validationError(`group(s) not found in Keycloak: ${missing.join(", ")}`, "groups")
+    }
+    if (ambiguous.length > 0) {
+      console.error(
+        `POST /api/settings/users: ambiguous group name(s) in Keycloak (cannot pick one safely): ${ambiguous.join(", ")}`,
+      )
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    }
+    groupIdMap = resolved
+  }
+
   // portal#35: dedupe a retried create (double-click, client retry on a
   // timeout) for the same actor + username/email/groups — same claim-then-fulfill
   // shape as POST /api/alerts/silence, since Keycloak (not us) mints the new
@@ -138,6 +187,16 @@ export async function POST(req: NextRequest) {
           return validationError("Idempotency-Key reused with a different request body", "Idempotency-Key")
         }
         delete parsed._fingerprint
+        // portal#35 review: a record fulfilled after a partial-state failure (user
+        // created, group assignment failed) must replay the same PartialStateError
+        // instead of a fabricated 201 -- otherwise a retry with this key looks like
+        // a fresh success even though the groups were never applied. Legacy records
+        // written before this marker existed have no `partial` field and fall
+        // through to the original 201 duplicate replay.
+        if (parsed.partial) {
+          delete parsed.partial
+          return NextResponse.json({ ...parsed, duplicate: true }, { status: 500 })
+        }
         return NextResponse.json({ ...parsed, duplicate: true }, { status: 201 })
       }
     }
@@ -165,39 +224,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 
-  if (requestedGroups.length > 0) {
+  if (groupIdMap) {
     try {
-      const allGroups = await getGroups()
-      const groupMap = new Map(allGroups.map((g) => [g.name, g.pk]))
-      const missing = requestedGroups.filter((g) => !groupMap.has(g))
-      if (missing.length > 0) {
-        const errorMsg = `User created (id=${created.pk}) but group(s) not found in Keycloak: ${missing.join(", ")}`
-        await failOperation(ctx, `User created with partial state: ${payload.username}`, errorMsg)
-        return NextResponse.json(
-          { error: "PartialStateError", message: errorMsg, user: created },
-          { status: 500 },
-        )
-      }
-
-      for (const groupName of requestedGroups) {
-        const groupPk = groupMap.get(groupName)!
+      for (const [, groupPk] of groupIdMap) {
         await addUserToGroup(groupPk, created.pk)
       }
     } catch (err) {
       // The upstream error text stays in the operation record and server log only —
       // the response names the partial state without echoing Keycloak internals.
+      const partialMessage = `User created (id=${created.pk}) but group assignment failed`
       await failOperation(
         ctx,
         `User created with partial state: ${payload.username}`,
-        `User created (id=${created.pk}) but group assignment failed: ${(err as Error).message}`,
+        `${partialMessage}: ${(err as Error).message}`,
       )
       console.error("POST /api/settings/users group assignment error:", err)
+      // portal#35 review: fulfill the idempotency key with the partial outcome
+      // instead of leaving it "pending:" for the full TTL — otherwise a client
+      // retrying with the same key after this failure is stuck on 409 "in
+      // progress" for up to 24h even though nothing is actually in flight.
+      if (idempotencyStoreKey) {
+        await fulfillIdempotencyKey(
+          getIdempotencyStore(),
+          idempotencyStoreKey,
+          JSON.stringify({
+            error: "PartialStateError",
+            message: partialMessage,
+            user: created,
+            _fingerprint: fingerprint,
+            partial: true,
+          }),
+        )
+      }
       return NextResponse.json(
-        {
-          error: "PartialStateError",
-          message: `User created (id=${created.pk}) but group assignment failed`,
-          user: created,
-        },
+        { error: "PartialStateError", message: partialMessage, user: created },
         { status: 500 },
       )
     }
