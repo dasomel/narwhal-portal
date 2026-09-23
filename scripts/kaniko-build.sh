@@ -156,11 +156,22 @@ if [[ "${SKIP_PUSH}" == "true" ]]; then
 else
   info "narwhal-portal 소스를 Gitea에 push 중..."
 
-  PUSH_URL="${GITEA_BASE_URL}/${GITEA_ADMIN_USER}/${GITEA_PORTAL_REPO}.git"
-  PUSH_URL_AUTH="${PUSH_URL/http:\/\//http://${GITEA_ADMIN_USER}:${GITEA_ADMIN_PASSWORD}@}"
+  # portal#23: username-only in the URL, password handed to git via GIT_ASKPASS
+  # instead of embedded in the URL — the password never appears in argv/`ps`,
+  # shell history, or git's own error output (which echoes the remote URL).
+  PUSH_URL="${GITEA_BASE_URL/http:\/\//http://${GITEA_ADMIN_USER}@}/${GITEA_ADMIN_USER}/${GITEA_PORTAL_REPO}.git"
 
   WORK_DIR="$(mktemp -d)"
-  trap 'cleanup_pf; rm -rf "${WORK_DIR}"' EXIT
+  ASKPASS_SCRIPT="$(mktemp)"
+  trap 'cleanup_pf; rm -rf "${WORK_DIR}"; rm -f "${ASKPASS_SCRIPT}"' EXIT
+
+  cat > "${ASKPASS_SCRIPT}" <<'EOF'
+#!/usr/bin/env bash
+# Invoked by git as: askpass "Password for 'http://user@host': "
+# Only ever asked for the password since the URL already carries the username.
+printf '%s\n' "${GITEA_ADMIN_PASSWORD}"
+EOF
+  chmod 700 "${ASKPASS_SCRIPT}"
 
   # 현재 narwhal-portal 소스 복사 (node_modules, .next 제외)
   rsync -a --exclude='.git' --exclude='node_modules' --exclude='.next' \
@@ -174,7 +185,8 @@ else
   git commit -m "build: narwhal-portal source for Kaniko in-cluster build"
 
   # push (force: 이전 build 커밋 덮어쓰기)
-  git push --force "${PUSH_URL_AUTH}" main
+  GIT_ASKPASS="${ASKPASS_SCRIPT}" GITEA_ADMIN_PASSWORD="${GITEA_ADMIN_PASSWORD}" \
+    git push --force "${PUSH_URL}" main
   cd "${REPO_ROOT}"
 
   info "Gitea push 완료"

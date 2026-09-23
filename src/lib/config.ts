@@ -8,14 +8,17 @@ export function isProduction(): boolean {
   return process.env.NODE_ENV === "production"
 }
 
-// Centralized K8S_API_SERVER configuration
+// In-cluster API server for the portal's OWN server-side calls (proxying pod logs,
+// job submission, live informers, etc). Prefers KUBERNETES_SERVICE_HOST (kubelet-injected,
+// always correct in-cluster) over K8S_API_SERVER (the provisioner's VIP, correct only when
+// VIP_ADDRESS was exported at provisioning time — see WO-D05 in the seam-drift audit).
 export function getK8sApiServer(): string {
-  if (process.env.K8S_API_SERVER) {
-    return process.env.K8S_API_SERVER
-  }
   if (process.env.KUBERNETES_SERVICE_HOST) {
     const port = process.env.KUBERNETES_SERVICE_PORT || "443"
     return `https://${process.env.KUBERNETES_SERVICE_HOST}:${port}`
+  }
+  if (process.env.K8S_API_SERVER) {
+    return process.env.K8S_API_SERVER
   }
   if (process.env.NODE_ENV !== "production") {
     // Development-only fallback for local VM cluster
@@ -24,13 +27,71 @@ export function getK8sApiServer(): string {
   throw new Error("Missing required production configuration: K8S_API_SERVER")
 }
 
-export const K8S_API_SERVER =
-  process.env.K8S_API_SERVER ||
-  (process.env.KUBERNETES_SERVICE_HOST
-    ? `https://${process.env.KUBERNETES_SERVICE_HOST}:${process.env.KUBERNETES_SERVICE_PORT || "443"}`
-    : process.env.NODE_ENV === "production"
-    ? ""
-    : "https://192.168.56.100:6443")
+// External-facing API server for artifacts a HUMAN uses outside the cluster (downloaded
+// kubeconfig). Must NOT resolve to the in-cluster ClusterIP/KUBERNETES_SERVICE_HOST — that
+// address is unreachable off-cluster. Always the provisioner's VIP.
+export function getExternalK8sApiServer(): string {
+  if (process.env.K8S_API_SERVER) {
+    return process.env.K8S_API_SERVER
+  }
+  if (process.env.NODE_ENV !== "production") {
+    // Development-only fallback for local VM cluster
+    return "https://192.168.56.100:6443"
+  }
+  throw new Error("Missing required production configuration: K8S_API_SERVER")
+}
+
+// Names of the remaining fetch-target env vars that must not silently default to
+// localhost in production. Kept in sync with validateRuntimeConfig()'s
+// optionalServices list below — same names, different concern (that list only
+// drives the /api/health/ready diagnostic report; this accessor gates actual
+// runtime calls).
+export type DependencyUrlEnvVar =
+  | "PROMETHEUS_URL"
+  | "TEMPO_URL"
+  | "APISIX_ADMIN_URL"
+  | "ARGOCD_URL"
+  | "OPENBAO_ADDR"
+  | "ALERTMANAGER_URL"
+  | "LOKI_URL"
+  | "GITEA_URL"
+  | "KEYCLOAK_INTERNAL_URL"
+  | "SLO_CHAIN_START"
+
+// Generic fail-fast accessor for dependency base URLs: env var → in production
+// throw, otherwise fall back to the dev-only default. Mirrors getK8sApiServer's
+// semantics (call at call-time, never at module top level — see 85ca55c).
+export function getDependencyUrl(name: DependencyUrlEnvVar, devDefault: string): string {
+  if (process.env[name]) {
+    return process.env[name] as string
+  }
+  if (!isProduction()) {
+    return devDefault
+  }
+  throw new Error(`Missing required production configuration: ${name}`)
+}
+
+// narwhal-portal#39: Portal/Gateway → Keycloak/Gitea integrations must be TLS-verified
+// in production. A plain http:// URL means the OIDC handshake or the Gitea machine
+// token travels — and can be intercepted or replayed — without transport-level
+// authentication of the far end, which defeats the point of requiring a token at all.
+// Fails fast at module load (same shape as the H-8 AUTH_MOCK guard in auth.ts) rather
+// than at request time, so a misconfigured deploy never serves a single request.
+//
+// Skipped during `next build`'s page-data collection (NEXT_PHASE=phase-production-build):
+// that phase imports every route module under NODE_ENV=production to statically analyze
+// them, before the real runtime env (which may legitimately set GITEA_URL/KEYCLOAK_ISSUER
+// only at deploy time, not at build time) is available. Throwing there breaks the build
+// itself, not just a misconfigured deploy -- confirmed by reproducing `next build` failing
+// on this check with no GITEA_URL set in the build environment.
+export function assertHttpsInProduction(name: string, url: string | undefined): void {
+  if (process.env.NEXT_PHASE === "phase-production-build") return
+  if (!isProduction() || !url) return
+  if (!url.startsWith("https://")) {
+    const scheme = url.split("://")[0] || "no scheme"
+    throw new Error(`${name} must use https:// in production (got ${scheme}://...)`)
+  }
+}
 
 export interface ConfigValidationResult {
   valid: boolean
@@ -84,6 +145,8 @@ export function validateRuntimeConfig(): ConfigValidationResult {
     "GITEA_URL",
     "OPENBAO_ADDR",
     "LOKI_URL",
+    "KEYCLOAK_INTERNAL_URL",
+    "SLO_CHAIN_START",
   ]
 
   for (const key of optionalServices) {
@@ -92,6 +155,21 @@ export function validateRuntimeConfig(): ConfigValidationResult {
     } else {
       details[key] = "missing"
       missingOptional.push(key)
+    }
+  }
+
+  // narwhal-portal#39: surface a non-TLS Keycloak/Gitea URL as a validation failure
+  // too, not just the module-load throw — validateRuntimeConfig() also backs the
+  // /api/health/status diagnostics view, and an operator should see this without
+  // having to crash-loop the deployment first.
+  if (isProd) {
+    for (const [key, url] of [
+      ["KEYCLOAK_ISSUER", process.env.KEYCLOAK_ISSUER],
+      ["GITEA_URL", process.env.GITEA_URL],
+    ] as const) {
+      if (url && !url.startsWith("https://")) {
+        missingRequired.push(`${key} (must be https://)`)
+      }
     }
   }
 

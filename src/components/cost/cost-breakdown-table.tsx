@@ -2,7 +2,6 @@
 
 /**
  * CostBreakdownTable — spec §5.5 Namespace/Service 토글, 표 정렬, 행 클릭 → 상세
- * TODO(wrap-up): i18n
  */
 
 import { useState, useMemo } from "react"
@@ -48,9 +47,13 @@ export function CostBreakdownTable() {
   const [sortKey, setSortKey] = useState<SortKey>("monthly")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
-  const { data, isLoading } = useQuery<CostResponse>({
+  const { data, isLoading, error } = useQuery<CostResponse>({
     queryKey: ["cost", scopeView],
-    queryFn: () => fetch(`/api/cost?scope=${scopeView}`).then((r) => r.json()),
+    queryFn: async () => {
+      const response = await fetch(`/api/cost?scope=${scopeView}`)
+      if (!response.ok) throw new Error("Cost data is unavailable")
+      return response.json()
+    },
     refetchInterval: 60_000,
   })
 
@@ -90,9 +93,9 @@ export function CostBreakdownTable() {
   function handleRowClick(item: CostItem) {
     if (scopeView === "service") {
       router.push(`/catalog/${item.id}?tab=cost`)
+      return
     }
-    // namespace 클릭 시 service 뷰로 전환
-    // TODO(wrap-up): namespace → /catalog?namespace=X 라우팅 연결
+    router.push(`/catalog?namespace=${encodeURIComponent(item.id)}`)
   }
 
   function SortIcon({ col }: { col: SortKey }) {
@@ -115,23 +118,25 @@ export function CostBreakdownTable() {
           <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
             <button
               onClick={() => setScopeView("namespace")}
+              aria-pressed={scopeView === "namespace"}
               className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
                 scopeView === "namespace"
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Namespace
+              {t("cost.namespace")}
             </button>
             <button
               onClick={() => setScopeView("service")}
+              aria-pressed={scopeView === "service"}
               className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
                 scopeView === "service"
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Service
+              {t("cost.service")}
             </button>
           </div>
         </div>
@@ -148,6 +153,10 @@ export function CostBreakdownTable() {
               <div key={i} className="h-10 w-full animate-pulse rounded bg-muted" />
             ))}
           </div>
+        ) : error ? (
+          <div className="py-12 text-center text-sm text-destructive">
+            {t("cost.dataUnavailable")}
+          </div>
         ) : sorted.length === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">
             {t("cost.noDataPrometheus")}
@@ -158,35 +167,80 @@ export function CostBreakdownTable() {
               <TableRow>
                 <TableHead
                   className="cursor-pointer select-none"
+                  role="button"
+                  tabIndex={0}
+                  aria-sort={sortKey === "id" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                   onClick={() => toggleSort("id")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleSort("id")
+                    }
+                  }}
                 >
-                  {scopeView === "namespace" ? "Namespace" : "Service"}
+                  {scopeView === "namespace" ? t("cost.namespace") : t("cost.service")}
                   <SortIcon col="id" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
+                  role="button"
+                  tabIndex={0}
+                  aria-sort={sortKey === "cpu" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                   onClick={() => toggleSort("cpu")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleSort("cpu")
+                    }
+                  }}
                 >
-                  CPU $/h
+                  {t("cost.cpuHourlyShort")}
                   <SortIcon col="cpu" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
+                  role="button"
+                  tabIndex={0}
+                  aria-sort={sortKey === "memory" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                   onClick={() => toggleSort("memory")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleSort("memory")
+                    }
+                  }}
                 >
-                  Mem $/h
+                  {t("cost.memoryHourlyShort")}
                   <SortIcon col="memory" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
+                  role="button"
+                  tabIndex={0}
+                  aria-sort={sortKey === "storage" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                   onClick={() => toggleSort("storage")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleSort("storage")
+                    }
+                  }}
                 >
-                  Stor $/h
+                  {t("cost.storageHourlyShort")}
                   <SortIcon col="storage" />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
+                  role="button"
+                  tabIndex={0}
+                  aria-sort={sortKey === "monthly" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                   onClick={() => toggleSort("monthly")}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleSort("monthly")
+                    }
+                  }}
                 >
                   {t("cost.monthlyEstimate")}
                   <SortIcon col="monthly" />
@@ -197,17 +251,22 @@ export function CostBreakdownTable() {
               {sorted.map((item) => (
                 <TableRow
                   key={item.id}
-                  className={
-                    scopeView === "service"
-                      ? "cursor-pointer hover:bg-muted/50"
-                      : "cursor-default"
-                  }
+                  className="cursor-pointer hover:bg-muted/50"
+                  role="link"
+                  tabIndex={0}
+                  aria-label={t("cost.openDetails", { name: item.id })}
                   onClick={() => handleRowClick(item)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      handleRowClick(item)
+                    }
+                  }}
                 >
                   <TableCell className="font-mono text-xs">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-xs">
-                        {scopeView === "namespace" ? "ns" : "svc"}
+                        {scopeView === "namespace" ? t("cost.namespaceShort") : t("cost.serviceShort")}
                       </Badge>
                       {item.id}
                     </div>

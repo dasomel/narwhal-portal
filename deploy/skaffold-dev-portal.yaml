@@ -186,13 +186,26 @@ spec:
           envFrom:
             - secretRef:
                 name: narwhal-portal-secrets
+          env:
+            # Portal #20: must equal the projected volume's `audience` below so the
+            # client-side aud check in src/lib/k8s-token.ts is active in-cluster.
+            - name: K8S_TOKEN_AUDIENCE
+              value: https://kubernetes.default.svc.cluster.local
           # D04: mount the cluster CA bundle so Node trusts in-cluster TLS
           # (Keycloak / ArgoCD / K8s API / OpenBao) via NODE_EXTRA_CA_CERTS instead of
           # NODE_TLS_REJECT_UNAUTHORIZED=0. NODE_EXTRA_CA_CERTS=/etc/ssl/narwhal/ca.crt is
           # injected into narwhal-portal-secrets by 13-2-narwhal-portal-bindings.sh.
+          #
+          # Portal #20: kube-api-token replaces the long-lived K8S_SA_TOKEN env var
+          # (narwhal-portal-secrets must no longer carry it — see docs/security-clean-install.md
+          # section 8). src/lib/k8s-token.ts reads this file on every call (cached ~60s, and
+          # re-read immediately on a 401), so a 1h projected token rotates with zero downtime.
           volumeMounts:
             - name: narwhal-ca
               mountPath: /etc/ssl/narwhal
+              readOnly: true
+            - name: kube-api-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
               readOnly: true
           resources:
             requests:
@@ -202,9 +215,20 @@ spec:
               cpu: "1"
               # next dev(Turbopack)가 다수 라우트 컴파일 시 2Gi 초과 → OOMKilled(137) → 502.
               memory: 3Gi
+          # Issue #63: liveness is process-only (no dependency calls); readiness
+          # gates on required config + critical dependencies (see
+          # src/app/api/health/{live,ready}/route.ts). Both are excluded from the
+          # session-cookie gate in src/proxy.ts's matcher (`(?!api|...)`), so they
+          # answer without a session.
+          livenessProbe:
+            httpGet:
+              path: /api/health/live
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /api/auth/session
+              path: /api/health/ready
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -216,6 +240,24 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
+        # Portal #20: projected serviceAccountToken, 1h lifetime, audience-scoped to the
+        # Kubernetes API — replaces the static K8S_SA_TOKEN secret env var. Mounted at the
+        # well-known in-cluster path so the default in src/lib/k8s-token.ts needs no
+        # K8S_SA_TOKEN_FILE override; the kubelet rotates the file in place before expiry.
+        #
+        # `audience` here is this kubeadm cluster's actual --service-account-issuer
+        # (narwhal's scripts/cluster/02-init-cluster.sh does not override it, so it
+        # defaults to the cluster-internal issuer URL, not the bare
+        # https://kubernetes.default.svc some docs assume). If K8S_TOKEN_AUDIENCE is
+        # set in narwhal-portal-secrets, it MUST match this value exactly — src/lib/k8s-token.ts
+        # only enforces the aud check when that env var is set, and a mismatch throws.
+        - name: kube-api-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+                  audience: https://kubernetes.default.svc.cluster.local
 ---
 apiVersion: v1
 kind: Service

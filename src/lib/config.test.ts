@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { validateRuntimeConfig, getK8sApiServer } from "./config"
+import { validateRuntimeConfig, getK8sApiServer, getDependencyUrl, assertHttpsInProduction } from "./config"
 
 describe("Runtime Configuration Validation (Issue #60)", () => {
   const originalEnv = { ...process.env }
@@ -18,6 +18,14 @@ describe("Runtime Configuration Validation (Issue #60)", () => {
     expect(result.environment).toBe("development")
     expect(result.valid).toBe(true)
     expect(getK8sApiServer()).toBe("https://192.168.56.100:6443")
+  })
+
+  it("falls back to the in-cluster server derived from KUBERNETES_SERVICE_HOST", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.K8S_API_SERVER
+    process.env.KUBERNETES_SERVICE_HOST = "10.0.0.1"
+    process.env.KUBERNETES_SERVICE_PORT = "6443"
+    expect(getK8sApiServer()).toBe("https://10.0.0.1:6443")
   })
 
   it("fails fast in production if required Keycloak variables are missing", () => {
@@ -50,5 +58,91 @@ describe("Runtime Configuration Validation (Issue #60)", () => {
     expect(result.valid).toBe(true)
     expect(result.missingRequired.length).toBe(0)
     expect(getK8sApiServer()).toBe("https://k8s.narwhal.internal:6443")
+  })
+})
+
+describe("getDependencyUrl (Issue #60 phase 3)", () => {
+  const originalEnv = { ...process.env }
+
+  beforeEach(() => {
+    process.env = { ...originalEnv }
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+  })
+
+  it("returns the env var value when set", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
+    process.env.PROMETHEUS_URL = "https://prometheus.narwhal.internal"
+    expect(getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")).toBe(
+      "https://prometheus.narwhal.internal",
+    )
+  })
+
+  it("falls back to the dev default outside production when unset", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
+    delete process.env.PROMETHEUS_URL
+    expect(getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")).toBe(
+      "http://localhost:9090",
+    )
+  })
+
+  it("throws in production when unset instead of defaulting to localhost", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.PROMETHEUS_URL
+    expect(() => getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")).toThrow(
+      "Missing required production configuration: PROMETHEUS_URL",
+    )
+  })
+})
+
+describe("assertHttpsInProduction (narwhal-portal#39)", () => {
+  const originalEnv = { ...process.env }
+
+  beforeEach(() => {
+    process.env = { ...originalEnv }
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+  })
+
+  it("throws in production for a plain http:// URL", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    expect(() => assertHttpsInProduction("GITEA_URL", "http://gitea-http.devtools.svc.cluster.local:3000")).toThrow(
+      /GITEA_URL must use https:\/\/ in production/,
+    )
+  })
+
+  it("passes in production for an https:// URL", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    expect(() => assertHttpsInProduction("GITEA_URL", "https://gitea.narwhal.internal")).not.toThrow()
+  })
+
+  it("does not enforce scheme outside production", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
+    expect(() => assertHttpsInProduction("GITEA_URL", "http://localhost:3000")).not.toThrow()
+  })
+
+  it("is a no-op when the URL is unset (the required-var check owns that case)", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    expect(() => assertHttpsInProduction("GITEA_URL", undefined)).not.toThrow()
+  })
+
+  it("flags a non-https KEYCLOAK_ISSUER/GITEA_URL in validateRuntimeConfig", () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.AUTH_MOCK
+    process.env.AUTH_SECRET = "secret"
+    process.env.KEYCLOAK_ISSUER = "http://keycloak.narwhal.internal"
+    process.env.KEYCLOAK_CLIENT_ID = "portal"
+    process.env.KEYCLOAK_CLIENT_SECRET = "secret"
+    process.env.K8S_API_SERVER = "https://k8s.narwhal.internal:6443"
+    process.env.GITEA_URL = "http://gitea.narwhal.internal"
+
+    const result = validateRuntimeConfig()
+    expect(result.valid).toBe(false)
+    expect(result.missingRequired).toContain("KEYCLOAK_ISSUER (must be https://)")
+    expect(result.missingRequired).toContain("GITEA_URL (must be https://)")
   })
 })

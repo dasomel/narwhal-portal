@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
+import { getK8sApiServer } from "@/lib/config"
+import { getK8sBearerToken } from "@/lib/k8s-token"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import {
   assertK8sName,
@@ -8,6 +10,7 @@ import {
   ValidationError,
   toValidationErrorBody,
 } from "@/lib/validation"
+import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
 
@@ -17,9 +20,6 @@ export interface PodLogsResponse {
   pod: string
   namespace: string
 }
-
-const K8S_API_SERVER = process.env.K8S_API_SERVER ?? "https://192.168.56.100:6443"
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
 
 const ALLOWED_ROLES = ["cluster-admin", "developer", "viewer"]
 const CONTAINER_NAME_RE = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/
@@ -46,6 +46,16 @@ export async function GET(
     }
     throw err
   }
+
+  // portal#33: the role check above (ALLOWED_ROLES) gates WHO may hit this
+  // route, but not WHICH namespace's logs they may read — a developer/viewer
+  // could pull pod logs (env var dumps, stack traces) from any namespace by
+  // naming it directly. Same gate as /api/k8s/pods and /api/pods.
+  const scope = await getEffectiveScope(session)
+  if (!namespaceVisible(namespace, scope)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
   const { searchParams } = new URL(req.url)
   const container = searchParams.get("container") ?? ""
   if (container && !CONTAINER_NAME_RE.test(container)) {
@@ -67,9 +77,12 @@ export async function GET(
     if (previous) query.set("previous", "true")
 
     const path = `/api/v1/namespaces/${safeK8sSegment(namespace)}/pods/${safeK8sSegment(pod)}/log?${query}`
-    const res = await fetch(`${K8S_API_SERVER}${path}`, {
+    const res = await fetch(`${getK8sApiServer()}${path}`, {
       headers: {
-        Authorization: `Bearer ${K8S_TOKEN}`,
+        // Reads the projected serviceAccountToken file each call (cached briefly,
+        // auto-refreshed) instead of a token captured once at module load — see
+        // src/lib/k8s-token.ts (Portal #20).
+        Authorization: `Bearer ${getK8sBearerToken()}`,
         // K8s pod-log subresource rejects `Accept: text/plain` with 406 on this API server;
         // `*/*` returns the plain-text log body (we read it via res.text() below).
         Accept: "*/*",

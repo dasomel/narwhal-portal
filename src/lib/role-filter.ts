@@ -176,9 +176,20 @@ export function alertMatchesScope(
 // one level up. It defaults to DEFAULT_CLUSTER_ID so every pre-#21 call site
 // (14 routes, none of which pass a third argument) keeps behaving exactly as
 // before; a route that resolves a real per-request cluster_id can pass it
-// through once one exists to route between.
-export function scopeFingerprint(groups: string[], teams: string[], clusterId: string = DEFAULT_CLUSTER_ID): string {
-  const canonical = JSON.stringify([[...groups].sort(), [...teams].sort(), clusterId])
+// through once one exists to route between. A resolved namespace set may be appended
+// by API callers whose cache must retire immediately after live label-scope changes.
+export function scopeFingerprint(
+  groups: string[],
+  teams: string[],
+  clusterId: string = DEFAULT_CLUSTER_ID,
+  resolvedNamespaces?: Iterable<string>,
+): string {
+  const canonical = JSON.stringify([
+    [...groups].sort(),
+    [...teams].sort(),
+    clusterId,
+    resolvedNamespaces ? [...resolvedNamespaces].sort() : null,
+  ])
   return createHash("sha256").update(canonical).digest("hex").slice(0, 32)
 }
 

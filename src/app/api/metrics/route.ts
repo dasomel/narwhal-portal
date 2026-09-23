@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getClusterMetrics, getNodeMetrics } from "@/lib/prometheus"
-import { auth } from "@/lib/auth"
+import { requireRole } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -13,9 +13,21 @@ export const dynamic = "force-dynamic"
 // same concept applied to events) by construction, not by omission — if a
 // namespace-scoped metric is ever added to this response, it needs the same
 // getEffectiveScope/namespaceVisible gate the k8s/pods and k8s/resource routes use.
+//
+// "No tenant data" is not "no policy" though — the route previously accepted any
+// authenticated session (guest included), unlike every other non-tenant-scoped read
+// (/api/cost, /api/scorecards, /api/service-graph) which gates on
+// requireRole(cluster-admin, developer, viewer). Matching that policy here so
+// telemetry exposure is consistent across routes rather than accidentally the one
+// exception.
 export async function GET() {
-  const session = await auth()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const gate = await requireRole("cluster-admin", "developer", "viewer")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
+  }
 
   try {
     const [metrics, nodeMetrics] = await Promise.all([

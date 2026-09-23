@@ -1,9 +1,21 @@
 # ADR-001: Skaffold 기반 in-cluster 개발 워크플로우
 
-- **Status**: Accepted
+- **Status**: Accepted (dev TLS 전략은 아래 [Superseded](#superseded-dev-tls-전략) 참고)
 - **Date**: 2026-04-22
 - **Deciders**: @dasomel
 - **관련 문서**: [local-dev.md](./local-dev.md)
+
+---
+
+## Superseded: dev TLS 전략
+
+> **이 섹션 이후 "dev 프로필 전략"의 `NODE_TLS_REJECT_UNAUTHORIZED=0`은 더 이상 현재 지원
+> 방식이 아니다.** 아래 원문(Decision)은 채택 당시 기록으로 보존하되, 실행 지침으로 따르지
+> 말 것.
+>
+> **현재 지원 방식**: `Dockerfile.dev`는 `NODE_EXTRA_CA_CERTS=/etc/ssl/narwhal/ca.crt`로 narwhal
+> CA 번들을 신뢰시켜 TLS 검증을 정상적으로 통과한다 (`Dockerfile.dev` 참고). TLS 검증을
+> 끄는(`NODE_TLS_REJECT_UNAUTHORIZED=0`) 방식은 사용하지 않는다.
 
 ---
 
@@ -71,8 +83,8 @@ ignoreDifferences:
 - 개발/운영 매니페스트 이원화 방지
 - 컨테이너 이미지 이름만 Skaffold가 자동 rewriting
 
-**dev 프로필 전략**:
-- `Dockerfile.dev`: `pnpm dev` + `NODE_TLS_REJECT_UNAUTHORIZED=0`
+**dev 프로필 전략** (원문 기록 — TLS 부분은 [Superseded](#superseded-dev-tls-전략) 참고):
+- `Dockerfile.dev`: `pnpm dev` + ~~`NODE_TLS_REJECT_UNAUTHORIZED=0`~~ → 현재는 `NODE_EXTRA_CA_CERTS`
 - Skaffold `sync.manual`로 `src/**`, `public/**`, `next.config.ts`를 재빌드 없이 컨테이너 `/app`에 동기화 → Next.js HMR
 - 코드 변경→반영 2~3초
 

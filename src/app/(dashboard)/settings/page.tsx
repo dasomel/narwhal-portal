@@ -7,6 +7,7 @@ import { CertsTable } from "@/components/settings/certs-table"
 import { PoliciesTable } from "@/components/settings/policies-table"
 import { EffectivePermissions } from "@/components/settings/effective-permissions"
 import { GroupsTable } from "@/components/settings/groups-table"
+import { PLATFORM_TOOLS } from "@/lib/tools"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { t } from "@/lib/i18n"
 import { getLocale } from "@/lib/i18n-server"
@@ -80,7 +81,7 @@ export default async function SettingsPage() {
         </TabsList>
         <TabsContent value="routes" className="mt-4"><RoutesTable /></TabsContent>
         <TabsContent value="users" className="mt-4"><UsersTable /></TabsContent>
-        <TabsContent value="groups" className="mt-4"><GroupsTable /></TabsContent>
+        <TabsContent value="groups" className="mt-4"><GroupsTable tools={PLATFORM_TOOLS} /></TabsContent>
         <TabsContent value="certs" className="mt-4"><CertsTable /></TabsContent>
         <TabsContent value="policies" className="mt-4"><PoliciesTable /></TabsContent>
         <TabsContent value="permissions" className="mt-4"><EffectivePermissions /></TabsContent>

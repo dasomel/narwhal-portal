@@ -1,5 +1,4 @@
 "use client"
-// TODO(wrap-up): i18n keys for ko/en — see spec §5.7
 
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
@@ -45,7 +44,12 @@ const TIER_COLORS: Record<string, string> = {
 
 function TierBadge({ tier }: { tier: string }) {
   const t = useT()
-  const label = tier === "none" ? `— ${t("scorecard.tier.none")}` : (tier === "gold" ? "🥇 Gold" : (tier === "silver" ? "🥈 Silver" : "🥉 Bronze"))
+  const labels = {
+    gold: `🥇 ${t("scorecard.tier.gold")}`,
+    silver: `🥈 ${t("scorecard.tier.silver")}`,
+    bronze: `🥉 ${t("scorecard.tier.bronze")}`,
+  }
+  const label = tier === "none" ? `— ${t("scorecard.tier.none")}` : (labels[tier as keyof typeof labels] ?? labels.bronze)
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${TIER_COLORS[tier] ?? TIER_COLORS.none}`}
@@ -91,9 +95,9 @@ function DonutChart({ counts, t }: { counts: { gold: number; silver: number; bro
         </div>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-600 inline-block" /><span>Gold {counts.gold}</span></div>
-        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-400 inline-block" /><span>Silver {counts.silver}</span></div>
-        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-600 inline-block" /><span>Bronze {counts.bronze}</span></div>
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-600 inline-block" /><span>{t("scorecard.tier.gold")} {counts.gold}</span></div>
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-400 inline-block" /><span>{t("scorecard.tier.silver")} {counts.silver}</span></div>
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-600 inline-block" /><span>{t("scorecard.tier.bronze")} {counts.bronze}</span></div>
         <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-200 inline-block border" /><span>{t("scorecard.tier.none")} {counts.none}</span></div>
       </div>
     </div>
@@ -134,7 +138,7 @@ function RulesModal() {
             {(data.rules as Array<{ id: string; name: string; weight: number }>).map((r) => (
               <div key={r.id} className="flex justify-between text-sm border-b pb-1">
                 <span>{r.name}</span>
-                <span className="text-muted-foreground">{r.weight}pt</span>
+                <span className="text-muted-foreground">{t("scorecard.points", { count: r.weight })}</span>
               </div>
             ))}
           </div>
@@ -282,9 +286,9 @@ export function ScorecardsTable() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("scorecard.allTiers")}</SelectItem>
-            <SelectItem value="gold">Gold</SelectItem>
-            <SelectItem value="silver">Silver</SelectItem>
-            <SelectItem value="bronze">Bronze</SelectItem>
+            <SelectItem value="gold">{t("scorecard.tier.gold")}</SelectItem>
+            <SelectItem value="silver">{t("scorecard.tier.silver")}</SelectItem>
+            <SelectItem value="bronze">{t("scorecard.tier.bronze")}</SelectItem>
             <SelectItem value="none">{t("scorecard.tier.none")}</SelectItem>
           </SelectContent>
         </Select>
@@ -324,10 +328,10 @@ export function ScorecardsTable() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Tier</TableHead>
+                <TableHead>{t("scorecard.tierLabel")}</TableHead>
                 <TableHead>{t("scorecard.service")}</TableHead>
                 <TableHead className="text-right">{t("scorecard.score")}</TableHead>
-                <TableHead>Owner</TableHead>
+                <TableHead>{t("scorecard.owner")}</TableHead>
                 <TableHead>{t("scorecard.failedRulesCol")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -343,7 +347,16 @@ export function ScorecardsTable() {
                 <TableRow
                   key={svc.id}
                   className="cursor-pointer hover:bg-muted/50"
+                  role="link"
+                  tabIndex={0}
+                  aria-label={t("scorecard.openService", { name: svc.name })}
                   onClick={() => router.push(`/catalog/${svc.id}?tab=quality`)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      router.push(`/catalog/${svc.id}?tab=quality`)
+                    }
+                  }}
                 >
                   <TableCell><TierBadge tier={svc.tier} /></TableCell>
                   <TableCell>

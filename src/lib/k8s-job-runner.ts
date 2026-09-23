@@ -2,11 +2,16 @@
 // nsenter를 통해 host PID/mount/network 네임스페이스로 진입 → host의 sysctl/modprobe/apt-get을 그대로 사용.
 
 import "server-only"
-import { K8S_API_SERVER } from "./config"
+import { getK8sApiServer } from "./config"
+import { getK8sBearerToken } from "./k8s-token"
 import { assertK8sNamespace, assertK8sNodeName, safeK8sSegment } from "./validation"
 import { buildJobScript, type ApplyTarget } from "./tuning-commands"
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
-const USE_BEARER = K8S_API_SERVER.startsWith("https://") && K8S_TOKEN.length > 0
+
+function authHeaders(apiServer: string): Record<string, string> {
+  if (!apiServer.startsWith("https://")) return {}
+  const token = getK8sBearerToken()
+  return token.length > 0 ? { Authorization: `Bearer ${token}` } : {}
+}
 
 const TUNING_NAMESPACE = process.env.TUNING_JOB_NAMESPACE ?? "devtools"
 assertK8sNamespace(TUNING_NAMESPACE)
@@ -33,13 +38,14 @@ function getTuningImage(): string {
 }
 
 async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const apiServer = getK8sApiServer()
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
+    ...authHeaders(apiServer),
     ...(init?.headers as Record<string, string> | undefined),
   }
-  if (USE_BEARER) headers.Authorization = `Bearer ${K8S_TOKEN}`
-  const res = await fetch(`${K8S_API_SERVER}${path}`, { ...init, headers })
+  const res = await fetch(`${apiServer}${path}`, { ...init, headers })
   if (!res.ok) {
     const body = await res.text().catch(() => "")
     throw new Error(`K8s API ${res.status} ${path}: ${body.slice(0, 400)}`)
@@ -48,20 +54,21 @@ async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function k8sFetchText(path: string): Promise<string> {
-  const headers: Record<string, string> = { Accept: "text/plain" }
-  if (USE_BEARER) headers.Authorization = `Bearer ${K8S_TOKEN}`
-  const res = await fetch(`${K8S_API_SERVER}${path}`, { headers })
+  const apiServer = getK8sApiServer()
+  const headers: Record<string, string> = { Accept: "text/plain", ...authHeaders(apiServer) }
+  const res = await fetch(`${apiServer}${path}`, { headers })
   if (!res.ok) throw new Error(`K8s API ${res.status} ${path}`)
   return res.text()
 }
 
 async function deleteJob(namespace: string, name: string): Promise<void> {
+  const apiServer = getK8sApiServer()
   // propagationPolicy=Background로 Job + Pod 모두 정리.
   await fetch(
-    `${K8S_API_SERVER}/apis/batch/v1/namespaces/${safeK8sSegment(namespace)}/jobs/${safeK8sSegment(name)}?propagationPolicy=Background`,
+    `${apiServer}/apis/batch/v1/namespaces/${safeK8sSegment(namespace)}/jobs/${safeK8sSegment(name)}?propagationPolicy=Background`,
     {
       method: "DELETE",
-      headers: USE_BEARER ? { Authorization: `Bearer ${K8S_TOKEN}` } : {},
+      headers: authHeaders(apiServer),
     },
   ).catch(() => {})
 }

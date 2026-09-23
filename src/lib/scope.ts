@@ -79,7 +79,15 @@ export async function getEffectiveScope(session: ScopeSession, clusterId: string
     namespaces: resolved.names,
     argocdProjects: scope.argocdProjects,
     hasMapping: resolved.all || resolved.names.size > 0 || scope.argocdProjects.length > 0,
-    fingerprint: scopeFingerprint(groups, teams, clusterId),
+    // D2: resolved namespace labels can change while claims do not. Include the
+    // resolved set to retire scoped cache entries at the next namespace refresh; a
+    // provider scope revision could replace the current 30-second cache window.
+    fingerprint: scopeFingerprint(
+      groups,
+      teams,
+      clusterId,
+      resolved.all ? ["*"] : resolved.names,
+    ),
     resolved,
     clusterId,
   }

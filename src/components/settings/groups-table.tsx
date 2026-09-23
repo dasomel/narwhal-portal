@@ -4,7 +4,7 @@ import { Fragment, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n-client"
-import { PLATFORM_TOOLS } from "@/lib/tools"
+import type { PlatformTool } from "@/lib/tools"
 import { Input } from "@/components/ui/input"
 import { Search, CheckCircle2, XCircle, Save, Users, ChevronDown, ChevronUp } from "lucide-react"
 import { GroupMembers } from "./group-members"
@@ -37,7 +37,7 @@ interface User {
 // Local state tracker: { [groupPk]: string[] }
 type PendingMap = Record<string, string[]>
 
-export function GroupsTable() {
+export function GroupsTable({ tools }: { tools: PlatformTool[] }) {
   const t = useT()
   const qc = useQueryClient()
   const [search, setSearch] = useState("")
@@ -164,7 +164,7 @@ export function GroupsTable() {
                 <th className="py-3 px-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider min-w-[60px] border-r border-border/50">
                   <Users className="inline h-3.5 w-3.5" />
                 </th>
-                {PLATFORM_TOOLS.map((tool) => (
+                {tools.map((tool) => (
                   <th
                     key={tool.id}
                     className="py-3 px-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider min-w-[80px]"
@@ -225,7 +225,7 @@ export function GroupsTable() {
                       </td>
 
                       {/* Tool checkboxes */}
-                      {PLATFORM_TOOLS.map((tool) => {
+                      {tools.map((tool) => {
                         const checked = allowedTools.includes(tool.id)
                         return (
                           <td key={tool.id} className="py-3 px-3 text-center">
@@ -269,7 +269,7 @@ export function GroupsTable() {
                     {/* Expanded member management row */}
                     {isExpanded && (
                       <tr key={`${group.pk}-members`} className="bg-narwhal-accent/5 border-b border-narwhal-accent/20">
-                        <td colSpan={PLATFORM_TOOLS.length + 3} className="py-3 px-4">
+                        <td colSpan={tools.length + 3} className="py-3 px-4">
                           <GroupMembers
                             groupPk={group.pk}
                             groupName={group.name}
@@ -293,7 +293,7 @@ export function GroupsTable() {
               })}
               {filteredGroups.length === 0 && (
                 <tr>
-                  <td colSpan={PLATFORM_TOOLS.length + 3} className="py-12 text-center text-muted-foreground italic text-sm">
+                  <td colSpan={tools.length + 3} className="py-12 text-center text-muted-foreground italic text-sm">
                     {t("groups.noResults")}
                   </td>
                 </tr>

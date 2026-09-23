@@ -68,7 +68,10 @@ spec:
         - name: git-clone
           # alpine/git is musl-based, ARM64-compatible, available on ghcr
           # fallback: docker.io/alpine/git (same image, Docker Hub mirror)
-          image: alpine/git:latest
+          # Pinned per narwhal#52 D3-A; must move in lockstep with narwhal's
+          # scripts/airgap/images.txt or the air-gap build job can't pull it.
+          # Digest pin (portal#23), resolved 2026-09-18 from docker.io/alpine/git:v2.54.0.
+          image: alpine/git:v2.54.0@sha256:0b5f57d22181e8b8fbe8ac5ca8754faa0d577f101b9857418f1acc43955ad464
           imagePullPolicy: IfNotPresent
           env:
             - name: GITEA_ADMIN_PASSWORD
@@ -82,11 +85,21 @@ spec:
             - |
               set -eu
               echo "==> Cloning narwhal-portal from in-cluster Gitea..."
+              # portal#23: credential goes in a .netrc read by git's own HTTP auth,
+              # never in the clone URL/argv — `ps`, Job events, and pod logs only
+              # ever see the bare URL below, no password.
+              cat > "${HOME}/.netrc" <<-NETRC
+              machine gitea-http.devtools.svc.cluster.local
+              login gitea-admin
+              password ${GITEA_ADMIN_PASSWORD}
+              NETRC
+              chmod 600 "${HOME}/.netrc"
               # Gitea service: gitea-http.devtools.svc.cluster.local:3000
               # Repo is created/pushed by kaniko-build.sh before this Job runs.
               git clone \
-                "http://gitea-admin:${GITEA_ADMIN_PASSWORD}@gitea-http.devtools.svc.cluster.local:3000/gitea-admin/narwhal-portal.git" \
+                "http://gitea-http.devtools.svc.cluster.local:3000/gitea-admin/narwhal-portal.git" \
                 /workspace
+              rm -f "${HOME}/.netrc"
               echo "==> Clone complete. HEAD: $(git -C /workspace rev-parse --short HEAD)"
           volumeMounts:
             - name: workspace
@@ -98,7 +111,10 @@ spec:
       containers:
         - name: kaniko
           # gcr.io/kaniko-project/executor supports ARM64 from v1.21+
-          image: gcr.io/kaniko-project/executor:latest
+          # Pinned per narwhal#52 D3-A; must move in lockstep with narwhal's
+          # scripts/airgap/images.txt or the air-gap build job can't pull it.
+          # Digest pin (portal#23), resolved 2026-09-18 from gcr.io/kaniko-project/executor:v1.24.0.
+          image: gcr.io/kaniko-project/executor:v1.24.0@sha256:4e7a52dd1f14872430652bb3b027405b8dfd17c4538751c620ac005741ef9698
           imagePullPolicy: IfNotPresent
           args:
             - "--context=dir:///workspace"

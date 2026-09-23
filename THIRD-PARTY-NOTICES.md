@@ -21338,7 +21338,7 @@ limitations under the License.
 
 </details>
 
-### @tanstack/query-core@5.95.2
+### @tanstack/query-core@5.102.8
 
 - License: `MIT`
 - Author: tannerlinsley
@@ -21372,7 +21372,7 @@ SOFTWARE.
 
 </details>
 
-### @tanstack/react-query@5.95.2
+### @tanstack/react-query@5.102.8
 
 - License: `MIT`
 - Author: tannerlinsley
@@ -33972,7 +33972,7 @@ THE SOFTWARE.
 
 </details>
 
-### js-yaml@4.3.1
+### js-yaml@4.3.2
 
 - License: `MIT`
 - Author: Vladimir Zapparov
