@@ -88,6 +88,31 @@ describe("InMemoryIdempotencyStore", () => {
     const reClaim = await store.claim("k1", "v1-new", 60)
     expect(reClaim).toBeNull()
   })
+
+  it("bounds size under repeated fulfill() calls the same way claim() does — the ValkeyIdempotencyStore fallback-mirror path", async () => {
+    const { InMemoryIdempotencyStore } = await import("./idempotency")
+    const store = new InMemoryIdempotencyStore(5)
+
+    // Simulates ValkeyIdempotencyStore.claim() mirroring every successful Valkey
+    // claim into the fallback via fulfill() — one call per distinct key, well past
+    // maxEntries, with Valkey (i.e. claim()) never itself touching this store.
+    for (let i = 0; i < 20; i++) {
+      await store.fulfill(`k${i}`, `v${i}`, 60)
+    }
+
+    expect(store.size()).toBeLessThanOrEqual(5)
+  })
+
+  it("sweeps expired entries on fulfill() the same way claim() does", async () => {
+    const { InMemoryIdempotencyStore } = await import("./idempotency")
+    const store = new InMemoryIdempotencyStore(100)
+
+    await store.claim("expiring", "v1", -1) // already expired
+    expect(store.size()).toBe(1)
+
+    await store.fulfill("other", "v2", 60)
+    expect(store.size()).toBe(1) // "expiring" was swept, "other" was added
+  })
 })
 
 describe("ValkeyIdempotencyStore fallback", () => {

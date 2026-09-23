@@ -249,8 +249,41 @@ async function fetchAllPages<T>(
   throw new Error(`${errorPrefix} pagination exceeded max page limit`)
 }
 
+/**
+ * Keycloak-derived Valkey cache keys and invalidation helpers.
+ *
+ * Cache layers & TTLs:
+ * - `keycloak:users`: raw Keycloak user list (TTL 300s / 5m). Invalidated on user create/update.
+ * - `keycloak:groups`: raw Keycloak group summary list (TTL 60s / 1m). Invalidated on group attribute updates.
+ * - `keycloak:groups-detailed`: groups with resolved user IDs and attributes (TTL 60s / 1m).
+ *   Never cached when member fetch is partial. Invalidated on membership and group attribute changes.
+ * - `api:groups-enriched`: API route projection combining groups and users with usernames/emails (TTL 60s / 1m).
+ *   Must be invalidated whenever group membership or group attributes mutate.
+ *
+ * OIDC session note:
+ * Changes to Keycloak group membership or attributes invalidate the cached API/client projections above,
+ * but do NOT immediately alter existing active sessions. A user's OIDC session groups and claims only
+ * update on re-login or token refresh; effective runtime permissions remain based on the token until then.
+ */
+export const KEYCLOAK_CACHE_KEYS = {
+  users: "keycloak:users",
+  groups: "keycloak:groups",
+  groupsDetailed: "keycloak:groups-detailed",
+  groupsEnriched: "api:groups-enriched",
+} as const
+
+export type KeycloakCacheKey = (typeof KEYCLOAK_CACHE_KEYS)[keyof typeof KEYCLOAK_CACHE_KEYS]
+
+export async function invalidateKeycloakCaches(
+  keys: readonly (KeycloakCacheKey | string)[] | KeycloakCacheKey | string
+): Promise<void> {
+  const keyList = Array.isArray(keys) ? keys : [keys]
+  const uniqueKeys = Array.from(new Set(keyList))
+  await Promise.all(uniqueKeys.map((k) => cacheDel(k)))
+}
+
 export async function getUsers(): Promise<KeycloakUser[]> {
-  const cached = await cacheGet<KeycloakUser[]>("keycloak:users")
+  const cached = await cacheGet<KeycloakUser[]>(KEYCLOAK_CACHE_KEYS.users)
   if (cached) return cached
 
   const data = await fetchAllPages<Record<string, unknown>>(
@@ -259,12 +292,12 @@ export async function getUsers(): Promise<KeycloakUser[]> {
     "Keycloak API"
   )
   const users = data.map(mapUser)
-  await cacheSet("keycloak:users", users, 300)
+  await cacheSet(KEYCLOAK_CACHE_KEYS.users, users, 300)
   return users
 }
 
 export async function getGroups(): Promise<KeycloakGroup[]> {
-  const cached = await cacheGet<KeycloakGroup[]>("keycloak:groups")
+  const cached = await cacheGet<KeycloakGroup[]>(KEYCLOAK_CACHE_KEYS.groups)
   if (cached) return cached
 
   const data = await fetchAllPages<{ id: string; name: string }>(
@@ -273,12 +306,12 @@ export async function getGroups(): Promise<KeycloakGroup[]> {
     "Keycloak groups"
   )
   const groups: KeycloakGroup[] = data.map((g) => ({ pk: g.id, name: g.name, num_pk: 0 }))
-  await cacheSet("keycloak:groups", groups, 60)
+  await cacheSet(KEYCLOAK_CACHE_KEYS.groups, groups, 60)
   return groups
 }
 
 export async function getGroupsDetailed(): Promise<KeycloakGroupDetailed[]> {
-  const cached = await cacheGet<KeycloakGroupDetailed[]>("keycloak:groups-detailed")
+  const cached = await cacheGet<KeycloakGroupDetailed[]>(KEYCLOAK_CACHE_KEYS.groupsDetailed)
   if (cached) return cached
 
   const groupList = await fetchAllPages<{
@@ -351,7 +384,7 @@ export async function getGroupsDetailed(): Promise<KeycloakGroupDetailed[]> {
   // caller re-fetches instead of being served a snapshot with silently
   // dropped memberships for up to the 60s TTL.
   if (!anyPartial) {
-    await cacheSet("keycloak:groups-detailed", detailed, 60)
+    await cacheSet(KEYCLOAK_CACHE_KEYS.groupsDetailed, detailed, 60)
   }
   return detailed
 }
@@ -390,7 +423,7 @@ export async function createUser(payload: {
     `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/users/${newId}`
   )
   if (!getRes.ok) throw new Error(`Get new user failed: ${getRes.status}`)
-  await cacheDel("keycloak:users")
+  await invalidateKeycloakCaches([KEYCLOAK_CACHE_KEYS.users])
   return mapUser(await getRes.json())
 }
 
@@ -403,7 +436,7 @@ export async function setUserActive(pk: string, isActive: boolean): Promise<void
     }
   )
   if (!res.ok) throw new Error(`Update user failed: ${res.status}`)
-  await cacheDel("keycloak:users")
+  await invalidateKeycloakCaches([KEYCLOAK_CACHE_KEYS.users])
 }
 
 export async function getGroupMembers(groupPk: string): Promise<KeycloakUser[]> {
@@ -421,9 +454,10 @@ export async function addUserToGroup(groupPk: string, userPk: string): Promise<v
     { method: "PUT" }
   )
   if (!res.ok) throw new Error(`Add user to group failed: ${res.status}`)
-  await Promise.all([
-    cacheDel("keycloak:groups-detailed"),
-    cacheDel("keycloak:users"),
+  await invalidateKeycloakCaches([
+    KEYCLOAK_CACHE_KEYS.groupsDetailed,
+    KEYCLOAK_CACHE_KEYS.users,
+    KEYCLOAK_CACHE_KEYS.groupsEnriched,
   ])
 }
 
@@ -433,9 +467,10 @@ export async function removeUserFromGroup(groupPk: string, userPk: string): Prom
     { method: "DELETE" }
   )
   if (!res.ok) throw new Error(`Remove user from group failed: ${res.status}`)
-  await Promise.all([
-    cacheDel("keycloak:groups-detailed"),
-    cacheDel("keycloak:users"),
+  await invalidateKeycloakCaches([
+    KEYCLOAK_CACHE_KEYS.groupsDetailed,
+    KEYCLOAK_CACHE_KEYS.users,
+    KEYCLOAK_CACHE_KEYS.groupsEnriched,
   ])
 }
 
@@ -463,8 +498,9 @@ export async function updateGroupAttributes(
     }
   )
   if (!putRes.ok) throw new Error(`Update group attributes failed: ${putRes.status}`)
-  await Promise.all([
-    cacheDel("keycloak:groups"),
-    cacheDel("keycloak:groups-detailed"),
+  await invalidateKeycloakCaches([
+    KEYCLOAK_CACHE_KEYS.groups,
+    KEYCLOAK_CACHE_KEYS.groupsDetailed,
+    KEYCLOAK_CACHE_KEYS.groupsEnriched,
   ])
 }

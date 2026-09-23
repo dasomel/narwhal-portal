@@ -4,10 +4,13 @@ import type { KeycloakUser } from "@/lib/keycloak-client"
 vi.mock("@/lib/auth", () => ({
   requireAdmin: vi.fn(),
   getActorId: vi.fn((s) => s.user.email ?? "unknown"),
+  ALLOWED_GROUPS: new Set(["cluster-admin", "developer", "viewer", "guest"]),
 }))
 vi.mock("@/lib/keycloak-client", () => ({
   getUsers: vi.fn(),
   createUser: vi.fn(),
+  getGroups: vi.fn(),
+  addUserToGroup: vi.fn(),
 }))
 vi.mock("@/lib/operation-context", () => ({
   beginOperation: vi.fn().mockResolvedValue({}),
@@ -16,8 +19,9 @@ vi.mock("@/lib/operation-context", () => ({
 }))
 
 const { requireAdmin } = await import("@/lib/auth")
-const { getUsers, createUser } = await import("@/lib/keycloak-client")
+const { getUsers, createUser, getGroups, addUserToGroup } = await import("@/lib/keycloak-client")
 const { beginOperation, completeOperation, failOperation } = await import("@/lib/operation-context")
+const { getIdempotencyStore, fulfillIdempotencyKey } = await import("@/lib/idempotency")
 const { GET, POST } = await import("./route")
 
 const adminSession = { user: { role: "cluster-admin", email: "admin@example.com" } }
@@ -43,6 +47,8 @@ function req(body: unknown, headers?: Record<string, string>) {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(createUser).mockResolvedValue(newUser)
+  vi.mocked(getGroups).mockResolvedValue([])
+  vi.mocked(addUserToGroup).mockResolvedValue(undefined)
 })
 
 describe("GET /api/settings/users — auth boundary", () => {
@@ -108,6 +114,56 @@ describe("POST /api/settings/users — validation", () => {
     expect((await res.json()).field).toBe("username")
   })
 
+  it("400s an unsupported group name", async () => {
+    const res = await POST(req({ ...validBody, groups: ["super-admin"] }) as never)
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toBe("ValidationError")
+    expect(json.field).toBe("groups")
+    expect(json.message).toContain("unsupported group")
+    expect(createUser).not.toHaveBeenCalled()
+  })
+
+  it("400s non-array groups", async () => {
+    const res = await POST(req({ ...validBody, groups: "developer" }) as never)
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toBe("ValidationError")
+    expect(json.field).toBe("groups")
+    expect(json.message).toContain("array of strings")
+    expect(createUser).not.toHaveBeenCalled()
+  })
+
+  it("400s non-string items in groups array", async () => {
+    const res = await POST(req({ ...validBody, groups: [123] }) as never)
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toBe("ValidationError")
+    expect(json.field).toBe("groups")
+    expect(createUser).not.toHaveBeenCalled()
+  })
+
+  it("400s duplicate groups", async () => {
+    const res = await POST(req({ ...validBody, groups: ["developer", "developer"] }) as never)
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toBe("ValidationError")
+    expect(json.field).toBe("groups")
+    expect(json.message).toContain("duplicate group")
+    expect(createUser).not.toHaveBeenCalled()
+  })
+
+  it("400s when groups count exceeds supported roles count", async () => {
+    const res = await POST(
+      req({ ...validBody, groups: ["cluster-admin", "developer", "viewer", "guest", "extra"] }) as never,
+    )
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toBe("ValidationError")
+    expect(json.field).toBe("groups")
+    expect(createUser).not.toHaveBeenCalled()
+  })
+
   it("does not pass unknown/smuggled fields through to createUser", async () => {
     await POST(req({ ...validBody, role: "cluster-admin", isSuperuser: true }) as never)
     expect(createUser).toHaveBeenCalledWith({
@@ -116,6 +172,111 @@ describe("POST /api/settings/users — validation", () => {
       name: validBody.name,
       password: validBody.password,
     })
+  })
+})
+
+describe("POST /api/settings/users — role groups handling", () => {
+  beforeEach(() => {
+    vi.mocked(requireAdmin).mockResolvedValue({ session: adminSession as never })
+  })
+
+  it("resolves groups and adds user to groups on success", async () => {
+    vi.mocked(getGroups).mockResolvedValue([
+      { pk: "gid-dev", name: "developer", num_pk: 0 },
+      { pk: "gid-viewer", name: "viewer", num_pk: 0 },
+    ])
+    const res = await POST(req({ ...validBody, groups: ["developer", "viewer"] }) as never)
+    expect(res.status).toBe(201)
+    expect(createUser).toHaveBeenCalledWith({
+      username: validBody.username,
+      email: validBody.email,
+      name: validBody.name,
+      password: validBody.password,
+    })
+    expect(getGroups).toHaveBeenCalledTimes(1)
+    expect(addUserToGroup).toHaveBeenCalledWith("gid-dev", newUser.pk)
+    expect(addUserToGroup).toHaveBeenCalledWith("gid-viewer", newUser.pk)
+    expect(completeOperation).toHaveBeenCalledWith(
+      expect.anything(),
+      `User created: ${validBody.username}`,
+      expect.stringContaining("groups=developer,viewer"),
+    )
+  })
+
+  it("creates bare user when no groups are provided (unchanged behavior)", async () => {
+    const res = await POST(req(validBody) as never)
+    expect(res.status).toBe(201)
+    expect(createUser).toHaveBeenCalledTimes(1)
+    expect(getGroups).not.toHaveBeenCalled()
+    expect(addUserToGroup).not.toHaveBeenCalled()
+    expect(completeOperation).toHaveBeenCalledWith(
+      expect.anything(),
+      `User created: ${validBody.username}`,
+      `id=${newUser.pk}; email=${validBody.email}`,
+    )
+  })
+
+  it("creates bare user when empty groups array is provided", async () => {
+    const res = await POST(req({ ...validBody, groups: [] }) as never)
+    expect(res.status).toBe(201)
+    expect(createUser).toHaveBeenCalledTimes(1)
+    expect(getGroups).not.toHaveBeenCalled()
+    expect(addUserToGroup).not.toHaveBeenCalled()
+  })
+
+  it("400s when a requested group is not found in Keycloak, without creating the user", async () => {
+    vi.mocked(getGroups).mockResolvedValue([
+      { pk: "gid-dev", name: "developer", num_pk: 0 },
+      // "viewer" is missing
+    ])
+    const res = await POST(req({ ...validBody, groups: ["developer", "viewer"] }) as never)
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toBe("ValidationError")
+    expect(json.field).toBe("groups")
+    expect(json.message).toContain("viewer")
+    expect(createUser).not.toHaveBeenCalled()
+    expect(addUserToGroup).not.toHaveBeenCalled()
+    expect(beginOperation).not.toHaveBeenCalled()
+  })
+
+  it("500s and does not create the user when getGroups() throws while resolving groups", async () => {
+    vi.mocked(getGroups).mockRejectedValue(new Error("Keycloak groups unavailable"))
+    const res = await POST(req({ ...validBody, groups: ["developer"] }) as never)
+    expect(res.status).toBe(500)
+    expect(createUser).not.toHaveBeenCalled()
+    expect(beginOperation).not.toHaveBeenCalled()
+  })
+
+  it("500s and does not create the user when Keycloak has duplicate group names for a requested group", async () => {
+    vi.mocked(getGroups).mockResolvedValue([
+      { pk: "gid-dev-1", name: "developer", num_pk: 0 },
+      { pk: "gid-dev-2", name: "developer", num_pk: 0 },
+    ])
+    const res = await POST(req({ ...validBody, groups: ["developer"] }) as never)
+    expect(res.status).toBe(500)
+    expect(createUser).not.toHaveBeenCalled()
+    expect(beginOperation).not.toHaveBeenCalled()
+  })
+
+  it("fails with partial-state message when addUserToGroup throws", async () => {
+    vi.mocked(getGroups).mockResolvedValue([
+      { pk: "gid-dev", name: "developer", num_pk: 0 },
+    ])
+    vi.mocked(addUserToGroup).mockRejectedValue(new Error("Keycloak network error"))
+    const res = await POST(req({ ...validBody, groups: ["developer"] }) as never)
+    expect(res.status).toBe(500)
+    const json = await res.json()
+    expect(json.error).toBe("PartialStateError")
+    expect(json.message).toContain(`User created (id=${newUser.pk})`)
+    // upstream error text goes to the operation record, never the response body
+    expect(json.message).not.toContain("Keycloak network error")
+    expect(failOperation).toHaveBeenCalledWith(
+      expect.anything(),
+      `User created with partial state: ${validBody.username}`,
+      expect.stringContaining("Keycloak network error"),
+    )
+    expect(completeOperation).not.toHaveBeenCalled()
   })
 })
 
@@ -156,5 +317,64 @@ describe("POST /api/settings/users — idempotency", () => {
     expect(second.status).toBe(201)
     expect((await second.json()).duplicate).toBe(true)
     expect(createUser).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects request when Idempotency-Key is reused with different groups", async () => {
+    vi.mocked(getGroups).mockResolvedValue([
+      { pk: "gid-dev", name: "developer", num_pk: 0 },
+      { pk: "gid-viewer", name: "viewer", num_pk: 0 },
+    ])
+    const first = await POST(
+      req({ ...validBody, groups: ["developer"] }, { "Idempotency-Key": "retry-diff-groups" }) as never,
+    )
+    expect(first.status).toBe(201)
+
+    const second = await POST(
+      req({ ...validBody, groups: ["viewer"] }, { "Idempotency-Key": "retry-diff-groups" }) as never,
+    )
+    expect(second.status).toBe(400)
+    const json = await second.json()
+    expect(json.field).toBe("Idempotency-Key")
+    expect(json.message).toBe("Idempotency-Key reused with a different request body")
+  })
+
+  it("replays the same PartialStateError on retry with the same key after a partial failure (no 409)", async () => {
+    vi.mocked(getGroups).mockResolvedValue([{ pk: "gid-dev", name: "developer", num_pk: 0 }])
+    vi.mocked(addUserToGroup).mockRejectedValue(new Error("Keycloak network error"))
+
+    const first = await POST(
+      req({ ...validBody, groups: ["developer"] }, { "Idempotency-Key": "retry-partial" }) as never,
+    )
+    expect(first.status).toBe(500)
+    const firstJson = await first.json()
+    expect(firstJson.error).toBe("PartialStateError")
+    expect(createUser).toHaveBeenCalledTimes(1)
+
+    const second = await POST(
+      req({ ...validBody, groups: ["developer"] }, { "Idempotency-Key": "retry-partial" }) as never,
+    )
+    expect(second.status).toBe(500)
+    const secondJson = await second.json()
+    expect(secondJson.error).toBe("PartialStateError")
+    expect(secondJson.duplicate).toBe(true)
+    expect(secondJson.user).toEqual(newUser)
+    // no 409 "in progress" — the retry replays the stored outcome instead
+    expect(second.status).not.toBe(409)
+    expect(createUser).toHaveBeenCalledTimes(1)
+  })
+
+  it("replays a legacy fulfilled record without _fingerprint as a 201 duplicate", async () => {
+    await fulfillIdempotencyKey(
+      getIdempotencyStore(),
+      "user-create:legacy-no-fingerprint",
+      JSON.stringify(newUser),
+    )
+
+    const res = await POST(req(validBody, { "Idempotency-Key": "legacy-no-fingerprint" }) as never)
+    expect(res.status).toBe(201)
+    const json = await res.json()
+    expect(json.duplicate).toBe(true)
+    expect(json.pk).toBe(newUser.pk)
+    expect(createUser).not.toHaveBeenCalled()
   })
 })

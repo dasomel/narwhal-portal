@@ -25,7 +25,7 @@ export type UserRole = "cluster-admin" | "developer" | "viewer" | "guest"
 export type GroupClaimStatus = "ok" | "unknown_groups" | "no_groups"
 
 // C-5: RBAC role allowlist (must match nav.tsx menuItems[].roles and tools.ts PLATFORM_TOOLS[].roles)
-const ALLOWED_GROUPS: ReadonlySet<UserRole> = new Set([
+export const ALLOWED_GROUPS: ReadonlySet<UserRole> = new Set([
   "cluster-admin",
   "developer",
   "viewer",

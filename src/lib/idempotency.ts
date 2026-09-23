@@ -53,24 +53,34 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
     }
   }
 
-  async claim(key: string, value: string, ttlSeconds: number): Promise<string | null> {
-    const now = Date.now()
+  /**
+   * Sweeps expired entries, evicts the oldest entry if at capacity, then writes
+   * key/value. Shared by claim() and fulfill() — fulfill() is called on every
+   * successful Valkey claim by ValkeyIdempotencyStore (as a fallback mirror), so
+   * without the same bound here the fallback map grows unbounded while Valkey
+   * stays healthy.
+   */
+  private setBounded(key: string, value: string, ttlSeconds: number, now: number): void {
     this.sweep(now)
-    const existing = this.map.get(key)
-    if (existing && existing.expiresAt > now) {
-      return existing.value
-    }
-    if (this.map.size >= this.maxEntries) {
+    if (!this.map.has(key) && this.map.size >= this.maxEntries) {
       const oldest = this.map.keys().next().value
       if (oldest) this.map.delete(oldest)
     }
     this.map.set(key, { value, expiresAt: now + ttlSeconds * 1000 })
+  }
+
+  async claim(key: string, value: string, ttlSeconds: number): Promise<string | null> {
+    const now = Date.now()
+    const existing = this.map.get(key)
+    if (existing && existing.expiresAt > now) {
+      return existing.value
+    }
+    this.setBounded(key, value, ttlSeconds, now)
     return null
   }
 
   async fulfill(key: string, value: string, ttlSeconds: number): Promise<void> {
-    const now = Date.now()
-    this.map.set(key, { value, expiresAt: now + ttlSeconds * 1000 })
+    this.setBounded(key, value, ttlSeconds, Date.now())
   }
 
   clear(): void {
