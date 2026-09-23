@@ -1,6 +1,17 @@
 # Release TODO — 게이트웨이/배포 런타임 패치 영구화 (gitea 반영)
 
-> **목적:** 라이브 개발(`skaffold dev`)을 떠받치기 위해 클러스터에 **직접(런타임)** 적용한
+> **⚠️ ARCHIVED / SUPERSEDED (2026-09-17)** — 이 문서는 **현재 상태를 나타내지 않는다.**
+> 여기 기록된 `selfHeal=off`, etcd/Admin API 직접 patch는 당시(2026-06) 라이브 개발 세션의
+> **임시 조치**였고, 이후 GitOps로 영구화되어 **`apisix-routes` / `narwhal-portal` 모두
+> `syncPolicy.automated.selfHeal: true`**가 현재 지원 상태다 (narwhal 메인 GitOps 매니페스트,
+> `docs/LIVE-DEV-container-reload.md` 참고). 이 문서를 실행 지침으로 따르지 말 것 — 직접
+> etcd/Admin API patch나 selfHeal 끄기는 **비상 대응(emergency-only)** 시에만, 그리고 반드시
+> 이 문서와 같은 방식으로 사후 아카이브/영구화할 것을 전제로 사용한다. 이력 보존 목적으로만
+> 유지한다.
+>
+> ---
+>
+> **목적 (원문, 역사적 기록):** 라이브 개발(`skaffold dev`)을 떠받치기 위해 클러스터에 **직접(런타임)** 적용한
 > 패치들을 정리한다. 이것들은 **gitea/GitOps에 반영되지 않은 임시 상태**이며, ArgoCD가
 > 재동기화하면 사라질 수 있어 현재 `apisix-routes` ArgoCD App의 **selfHeal을 off**로 막아 둔
 > 상태다. **다음 tagging / release 시점에 아래를 gitea(GitOps)로 영구화**하고 selfHeal을

@@ -20,6 +20,10 @@ const { GET } = await import("./route")
 
 const platformTeamSession = { groups: ["developer"], teams: ["platform-team"], user: { role: "developer" } }
 const frontendTeamSession = { groups: ["developer"], teams: ["frontend-team"], user: { role: "developer" } }
+const adminSession = { groups: ["cluster-admin"], teams: [], user: { role: "cluster-admin" } }
+// No role/team claim resolves to role-filter.ts's branch 4 (guest / no mapping):
+// hasMapping=false, namespaces=[] — denied regardless of which namespace is asked for.
+const unscopedSession = { groups: [], teams: [], user: { role: "guest" } }
 
 const namespaces: NamespaceInfo[] = [
   { name: "platform-system", status: "Active", labels: {}, createdAt: "2026-01-01T00:00:00Z" },
@@ -46,6 +50,7 @@ function req(namespace: string, name = "pod-1") {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   vi.mocked(getNamespaces).mockResolvedValue(namespaces)
   vi.mocked(getPodDetail).mockResolvedValue(podDetail)
   vi.mocked(cacheGet).mockResolvedValue(null)
@@ -73,5 +78,37 @@ describe("GET /api/k8s/resource — scope enforcement", () => {
     vi.mocked(auth).mockResolvedValue(null as never)
     const res = await GET(req("platform-system"))
     expect(res.status).toBe(401)
+  })
+
+  it("200s cluster-admin reading a namespace no team mapping grants them (fleet visibility)", async () => {
+    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    const res = await GET(req("frontend-app"))
+    expect(res.status).toBe(200)
+    expect(getPodDetail).toHaveBeenCalledWith("frontend-app", "pod-1")
+  })
+
+  it("403s a caller with no team mapping and no role default (unscoped non-admin)", async () => {
+    vi.mocked(auth).mockResolvedValue(unscopedSession as never)
+    const res = await GET(req("platform-system"))
+    expect(res.status).toBe(403)
+    expect(getPodDetail).not.toHaveBeenCalled()
+  })
+
+  it("keys the cache per-namespace so one namespace's cached detail never answers another's request", async () => {
+    const frontendDetail: PodDetail = { ...podDetail, namespace: "frontend-app" }
+    vi.mocked(cacheGet).mockImplementation(async (key: string) => {
+      if (key === "k8s:resource:platform-system:pod-1") return podDetail
+      if (key === "k8s:resource:frontend-app:pod-1") return frontendDetail
+      return null
+    })
+    vi.mocked(auth).mockResolvedValue(adminSession as never)
+
+    const platformRes = await GET(req("platform-system"))
+    const frontendRes = await GET(req("frontend-app"))
+
+    expect(await platformRes.json()).toEqual(podDetail)
+    expect(await frontendRes.json()).toEqual(frontendDetail)
+    // Both served from cache — the upstream detail call never ran for either namespace.
+    expect(getPodDetail).not.toHaveBeenCalled()
   })
 })

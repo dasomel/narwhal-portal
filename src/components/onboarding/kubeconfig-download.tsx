@@ -3,6 +3,7 @@ import { useSession } from "next-auth/react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n-client"
+import { KUBELOGIN_VERSION, kubeloginArchiveUrl, kubeloginChecksumsUrl } from "@/lib/kubelogin-version"
 
 export function KubeconfigDownload() {
   const { data: session } = useSession()
@@ -35,6 +36,7 @@ export function KubeconfigDownload() {
 
           <p className="text-foreground/80 font-semibold">— {t("kubeconfig.osUnix")} —</p>
           <p>{t("kubeconfig.installPlugin")}</p>
+          <p># brew tracks the formula&apos;s own pinned+checksummed revision (trust boundary: homebrew-core)</p>
           <p>brew install int128/kubelogin/kubelogin</p>
           <br />
           <p>{t("kubeconfig.applyConfig")}</p>
@@ -46,10 +48,14 @@ export function KubeconfigDownload() {
 
           <br />
           <p className="text-foreground/80 font-semibold">— {t("kubeconfig.osWindows")} —</p>
-          <p>{t("kubeconfig.installPlugin")}</p>
-          <p>curl.exe -Lo kubelogin.zip https://github.com/int128/kubelogin/releases/latest/download/kubelogin_windows_amd64.zip</p>
+          <p>{t("kubeconfig.installPlugin")} (pinned {KUBELOGIN_VERSION})</p>
+          <p>curl.exe -Lo kubelogin.zip {kubeloginArchiveUrl("windows_amd64")}</p>
+          <p>curl.exe -Lo checksums.txt {kubeloginChecksumsUrl()}</p>
+          <p># verify checksum before installing</p>
+          <p>CertUtil -hashfile kubelogin.zip SHA256 | findstr /i (Select-String kubelogin_windows_amd64.zip checksums.txt).Line.Split()[0]</p>
           <p>Expand-Archive kubelogin.zip -DestinationPath C:\kubelogin</p>
           <p># Add C:\kubelogin to PATH, rename kubelogin.exe -&gt; kubectl-oidc_login.exe</p>
+          <p># Upgrade guidance: bump KUBELOGIN_VERSION in src/lib/kubelogin-version.ts and re-verify; this installer never silently tracks a moving target</p>
           <br />
           <p>{t("kubeconfig.applyConfig")}</p>
           <p>mkdir $HOME\.kube -Force</p>

@@ -10,8 +10,8 @@ export interface HeroResponse {
   summary: {
     nodes: { ready: number; total: number }
     pods: { running: number; total: number }
-    cpu: number           // 0-100
-    memory: number        // 0-100
+    cpu: number | null           // 0-100, null if telemetry unavailable
+    memory: number | null        // 0-100, null if telemetry unavailable
     syncedAgo: string | null  // e.g. "2m"
   }
   incidents: HeroIncident[]    // max 5, sorted critical-first then by timestamp desc
@@ -65,6 +65,8 @@ export interface ArgoCDSyncRequest {
 export interface ArgoCDSyncResponse {
   ok: boolean
   app?: { name: string; syncStatus: string; revision: string | null }
+  /** portal#59: true when the sync was accepted but not yet observed to converge (operationState.phase != Succeeded). */
+  pending?: boolean
   error?: string
 }
 

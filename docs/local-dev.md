@@ -6,7 +6,7 @@
 2. `.env.local` 열어 placeholder 값 직접 채우기:
    - `OIDC_CLIENT_SECRET` / `KEYCLOAK_CLIENT_SECRET` — Keycloak 클라이언트 설정에서 발급
    - `KEYCLOAK_ADMIN_CLIENT_SECRET` — Keycloak SA 클라이언트 생성 후 입력
-   - `OPENBAO_TOKEN` — OpenBao AppRole auth 후 발급
+   - `OPENBAO_TOKEN` — OpenBao AppRole auth 후 발급 (로컬 전용 폴백; 클러스터 배포는 narwhal#156 이후 `OPENBAO_AUTH_METHOD=kubernetes`로 Kubernetes auth를 쓰며 이 값을 주입하지 않는다)
    - 자세한 절차: [docs/security-clean-install.md](./security-clean-install.md)
 3. `pnpm install`
 4. `pnpm dev` (로컬) 또는 `pnpm run dev:skaffold` (클러스터 내 HMR)

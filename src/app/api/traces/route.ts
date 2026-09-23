@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { getDependencyUrl } from "@/lib/config"
 
 export const dynamic = "force-dynamic"
 
-const TEMPO_URL = process.env.TEMPO_URL ?? "http://localhost:3200"
+function tempoUrl(): string {
+  return getDependencyUrl("TEMPO_URL", "http://localhost:3200")
+}
 
 // M-3: TraceQL service-name parameter — DNS-style label characters only.
 // Rejects quotes, braces, semicolons → no template breakout.
@@ -39,7 +42,7 @@ export async function GET(req: Request) {
   try {
     const query = service ? `{resource.service.name="${service}"}` : "{}"
     const res = await fetch(
-      `${TEMPO_URL}/api/search?q=${encodeURIComponent(query)}&limit=20`,
+      `${tempoUrl()}/api/search?q=${encodeURIComponent(query)}&limit=20`,
       { signal: AbortSignal.timeout(5000) }
     )
     if (!res.ok) return NextResponse.json([])

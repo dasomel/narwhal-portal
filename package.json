@@ -15,7 +15,8 @@
     "design:lint": "npx -y @google/design.md@0.3.0 lint DESIGN.md",
     "notices": "node scripts/generate-third-party-notices.mjs",
     "check:supply-chain": "node scripts/check-supply-chain-policy.mjs",
-  "check:cooling": "node scripts/check-lockfile-cooling.mjs",
+    "check:cooling": "node scripts/check-lockfile-cooling.mjs",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

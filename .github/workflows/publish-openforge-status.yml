@@ -1,0 +1,44 @@
+name: Publish OpenForge Portfolio Status
+
+on:
+  workflow_dispatch:
+    inputs:
+      development_status:
+        description: Verified OpenForge lifecycle state
+        required: true
+        type: choice
+        options:
+          - implemented
+          - adopted
+          - active
+          - maintenance
+          - blocked
+      milestone:
+        description: Completed milestone or capability
+        required: false
+        type: string
+      progress_percent:
+        description: Optional progress percentage (0-100)
+        required: false
+        type: string
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    uses: dasomel/openforge/.github/workflows/publish-project-status.yml@d702363e24bbb56d5e28aec9e7fb20a56c1ea519
+    with:
+      project: narwhal-portal
+      repository: dasomel/narwhal-portal
+      development_status: ${{ github.event_name == 'workflow_run' && 'active' || inputs.development_status }}
+      milestone: ${{ github.event_name == 'workflow_run' && 'release' || inputs.milestone }}
+      progress_percent: ${{ github.event_name == 'workflow_run' && '' || inputs.progress_percent }}
+      revision: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      evidence_workflow_url: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.html_url || '' }}
+    secrets:
+      OPENFORGE_STATUS_TOKEN: ${{ secrets.OPENFORGE_STATUS_TOKEN }}

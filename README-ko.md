@@ -110,6 +110,7 @@ npx shadcn@latest add {component}  # add a shadcn/ui component
 
 ## Related Docs
 
+- [아키텍처](docs/architecture.md) — 시스템 컨텍스트, 애플리케이션 계층, 요청 흐름 및 신뢰 경계
 - [docs/local-dev.md](./docs/local-dev.md) — 전체 Skaffold/Kaniko 개발 워크플로우, 트러블슈팅
 - [docs/security-clean-install.md](./docs/security-clean-install.md) — 클린 설치 시크릿 및
   보안 강화 체크리스트

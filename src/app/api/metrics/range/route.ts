@@ -1,13 +1,22 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/lib/auth"
+import { requireRole } from "@/lib/auth"
 import { queryRange } from "@/lib/prometheus"
 import { assertK8sNodeName, ValidationError } from "@/lib/validation"
 
 export const dynamic = "force-dynamic"
 
+// portal#33: node/cluster range queries carry the same "system, not tenant"
+// telemetry shape as /api/metrics (see that route's comment) — same role gate,
+// excluding guest, for the same reason: previously any authenticated session
+// could pull per-node CPU/memory/disk/network history.
 export async function GET(req: Request) {
-  const session = await auth()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const gate = await requireRole("cluster-admin", "developer", "viewer")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
+  }
 
   const { searchParams } = new URL(req.url)
   const metric = searchParams.get("metric") ?? "cpu"

@@ -2,6 +2,8 @@ import { cacheGet, cacheSet } from "./valkey"
 import { getAlerts } from "./alertmanager"
 import { getArgoApps } from "./argocd"
 import { getClusterMetrics } from "./prometheus"
+import { getK8sApiServer } from "./config"
+import { getK8sBearerToken } from "./k8s-token"
 import type {
   HeroResponse,
   HeroIncident,
@@ -187,16 +189,13 @@ function nodeToIncident(node: NodePressureInfo): HeroIncident {
 // Node pressure fetch (direct K8s API — no external lib dep)
 // ---------------------------------------------------------------------------
 
-const K8S_API_SERVER = process.env.K8S_API_SERVER ?? ""
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
-
 async function getNodePressureNodes(): Promise<NodePressureInfo[]> {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 5000)
-    const res = await fetch(`${K8S_API_SERVER}/api/v1/nodes`, {
+    const res = await fetch(`${getK8sApiServer()}/api/v1/nodes`, {
       headers: {
-        Authorization: `Bearer ${K8S_TOKEN}`,
+        Authorization: `Bearer ${getK8sBearerToken()}`,
         Accept: "application/json",
       },
       signal: controller.signal,
@@ -313,8 +312,8 @@ export async function buildHeroResponse(): Promise<HeroResponse> {
   const nodeReady = metrics?.nodes?.ready ?? 0
   const podTotal = metrics?.pods?.total ?? 0
   const podRunning = metrics?.pods?.running ?? 0
-  const cpu = metrics?.cpu ?? 0
-  const memory = metrics?.memory ?? 0
+  const cpu = metrics?.cpu ?? null
+  const memory = metrics?.memory ?? null
 
   // Last sync time: find the most recent operationState.finishedAt across all apps
   let latestSyncTs: string | null = null

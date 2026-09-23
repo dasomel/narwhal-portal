@@ -8,13 +8,25 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
-import { getCostTrend } from "@/lib/cost"
-import { ValidationError, toValidationErrorBody } from "@/lib/validation"
+import { getArgoApp } from "@/lib/argocd"
+import { CostPricingConfigurationError, getCostPricing, getCostTrend } from "@/lib/cost"
+import { appVisible, getEffectiveScope, namespaceVisible } from "@/lib/scope"
+import { K8S_NAME_RE, K8S_NAMESPACE_RE, ValidationError, toValidationErrorBody } from "@/lib/validation"
 
 export const dynamic = "force-dynamic"
 
 const VALID_SCOPES = new Set(["cluster", "namespace", "service"])
 const MAX_DAYS = 90
+
+export interface CostTrendResponse {
+  scope: "cluster" | "namespace" | "service"
+  id: string
+  days: number
+  generatedAt: string
+  pricing: ReturnType<typeof getCostPricing>["metadata"]
+  points: Awaited<ReturnType<typeof getCostTrend>>["points"]
+  notice?: string
+}
 
 export async function GET(req: NextRequest) {
   const gate = await requireRole("cluster-admin", "developer", "viewer")
@@ -35,8 +47,8 @@ export async function GET(req: NextRequest) {
     }
 
     const id = req.nextUrl.searchParams.get("id") ?? scope
-    if (!id || id.length > 253) {
-      throw new ValidationError("invalid id: must be a non-empty string (≤253 chars)", "id")
+    if (!id || id.length > 253 || !K8S_NAME_RE.test(id)) {
+      throw new ValidationError("invalid id: must match RFC 1123 label", "id")
     }
 
     const daysParam = req.nextUrl.searchParams.get("days") ?? "30"
@@ -48,23 +60,59 @@ export async function GET(req: NextRequest) {
       throw new ValidationError(`invalid days: maximum is ${MAX_DAYS}`, "days")
     }
 
+    // portal#61: id was passed straight to Prometheus with no ownership check — a
+    // caller with a valid role but out-of-scope id could read another team's
+    // namespace/service cost trend. namespace scope checks the id directly;
+    // service scope resolves it through ArgoCD the same way cost/[svc] and
+    // scorecards/[svc] do, and also validates + pins the resolved destination
+    // namespace so the PromQL query itself is scoped to it (same defense as
+    // getCostByService, guards against a malformed namespace value reaching
+    // PromQL). cluster scope is restricted to visible namespaces inside
+    // getCostTrend itself (a non-admin has no single id to deny on).
+    const effScope = await getEffectiveScope(gate.session)
+    if (scope === "namespace" && !namespaceVisible(id, effScope)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
+    let serviceNamespace: string | undefined
+    if (scope === "service") {
+      const app = await getArgoApp(id)
+      const namespace = app?.spec.destination?.namespace ?? "default"
+      if (!K8S_NAMESPACE_RE.test(namespace)) {
+        throw new ValidationError("invalid service destination namespace: must match RFC 1123 label", "namespace")
+      }
+      if (!app || !appVisible(app.spec.project ?? "default", namespace, effScope)) {
+        return NextResponse.json({ error: "Service not found" }, { status: 404 })
+      }
+      serviceNamespace = namespace
+    }
+
+    const pricing = getCostPricing()
     const { points, notice } = await getCostTrend(
       scope as "cluster" | "namespace" | "service",
       id,
-      days
+      days,
+      effScope,
+      serviceNamespace
     )
 
-    const body: Record<string, unknown> = {
-      scope,
+    const body: CostTrendResponse = {
+      scope: scope as CostTrendResponse["scope"],
       id,
       days,
       generatedAt: new Date().toISOString(),
+      pricing: pricing.metadata,
       points,
     }
     if (notice) body.notice = notice
 
     return NextResponse.json(body)
   } catch (err) {
+    if (err instanceof CostPricingConfigurationError) {
+      return NextResponse.json(
+        { error: "Cost pricing is not configured", invalid: err.invalid },
+        { status: 503 }
+      )
+    }
     if (err instanceof ValidationError) {
       return NextResponse.json(toValidationErrorBody(err), { status: 400 })
     }

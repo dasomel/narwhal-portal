@@ -1,6 +1,9 @@
 import { cacheGet, cacheSet } from "./valkey"
+import { getDependencyUrl } from "./config"
 
-const ALERTMANAGER_URL = process.env.ALERTMANAGER_URL ?? "http://localhost:9093"
+function alertmanagerUrl(): string {
+  return getDependencyUrl("ALERTMANAGER_URL", "http://localhost:9093")
+}
 
 interface Alert {
   labels: Record<string, string>
@@ -28,7 +31,7 @@ export async function createSilence(
   try {
     const now = new Date()
     const end = new Date(now.getTime() + durationMinutes * 60000)
-    const res = await fetch(`${ALERTMANAGER_URL}/api/v2/silences`, {
+    const res = await fetch(`${alertmanagerUrl()}/api/v2/silences`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -49,7 +52,7 @@ export async function createSilence(
 
 export async function getSilence(silenceId: string): Promise<AlertmanagerSilence | null> {
   try {
-    const res = await fetch(`${ALERTMANAGER_URL}/api/v2/silence/${encodeURIComponent(silenceId)}`)
+    const res = await fetch(`${alertmanagerUrl()}/api/v2/silence/${encodeURIComponent(silenceId)}`)
     if (!res.ok) return null
     return (await res.json()) as AlertmanagerSilence
   } catch {
@@ -59,7 +62,7 @@ export async function getSilence(silenceId: string): Promise<AlertmanagerSilence
 
 export async function deleteSilence(silenceId: string): Promise<boolean> {
   try {
-    const res = await fetch(`${ALERTMANAGER_URL}/api/v2/silence/${encodeURIComponent(silenceId)}`, {
+    const res = await fetch(`${alertmanagerUrl()}/api/v2/silence/${encodeURIComponent(silenceId)}`, {
       method: "DELETE",
     })
     return res.ok
@@ -75,7 +78,7 @@ export async function getAlerts(): Promise<Alert[]> {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
-    const res = await fetch(`${ALERTMANAGER_URL}/api/v2/alerts?active=true&silenced=false`, {
+    const res = await fetch(`${alertmanagerUrl()}/api/v2/alerts?active=true&silenced=false`, {
       signal: controller.signal,
     })
     clearTimeout(timeout)

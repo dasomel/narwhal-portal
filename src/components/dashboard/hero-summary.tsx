@@ -12,8 +12,22 @@ export function HeroSummary({ data }: HeroSummaryProps) {
   const t = useT()
   const { summary, mascot, copy } = data
 
-  const cpuColor = summary.cpu > 90 ? "text-danger" : summary.cpu > 75 ? "text-warning" : "text-text-secondary"
-  const memColor = summary.memory > 90 ? "text-danger" : summary.memory > 75 ? "text-warning" : "text-text-secondary"
+  const cpuColor =
+    summary.cpu !== null
+      ? summary.cpu > 90
+        ? "text-danger"
+        : summary.cpu > 75
+          ? "text-warning"
+          : "text-text-secondary"
+      : "text-text-secondary"
+  const memColor =
+    summary.memory !== null
+      ? summary.memory > 90
+        ? "text-danger"
+        : summary.memory > 75
+          ? "text-warning"
+          : "text-text-secondary"
+      : "text-text-secondary"
 
   const stateColor =
     mascot === "healthy"
@@ -35,10 +49,10 @@ export function HeroSummary({ data }: HeroSummaryProps) {
         <div className="mt-3 flex flex-wrap gap-2">
           <span className={`text-xs px-2 py-1 rounded-full font-medium ${stateColor}`}>{stateLabel}</span>
           <span className={`text-xs px-3 py-1 rounded-full bg-surface/70 ${cpuColor}`}>
-            CPU {summary.cpu}%
+            CPU {summary.cpu !== null ? `${summary.cpu}%` : "—"}
           </span>
           <span className={`text-xs px-3 py-1 rounded-full bg-surface/70 ${memColor}`}>
-            MEM {summary.memory}%
+            MEM {summary.memory !== null ? `${summary.memory}%` : "—"}
           </span>
           <span className="text-xs px-3 py-1 rounded-full bg-surface/70 text-text-secondary">
             Nodes {summary.nodes?.ready ?? "-"}/{summary.nodes?.total ?? "-"}

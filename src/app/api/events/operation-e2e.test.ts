@@ -10,7 +10,7 @@ vi.mock("next-auth/providers/credentials", () => ({
   default: (opts: unknown) => opts,
 }))
 
-vi.mock("@/lib/auth", () => ({ auth: vi.fn(), getActorId: (s: Session) => s.user?.email ?? "unknown" }))
+vi.mock("@/lib/auth", () => ({ requireRole: vi.fn(), auth: vi.fn(), getActorId: (s: Session) => s.user?.email ?? "unknown" }))
 vi.mock("@/lib/argocd", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/argocd")>()
   return {
@@ -33,7 +33,7 @@ vi.mock("@/lib/valkey", () => ({
   }),
 }))
 
-const { auth } = await import("@/lib/auth")
+const { requireRole, auth } = await import("@/lib/auth")
 const { assertAppAccessible, syncArgoApp, rollbackArgoApp } = await import("@/lib/argocd")
 const { POST: catalogSyncPOST } = await import("../catalog/[name]/sync/route")
 const { POST: catalogRollbackPOST } = await import("../catalog/[name]/rollback/route")
@@ -59,6 +59,7 @@ function params(name: string) {
 
 describe("E2E Operation Context Lifecycle & Stream Retrieval (portal#11)", () => {
   beforeEach(() => {
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     vi.mocked(auth).mockResolvedValue(adminSession as never)
     vi.mocked(assertAppAccessible).mockResolvedValue(mockApp)
     vi.mocked(syncArgoApp).mockResolvedValue({ name: "my-service", syncStatus: "Synced", revision: "a1b2c3d" })

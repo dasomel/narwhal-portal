@@ -1,18 +1,19 @@
 import "server-only"
-import { K8S_API_SERVER } from "./config"
+import { getK8sApiServer } from "./config"
+import { getK8sBearerToken } from "./k8s-token"
 import { cacheGet, cacheSet } from "./valkey"
 import type { SecuritySummary, WorkloadVulnRow, ImageVulnReport, Vulnerability, Severity, VulnDbFreshness } from "@/types/security"
 
 // --- K8s API helpers (local, avoids circular dep with k8s-client.ts) ---
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
-const USE_BEARER = K8S_API_SERVER.startsWith("https://") && K8S_TOKEN.length > 0
 
 async function trivyK8sFetch<T>(path: string): Promise<T> {
+  const apiServer = getK8sApiServer()
   const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (USE_BEARER) {
-    headers["Authorization"] = `Bearer ${K8S_TOKEN}`
+  if (apiServer.startsWith("https://")) {
+    const token = getK8sBearerToken()
+    if (token.length > 0) headers["Authorization"] = `Bearer ${token}`
   }
-  const res = await fetch(`${K8S_API_SERVER}${path}`, {
+  const res = await fetch(`${apiServer}${path}`, {
     headers,
     // Skip TLS verify is handled at the Node level via NODE_TLS_REJECT_UNAUTHORIZED
   })
@@ -142,7 +143,9 @@ export function computeVulnDbFreshness(lastSyncIso?: string): VulnDbFreshness {
     lastSyncTime: syncTime,
     dbAgeDays,
     status,
-    dbRegistry: process.env.TRIVY_DB_REGISTRY || "harbor.kakao.narwhal.internal/library/trivy-db",
+    dbRegistry:
+      process.env.TRIVY_DB_REGISTRY ||
+      `harbor.${process.env.CLUSTER_BASE_DOMAIN ?? process.env.NEXT_PUBLIC_CLUSTER_BASE_DOMAIN ?? "local.narwhal.internal"}/library/trivy-db`,
   }
 }
 

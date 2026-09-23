@@ -6,16 +6,23 @@ import { useT } from "@/lib/i18n-client"
 
 interface SecretEntry {
   path: string
-  keys: string[]
   version: number
   createdTime: string
+  updatedTime: string
 }
 
 export function SecretsTable() {
   const t = useT()
-  const { data: secrets = [], isLoading } = useQuery<SecretEntry[]>({
+  const { data: secrets = [], isLoading, isError } = useQuery<SecretEntry[]>({
     queryKey: ["secrets"],
-    queryFn: () => fetch("/api/secrets").then((r) => r.json()).then((d) => Array.isArray(d) ? d : []),
+    queryFn: async () => {
+      const r = await fetch("/api/secrets")
+      // portal#19: a degraded/forbidden metadata read comes back as a non-2xx
+      // JSON error body, not an empty array — surfacing that distinctly from
+      // "no secrets exist" is the whole point of failing explicitly degraded.
+      if (!r.ok) throw new Error("Failed to load secrets")
+      return r.json()
+    },
   })
 
   return (
@@ -24,6 +31,10 @@ export function SecretsTable() {
       {isLoading ? (
         <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
           <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
+        </div>
+      ) : isError ? (
+        <div className="h-32 bg-red-50 rounded flex items-center justify-center">
+          <span className="text-sm text-red-500">{t("secrets.error")}</span>
         </div>
       ) : secrets.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("secrets.empty")}</p>
@@ -35,6 +46,7 @@ export function SecretsTable() {
               <th className="pb-2 font-medium">{t("secrets.keys")}</th>
               <th className="pb-2 font-medium">{t("secrets.version")}</th>
               <th className="pb-2 font-medium">{t("secrets.created")}</th>
+              <th className="pb-2 font-medium">{t("secrets.updated")}</th>
             </tr>
           </thead>
           <tbody>
@@ -43,12 +55,15 @@ export function SecretsTable() {
                 <td className="py-2.5 font-mono text-xs text-foreground">{s.path}</td>
                 <td className="py-2.5">
                   <Badge className="bg-muted text-muted-foreground font-mono text-xs">
-                    {t("secrets.masked", { count: s.keys.length })}
+                    {t("secrets.masked")}
                   </Badge>
                 </td>
                 <td className="py-2.5 text-muted-foreground">v{s.version}</td>
                 <td className="py-2.5 text-muted-foreground text-xs">
                   {s.createdTime ? new Date(s.createdTime).toLocaleDateString() : "—"}
+                </td>
+                <td className="py-2.5 text-muted-foreground text-xs">
+                  {s.updatedTime ? new Date(s.updatedTime).toLocaleDateString() : "—"}
                 </td>
               </tr>
             ))}

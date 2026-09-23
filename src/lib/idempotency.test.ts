@@ -59,3 +59,49 @@ describe("idempotencyStoreKey", () => {
     expect(idempotencyStoreKey("req-1")).toBe("events:idempotency:req-1")
   })
 })
+
+describe("InMemoryIdempotencyStore", () => {
+  it("claims and deduplicates in-memory without Valkey", async () => {
+    const { InMemoryIdempotencyStore } = await import("./idempotency")
+    const store = new InMemoryIdempotencyStore()
+    const first = await store.claim("key-1", "val-1", 60)
+    expect(first).toBeNull()
+
+    const second = await store.claim("key-1", "val-2", 60)
+    expect(second).toBe("val-1")
+
+    await store.fulfill("key-1", "val-fulfilled", 60)
+    const third = await store.claim("key-1", "val-3", 60)
+    expect(third).toBe("val-fulfilled")
+  })
+
+  it("evicts oldest entries when maxEntries is reached", async () => {
+    const { InMemoryIdempotencyStore } = await import("./idempotency")
+    const store = new InMemoryIdempotencyStore(2)
+    await store.claim("k1", "v1", 60)
+    await store.claim("k2", "v2", 60)
+    expect(store.size()).toBe(2)
+
+    await store.claim("k3", "v3", 60)
+    expect(store.size()).toBe(2)
+    // k1 should have been evicted
+    const reClaim = await store.claim("k1", "v1-new", 60)
+    expect(reClaim).toBeNull()
+  })
+})
+
+describe("ValkeyIdempotencyStore fallback", () => {
+  it("falls back to in-memory store when Valkey throws", async () => {
+    const { ValkeyIdempotencyStore, InMemoryIdempotencyStore } = await import("./idempotency")
+    const fallback = new InMemoryIdempotencyStore()
+    const valkeyStore = new ValkeyIdempotencyStore(fallback)
+
+    // Valkey is not running in test env, so it catches and falls back to in-memory store
+    const first = await valkeyStore.claim("events:idempotency:valkey-fallback-1", "event-1", 60)
+    expect(first).toBeNull()
+
+    const duplicate = await valkeyStore.claim("events:idempotency:valkey-fallback-1", "event-2", 60)
+    expect(duplicate).toBe("event-1")
+  })
+})
+
