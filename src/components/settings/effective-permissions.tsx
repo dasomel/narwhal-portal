@@ -31,13 +31,17 @@ export function EffectivePermissions() {
   }
   if (!data) return null
 
-  const hasProblem = data.claims.unmappedClaims.length > 0 || data.claims.fellBackToGuest
+  const rejectedRoleClaim = data.claims.groupClaimStatus === "unknown_groups"
+  const hasProblem = data.claims.unmappedClaims.length > 0 || data.claims.fellBackToGuest || rejectedRoleClaim
 
   return (
     <div className="space-y-4">
       {hasProblem && (
         <Card className="p-5 border-narwhal-warning/40">
           <h2 className="font-semibold text-foreground mb-2">{t("perm.diagTitle")}</h2>
+          {rejectedRoleClaim && (
+            <p className="text-sm text-narwhal-warning mb-2">{t("perm.diagRejectedRole")}</p>
+          )}
           {data.claims.fellBackToGuest && (
             <p className="text-sm text-muted-foreground mb-2">{t("perm.diagGuest")}</p>
           )}

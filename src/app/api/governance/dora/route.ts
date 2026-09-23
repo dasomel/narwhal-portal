@@ -5,17 +5,27 @@ import { getCommitTimestamp } from "@/lib/gitea"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import { appVisible, getEffectiveScope } from "@/lib/scope"
 import { assertPromQLSafe } from "@/lib/validation"
+import { getDependencyUrl } from "@/lib/config"
 
 export const dynamic = "force-dynamic"
 
-const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? "http://localhost:9090"
+function prometheusUrl(): string {
+  return getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")
+}
+
+// D1: ArgoCD's history[] entries carry no per-entry operation result — only
+// operationState.phase reflects the outcome of the MOST RECENT operation.
+// Older history entries therefore have no deployment-outcome evidence at all.
+// Per the #51 discriminator (don't coerce "no evidence" into a valid value),
+// those entries are "Unknown", not silently "Succeeded".
+export type DoraDeploymentOutcome = "Succeeded" | "Failed" | "Unknown"
 
 export interface DoraDeployment {
   app: string
   namespace: string
   revision: string
   deployedAt: string
-  status: "Succeeded" | "Failed"
+  status: DoraDeploymentOutcome
 }
 
 export interface DoraPerApp {
@@ -26,13 +36,27 @@ export interface DoraPerApp {
   leadTimeHours: number | null
 }
 
+export const DORA_METRIC_DEFINITION_VERSION = "dora-v2-2026-09-18"
+
 export interface DoraMetrics {
   period: "7d"
+  metricDefinitionVersion: string
   deployFrequency: number
   totalDeploys: number
   leadTimeHours: number | null
-  changeFailureRate: number
+  // % of deployments with a KNOWN outcome (Succeeded|Failed) that failed.
+  // null when no deployment in the window has outcome evidence — distinct
+  // from 0%, which means "known outcomes, zero of them failed".
+  changeFailureRate: number | null
+  knownOutcomeDeploys: number
+  unknownOutcomeDeploys: number
+  // mttrMinutes is derived from Prometheus ALERTS firing-episode duration,
+  // NOT from an incident-lifecycle (start/ack/recovery-verification) model —
+  // no ITSM/incident-command evidence source is wired up yet (see #106).
+  // mttrSource makes that distinction explicit in the API response.
   mttrMinutes: number | null
+  mttrSource: "alert-episode-duration"
+  evidenceWindow: { start: string; end: string }
   dailyDeploys: { date: string; count: number }[]
   perApp: DoraPerApp[]
   recent: DoraDeployment[]
@@ -45,7 +69,7 @@ async function getMttrMinutes(sevenDaysAgoMs: number): Promise<number | null> {
     const promql = 'max by (alertname, namespace) (ALERTS{alertstate="firing",severity!="none"})'
     assertPromQLSafe(promql)
 
-    const url = `${PROMETHEUS_URL}/api/v1/query_range?query=${encodeURIComponent(promql)}&start=${start}&end=${end}&step=300`
+    const url = `${prometheusUrl()}/api/v1/query_range?query=${encodeURIComponent(promql)}&start=${start}&end=${end}&step=300`
     const res = await fetch(url, {
       next: { revalidate: 0 },
       signal: AbortSignal.timeout(5000),
@@ -109,7 +133,9 @@ export async function GET() {
   }
 
   const scope = await getEffectiveScope(session)
-  const cacheKey = `governance:dora:${scope.fingerprint}`
+  // v2 prefix: response shape changed (nullable changeFailureRate, outcome
+  // evidence fields) — keep old cached v1 payloads from being served as-is.
+  const cacheKey = `governance:dora:v2:${scope.fingerprint}`
   try {
     const cached = await cacheGet<DoraMetrics>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -186,11 +212,21 @@ export async function GET() {
     let totalLeadTimeSumMs = 0
     let totalLeadTimeCount = 0
     let failedDeploysCount = 0
+    let knownOutcomeCount = 0
 
     for (const d of deployments) {
-      const status: "Succeeded" | "Failed" = (d.isLatest && d.phase === "Failed") ? "Failed" : "Succeeded"
-      if (status === "Failed") {
-        failedDeploysCount++
+      // D1: only the latest history entry has any outcome evidence
+      // (operationState.phase describes the most recent operation only).
+      // A definite phase there maps to Succeeded/Failed; anything else
+      // (including older entries) is Unknown — never assumed Succeeded.
+      let status: DoraDeploymentOutcome = "Unknown"
+      if (d.isLatest) {
+        if (d.phase === "Failed" || d.phase === "Error") status = "Failed"
+        else if (d.phase === "Succeeded") status = "Succeeded"
+      }
+      if (status !== "Unknown") {
+        knownOutcomeCount++
+        if (status === "Failed") failedDeploysCount++
       }
 
       if (recent.length < 20) {
@@ -275,19 +311,27 @@ export async function GET() {
     const leadTimeHours = totalLeadTimeCount > 0
       ? Math.round((totalLeadTimeSumMs / totalLeadTimeCount / 3600000) * 10) / 10
       : null
-    const changeFailureRate = deployments.length > 0
-      ? Math.round((failedDeploysCount / deployments.length) * 100)
-      : 0
+    // D1: rate is over KNOWN outcomes only; null (not 0%) when nothing in
+    // the window has outcome evidence, so "no data" never renders as a
+    // false-healthy 0% failure rate.
+    const changeFailureRate = knownOutcomeCount > 0
+      ? Math.round((failedDeploysCount / knownOutcomeCount) * 100)
+      : null
 
     const mttrMinutes = await getMttrMinutes(sevenDaysAgo)
 
     const result: DoraMetrics = {
       period: "7d",
+      metricDefinitionVersion: DORA_METRIC_DEFINITION_VERSION,
       deployFrequency,
       totalDeploys: deployments.length,
       leadTimeHours,
       changeFailureRate,
+      knownOutcomeDeploys: knownOutcomeCount,
+      unknownOutcomeDeploys: deployments.length - knownOutcomeCount,
       mttrMinutes,
+      mttrSource: "alert-episode-duration",
+      evidenceWindow: { start: new Date(sevenDaysAgo).toISOString(), end: new Date(now).toISOString() },
       dailyDeploys,
       perApp: perAppSlice,
       recent,
@@ -305,13 +349,22 @@ export async function GET() {
     return NextResponse.json(result)
   } catch (err) {
     console.error("[governance/dora]", err)
+    // D1: source evidence (ArgoCD/Prometheus) failed entirely — report
+    // changeFailureRate as null (unknown), not 0 (which would read as
+    // false-healthy), per the same rule applied to the happy path above.
+    const nowIso = new Date().toISOString()
     return NextResponse.json({
       period: "7d",
+      metricDefinitionVersion: DORA_METRIC_DEFINITION_VERSION,
       deployFrequency: 0,
       totalDeploys: 0,
       leadTimeHours: null,
-      changeFailureRate: 0,
+      changeFailureRate: null,
+      knownOutcomeDeploys: 0,
+      unknownOutcomeDeploys: 0,
       mttrMinutes: null,
+      mttrSource: "alert-episode-duration",
+      evidenceWindow: { start: nowIso, end: nowIso },
       dailyDeploys: [],
       perApp: [],
       recent: [],

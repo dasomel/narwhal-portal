@@ -37,6 +37,8 @@ export interface ResourcesResponseV2 {
   topMemPods: TopPod[]        // top 10 by memory
   cluster: { cpuPercent: number; memPercent: number; totalPods: number; noRequestPods: number }
   noRequestPodsList: NoRequestPod[]
+  /** portal#52: true when the cluster-wide pod list hit its page cap — noRequestPods/topPods are then a partial view, not the full cluster. */
+  truncated: boolean
 }
 
 export async function GET() {
@@ -64,7 +66,7 @@ export async function GET() {
       cpuPodData,
       memPodData,
       clusterMetrics,
-      allK8sPods,
+      allPodsResult,
     ] = await Promise.all([
       queryVector("count by (namespace)(kube_pod_info)"),
       queryVector('sum by (namespace)(rate(container_cpu_usage_seconds_total{container!=""}[5m]))'),
@@ -81,6 +83,7 @@ export async function GET() {
       getClusterMetrics(),
       getAllPodsMinimal(),
     ])
+    const allK8sPods = allPodsResult.items
 
     const podByNs = Object.fromEntries(podData.map((r) => [r.metric.namespace, r.value]))
     const cpuUsedByNs = Object.fromEntries(cpuUsedData.map((r) => [r.metric.namespace, r.value]))
@@ -197,6 +200,7 @@ export async function GET() {
         noRequestPods: clusterNoRequestPods,
       },
       noRequestPodsList: noRequestPodsList.slice(0, 300),
+      truncated: allPodsResult.truncated,
     }
 
     try {

@@ -159,7 +159,7 @@ export function ActivityFeed() {
 
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null)
 
-  const { data: alerts = [] } = useQuery<Alert[]>({
+  const { data: alerts = [], isError: alertsError, refetch: refetchAlerts } = useQuery<Alert[]>({
     queryKey: ["alerts"],
     queryFn: () =>
       fetch("/api/alerts")
@@ -168,7 +168,7 @@ export function ActivityFeed() {
     refetchInterval: 15_000,
   })
 
-  const { data: events = [] } = useQuery<TimelineEvent[]>({
+  const { data: events = [], isError: eventsError, refetch: refetchEvents } = useQuery<TimelineEvent[]>({
     queryKey: ["events"],
     queryFn: () =>
       fetch("/api/events")
@@ -219,6 +219,20 @@ export function ActivityFeed() {
         <div className="px-4 pt-4 pb-2">
           <h3 className="text-[13px] font-semibold text-foreground">⚡ Activity Feed</h3>
         </div>
+        {(alertsError || eventsError) && (
+          <div className="mx-4 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <span>{t("events.partialUnavailable")}</span>
+            <button
+              className="ml-2 underline underline-offset-2"
+              onClick={() => {
+                if (alertsError) void refetchAlerts()
+                if (eventsError) void refetchEvents()
+              }}
+            >
+              {t("common.retry")}
+            </button>
+          </div>
+        )}
         {feed.length === 0 ? (
           <div className="px-4 pb-4 text-[13px] text-muted-foreground">{t("events.empty")}</div>
         ) : (

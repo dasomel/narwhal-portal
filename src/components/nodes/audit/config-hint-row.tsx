@@ -5,7 +5,7 @@ import { ChevronDown, ChevronRight, Copy, Check, ExternalLink, Terminal, Loader2
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n-client"
 import type { ApplyTarget } from "@/lib/tuning-commands"
-import { useTuningApply } from "@/hooks/use-tuning-apply"
+import { resolveTuningApproval, useTuningApply } from "@/hooks/use-tuning-apply"
 
 export interface ConfigHint {
   location: string
@@ -33,6 +33,7 @@ export function ConfigHintRow({
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [showLogs, setShowLogs] = useState(false)
+  const [resolvingApproval, setResolvingApproval] = useState(false)
 
   const apply = useTuningApply(nodeName ?? "")
 
@@ -48,16 +49,37 @@ export function ConfigHintRow({
     })
   }
 
-  function handleApply() {
-    if (!canAutoApply || !applyTarget) return
-    const msg = t("nodes.audit.autoApply.confirm.body", { node: nodeName ?? "" })
-    if (!window.confirm(msg)) return
-    apply.mutate([applyTarget], {
-      onSuccess: (res) => {
-        if (res.ok) onApplied?.()
-        setShowLogs(true)
-      },
-    })
+  async function handleApply() {
+    if (!canAutoApply || !applyTarget || !nodeName) return
+    setResolvingApproval(true)
+    try {
+      const issued = await resolveTuningApproval(nodeName, [applyTarget])
+      const resolved = issued.resolvedInvocation
+      const exactCall = [
+        t("nodes.audit.autoApply.confirm.body", { node: nodeName }),
+        "",
+        `Tool: ${resolved.tool}@${resolved.toolContractVersion}`,
+        `Target: ${JSON.stringify(resolved.target)}`,
+        `Arguments: ${JSON.stringify(resolved.arguments)}`,
+        `Invocation: ${resolved.invocationDigest}`,
+        `Canonicalization: ${resolved.canonicalizationVersion}`,
+      ].join("\n")
+      if (!window.confirm(exactCall)) return
+
+      apply.mutate({ items: [applyTarget], approval: issued.approval }, {
+        onSuccess: (res) => {
+          if (res.ok) onApplied?.()
+          setShowLogs(true)
+        },
+      })
+    } catch (error) {
+      // Surface resolution failures through the existing logs area without ever
+      // reaching the mutation endpoint.
+      console.error("Failed to resolve tuning approval", error)
+      window.alert((error as Error).message)
+    } finally {
+      setResolvingApproval(false)
+    }
   }
 
   const autoApplyBadge = () => {
@@ -96,7 +118,7 @@ export function ConfigHintRow({
     if (hint.autoApply === "manual") return null
 
     const isKubectl = hint.autoApply === "kubectl"
-    const isPending = apply.isPending
+    const isPending = apply.isPending || resolvingApproval
     const lastResult = apply.data
     const succeeded = lastResult?.ok === true
     const failed = lastResult && !lastResult.ok
@@ -157,7 +179,6 @@ export function ConfigHintRow({
 
       {open && (
         <div className="mt-1.5 ml-4 rounded-lg bg-muted/30 border border-border/60 px-3 py-2.5 space-y-2 text-xs">
-          {/* Location */}
           <div className="flex items-start gap-2">
             <span className="text-muted-foreground font-bold shrink-0 w-16">
               {t("nodes.audit.configHint.location")}
@@ -167,7 +188,6 @@ export function ConfigHintRow({
             </code>
           </div>
 
-          {/* Command */}
           {hint.command && (
             <div className="flex items-start gap-2">
               <span className="text-muted-foreground font-bold shrink-0 w-16">
@@ -201,7 +221,6 @@ export function ConfigHintRow({
             </div>
           )}
 
-          {/* Auto-apply badge */}
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground font-bold shrink-0 w-16">
               {t("nodes.audit.configHint.autoApply")}
@@ -209,7 +228,6 @@ export function ConfigHintRow({
             {autoApplyBadge()}
           </div>
 
-          {/* Apply result logs */}
           {apply.data && showLogs && (
             <div className="flex items-start gap-2">
               <span className="text-muted-foreground font-bold shrink-0 w-16">
@@ -236,7 +254,6 @@ export function ConfigHintRow({
             </div>
           )}
 
-          {/* Doc link */}
           {hint.docLink && (
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground font-bold shrink-0 w-16" />

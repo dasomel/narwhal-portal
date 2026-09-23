@@ -34,23 +34,81 @@ export interface IdempotencyStore {
 }
 
 /**
+ * In-memory fallback dedup store when Valkey is unavailable.
+ * Bounded by maxEntries with TTL-based eviction to prevent memory growth.
+ */
+export class InMemoryIdempotencyStore implements IdempotencyStore {
+  private map = new Map<string, { value: string; expiresAt: number }>()
+  private maxEntries: number
+
+  constructor(maxEntries = 5000) {
+    this.maxEntries = maxEntries
+  }
+
+  private sweep(now: number): void {
+    for (const [k, v] of this.map.entries()) {
+      if (v.expiresAt <= now) {
+        this.map.delete(k)
+      }
+    }
+  }
+
+  async claim(key: string, value: string, ttlSeconds: number): Promise<string | null> {
+    const now = Date.now()
+    this.sweep(now)
+    const existing = this.map.get(key)
+    if (existing && existing.expiresAt > now) {
+      return existing.value
+    }
+    if (this.map.size >= this.maxEntries) {
+      const oldest = this.map.keys().next().value
+      if (oldest) this.map.delete(oldest)
+    }
+    this.map.set(key, { value, expiresAt: now + ttlSeconds * 1000 })
+    return null
+  }
+
+  async fulfill(key: string, value: string, ttlSeconds: number): Promise<void> {
+    const now = Date.now()
+    this.map.set(key, { value, expiresAt: now + ttlSeconds * 1000 })
+  }
+
+  clear(): void {
+    this.map.clear()
+  }
+
+  size(): number {
+    return this.map.size
+  }
+}
+
+/**
  * Valkey-backed store: SET key value EX ttl NX, falling back to GET on a miss to
- * report the existing value. Fail-open on any Valkey error — never block event
- * ingestion on dedup availability, mirroring cacheGet/cacheSet's fail-open
- * behavior in src/lib/valkey.ts.
+ * report the existing value. When Valkey is unavailable, falls back to an in-memory
+ * store so deduplication remains active in degraded mode.
  */
 export class ValkeyIdempotencyStore implements IdempotencyStore {
+  private inMemoryFallback: InMemoryIdempotencyStore
+
+  constructor(fallback?: InMemoryIdempotencyStore) {
+    this.inMemoryFallback = fallback ?? new InMemoryIdempotencyStore()
+  }
+
   async claim(key: string, value: string, ttlSeconds: number): Promise<string | null> {
     try {
       const client = getValkey()
       const result = await client.set(key, value, "EX", ttlSeconds, "NX")
-      if (result === "OK") return null
+      if (result === "OK") {
+        await this.inMemoryFallback.fulfill(key, value, ttlSeconds)
+        return null
+      }
       const existing = await client.get(key)
       // existing === null here would mean the key expired between SET NX and GET —
       // treat that race as "not a duplicate" (this call effectively wins).
       return existing
     } catch {
-      return null
+      // Valkey unavailable — use in-memory fallback store
+      return this.inMemoryFallback.claim(key, value, ttlSeconds)
     }
   }
 
@@ -59,15 +117,25 @@ export class ValkeyIdempotencyStore implements IdempotencyStore {
       const client = getValkey()
       await client.set(key, value, "EX", ttlSeconds)
     } catch {
-      // Fail-open — see interface doc.
+      // Valkey error — fail-open to in-memory fallback
     }
+    await this.inMemoryFallback.fulfill(key, value, ttlSeconds)
+  }
+
+  getFallback(): InMemoryIdempotencyStore {
+    return this.inMemoryFallback
   }
 }
 
 const defaultStore = new ValkeyIdempotencyStore()
+let storeOverride: IdempotencyStore | null = null
 
 export function getIdempotencyStore(): IdempotencyStore {
-  return defaultStore
+  return storeOverride ?? defaultStore
+}
+
+export function setIdempotencyStoreForTesting(store: IdempotencyStore | null): void {
+  storeOverride = store
 }
 
 /**

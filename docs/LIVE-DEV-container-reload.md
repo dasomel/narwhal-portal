@@ -71,7 +71,7 @@ skaffold dev -p dev --cleanup=false --status-check=true
 런타임 선행(클러스터 상태, 코드 아님):
 ```bash
 # harbor 로그인 (위 A 참고)
-# harbor route client-control 0 (etcd, 100MB 해제) — docs/RELEASE-TODO-gitea-permanence.md 참고
+# harbor route client-control 0 (etcd, 100MB 해제) — docs/archive/RELEASE-TODO-gitea-permanence.md 참고
 ```
 
 ### ✅ (해결됨 2026-06-10) ArgoCD selfHeal 원복 — argocd-cm ignoreDifferences
@@ -85,7 +85,7 @@ ArgoCD diff에서 제외 — selfHeal은 켜진 채로 dev 배포가 유지되�
 - `apps_Deployment`: narwhal-portal 컨테이너의 `image`/`resources` (jq select로 스코프 한정)
 - `all`: `skaffold.dev/run-id`, `app.kubernetes.io/managed-by` 라벨
 - 런타임 patch 적용 + narwhal 로컬 커밋 `ab51121`(`gitops/resources/argocd-config.yaml`) —
-  gitea 반영 전 argocd-cm 재생성 시 재적용 필요 (`docs/RELEASE-TODO-gitea-permanence.md` 참고)
+  gitea 반영 전 argocd-cm 재생성 시 재적용 필요 (`docs/archive/RELEASE-TODO-gitea-permanence.md` 참고)
 
 검증(2026-06-10): dev 이미지 배포 후 90초+ 유지, `narwhal-portal` 앱 Synced, file-sync로
 `/app/src`에 즉시 반영, 포털 200 응답.
@@ -113,6 +113,6 @@ rm -f src/__synctest.ts
 ---
 
 ## 관련 문서
-- `docs/RELEASE-TODO-gitea-permanence.md` — 런타임 패치(client-control 0, selfHeal off)의 gitea 영구화
+- `docs/archive/RELEASE-TODO-gitea-permanence.md` — 런타임 패치(client-control 0, selfHeal off)의 gitea 영구화
 - `docs/local-dev.md` — kubeconfig / kaniko secret 셋업
 - `docs/adr-skaffold-dev-workflow.md` — Skaffold+Kaniko 워크플로 ADR

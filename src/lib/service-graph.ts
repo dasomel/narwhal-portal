@@ -7,8 +7,11 @@
 import { cacheGet, cacheSet } from "./valkey"
 import { getArgoApps } from "./argocd"
 import type { ScoreTier } from "./argocd"
+import { getDependencyUrl } from "./config"
 
-const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? "http://localhost:9090"
+function prometheusUrl(): string {
+  return getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")
+}
 
 // 노이즈 필터 — 제외할 시스템 워크로드
 const SYSTEM_WORKLOADS = new Set(["kubernetes", "coredns", "istiod", "unknown", ""])
@@ -84,7 +87,7 @@ async function queryPrometheus(promql: string, timeoutMs = 10000): Promise<Vecto
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const url = `${PROMETHEUS_URL}/api/v1/query?query=${encodeURIComponent(promql)}`
+    const url = `${prometheusUrl()}/api/v1/query?query=${encodeURIComponent(promql)}`
     const res = await fetch(url, { signal: controller.signal, next: { revalidate: 0 } })
     if (!res.ok) return null
     const data = await res.json()

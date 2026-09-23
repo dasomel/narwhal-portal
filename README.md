@@ -1,6 +1,6 @@
 # Narwhal IDP Portal
 
-English | [한국어](README_ko.md)
+English | [한국어](README-ko.md)
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
@@ -110,6 +110,8 @@ npx shadcn@latest add {component}  # add a shadcn/ui component
 
 ## Related Docs
 
+- [docs/architecture.md](./docs/architecture.md) — system context, application layers, request flow,
+  and trust boundaries
 - [docs/local-dev.md](./docs/local-dev.md) — full Skaffold/Kaniko dev workflow, troubleshooting
 - [docs/security-clean-install.md](./docs/security-clean-install.md) — clean-install secrets and
   security hardening checklist

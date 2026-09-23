@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/lib/auth"
+import { requireRole } from "@/lib/auth"
 import {
   assertAppAccessible,
   ArgoForbiddenError,
   ArgoNotFoundError,
+  getArgoAppFresh,
+  getOperationOutcome,
   syncArgoApp,
 } from "@/lib/argocd"
 import { assertK8sName, ValidationError, toValidationErrorBody } from "@/lib/validation"
@@ -12,11 +14,14 @@ import { beginOperation, completeOperation, failOperation } from "@/lib/operatio
 export const dynamic = "force-dynamic"
 
 export async function POST(req: Request, { params }: { params: Promise<{ name: string }> }) {
-  const session = await auth()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  if (session.user.role !== "cluster-admin" && session.user.role !== "developer") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  const gate = await requireRole("cluster-admin", "developer")
+  if ("error" in gate) {
+    return NextResponse.json(
+      { error: gate.error === "unauthorized" ? "Unauthorized" : "Forbidden" },
+      { status: gate.error === "unauthorized" ? 401 : 403 }
+    )
   }
+  const { session } = gate
 
   const { name } = await params
   try {
@@ -58,6 +63,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
         err instanceof Error ? err.message : String(err),
       )
       throw err
+    }
+
+    // portal#59: the sync response above only means ArgoCD *accepted* the sync
+    // request, not that reconciliation finished. Re-read the app and check
+    // operationState.phase before claiming verified success.
+    const fresh = await getArgoAppFresh(name)
+    const outcome = fresh === null ? "pending" : getOperationOutcome(fresh)
+    if (outcome === "failed") {
+      const message = `sync failed; operationState.phase=${fresh?.status.operationState?.phase ?? "unknown"}`
+      await failOperation(ctx, `Catalog sync failed: ${name}`, message)
+      return NextResponse.json({ success: false, message, app: result }, { status: 502 })
+    }
+    if (outcome === "pending") {
+      await completeOperation(
+        ctx,
+        `Catalog sync triggered (pending convergence): ${name}`,
+        `sync accepted; operationState.phase=${fresh?.status.operationState?.phase ?? "unknown"}`,
+      )
+      return NextResponse.json({
+        success: true,
+        pending: true,
+        message: `Sync triggered for ${name}; awaiting convergence`,
+        app: result,
+      })
     }
 
     await completeOperation(

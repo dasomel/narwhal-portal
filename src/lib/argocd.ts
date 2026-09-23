@@ -1,8 +1,11 @@
-import { cacheGet, cacheSet } from "./valkey"
+import { cacheDel, cacheGet, cacheSet } from "./valkey"
 import { getUserScope, type OwnershipMismatch } from "./role-filter"
 import { getEffectiveScope, namespaceVisible } from "./scope"
+import { getDependencyUrl } from "./config"
 
-const ARGOCD_URL = process.env.ARGOCD_URL ?? "http://localhost:8080"
+function argocdUrl(): string {
+  return getDependencyUrl("ARGOCD_URL", "http://localhost:8080")
+}
 const ARGOCD_TOKEN = process.env.ARGOCD_TOKEN ?? ""
 
 // H-3: ArgoCD project allowlist for the `developer` role.
@@ -55,7 +58,7 @@ export interface ArgoApp {
 function argoFetch(path: string, timeout = 5000): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout)
-  return fetch(`${ARGOCD_URL}${path}`, {
+  return fetch(`${argocdUrl()}${path}`, {
     headers: { Authorization: `Bearer ${ARGOCD_TOKEN}` },
     signal: controller.signal,
   }).finally(() => clearTimeout(timer))
@@ -148,10 +151,46 @@ export interface SyncResult {
   revision: string | null
 }
 
+/**
+ * portal#59: the ArgoCD sync/rollback POST response reflects the moment the
+ * operation was *accepted*, not that it *converged* -- ArgoCD reconciles
+ * asynchronously and status.operationState.phase only reaches a terminal
+ * value once the operation actually finishes. Callers must re-read the app
+ * (bypassing the cache populated by earlier GETs) and check this before
+ * reporting verified success.
+ */
+export type OperationOutcome = "converged" | "failed" | "pending"
+
+/**
+ * portal#59 review: an earlier version of this function only special-cased
+ * "Succeeded" and returned false for everything else, including terminal
+ * "Failed"/"Error" phases -- callers treated that bare false as pending:true,
+ * silently reporting real failures as still-in-progress. Distinguish the three
+ * outcomes explicitly so a failed operation is never mistaken for a pending one.
+ */
+export function getOperationOutcome(app: ArgoApp): OperationOutcome {
+  const phase = app.status.operationState?.phase
+  if (phase === "Succeeded") return app.status.sync.status === "Synced" ? "converged" : "pending"
+  if (phase === "Failed" || phase === "Error") return "failed"
+  return "pending"
+}
+
+/** @deprecated use getOperationOutcome() -- kept only so any lingering caller fails loud, not silent. */
+export function isOperationConverged(app: ArgoApp): boolean {
+  return getOperationOutcome(app) === "converged"
+}
+
+/** Re-reads an app's live status, bypassing any cached copy from before the mutation. */
+export async function getArgoAppFresh(name: string): Promise<ArgoApp | null> {
+  const cacheKey = `argocd:app:${name}`
+  await cacheDel(cacheKey)
+  return getArgoApp(name)
+}
+
 export async function syncArgoApp(name: string): Promise<SyncResult> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 10000)
-  const res = await fetch(`${ARGOCD_URL}/api/v1/applications/${encodeURIComponent(name)}/sync`, {
+  const res = await fetch(`${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/sync`, {
     method: "POST",
     headers: { Authorization: `Bearer ${ARGOCD_TOKEN}`, "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -173,7 +212,7 @@ export async function syncArgoApp(name: string): Promise<SyncResult> {
 
 export async function rollbackArgoApp(name: string, id: number): Promise<boolean> {
   try {
-    const res = await fetch(`${ARGOCD_URL}/api/v1/applications/${encodeURIComponent(name)}/rollback`, {
+    const res = await fetch(`${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/rollback`, {
       method: "POST",
       headers: { Authorization: `Bearer ${ARGOCD_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({ id }),

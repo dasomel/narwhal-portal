@@ -67,18 +67,23 @@ interface Props {
 
 export function ServiceCostTab({ serviceId }: Props) {
   const t = useT()
-  const { data: detail, isLoading: detailLoading } = useQuery<CostDetailResponse>({
+  const { data: detail, isLoading: detailLoading, error: detailError } = useQuery<CostDetailResponse>({
     queryKey: ["cost-service", serviceId],
-    queryFn: () => fetch(`/api/cost/${serviceId}`).then((r) => r.json()),
+    queryFn: async () => {
+      const response = await fetch(`/api/cost/${serviceId}`)
+      if (!response.ok) throw new Error("Cost data is unavailable")
+      return response.json()
+    },
     refetchInterval: 60_000,
   })
 
-  const { data: trendData, isLoading: trendLoading } = useQuery<TrendResponse>({
+  const { data: trendData, isLoading: trendLoading, error: trendError } = useQuery<TrendResponse>({
     queryKey: ["cost-trend", "service", serviceId, 7],
-    queryFn: () =>
-      fetch(`/api/cost/trend?scope=service&id=${serviceId}&days=7`).then((r) =>
-        r.json()
-      ),
+    queryFn: async () => {
+      const response = await fetch(`/api/cost/trend?scope=service&id=${serviceId}&days=7`)
+      if (!response.ok) throw new Error("Cost trend data is unavailable")
+      return response.json()
+    },
     refetchInterval: 300_000,
   })
 
@@ -86,6 +91,14 @@ export function ServiceCostTab({ serviceId }: Props) {
     date: p.date.slice(5), // MM-DD
     total: p.total,
   }))
+
+  if (detailError) {
+    return (
+      <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        {t("cost.dataUnavailable")}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -168,6 +181,10 @@ export function ServiceCostTab({ serviceId }: Props) {
           {trendLoading ? (
             <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">
               {t("common.loading")}
+            </div>
+          ) : trendError ? (
+            <div className="h-40 flex items-center justify-center text-xs text-destructive">
+              {t("cost.dataUnavailable")}
             </div>
           ) : chartData.length === 0 ? (
             <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">

@@ -101,3 +101,80 @@ describe("GET /api/governance/dora — scope enforcement", () => {
     expect(res.status).toBe(401)
   })
 })
+
+describe("GET /api/governance/dora — deployment outcome semantics (#32)", () => {
+  it("marks a historical (non-latest) deployment Unknown, never Succeeded, when ArgoCD gives no per-entry outcome evidence", async () => {
+    vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
+    const appWithHistory: ArgoApp = {
+      metadata: { name: "platform-app" },
+      spec: { project: "platform", destination: { namespace: "platform-system" } },
+      status: {
+        sync: { status: "Synced" },
+        health: { status: "Healthy" },
+        // operationState.phase is absent -> even the latest entry has no
+        // definite outcome evidence.
+        history: [
+          { id: 1, revision: "older-rev", deployedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+          { id: 2, revision: "latest-rev", deployedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() },
+        ],
+      },
+    }
+    vi.mocked(getArgoApps).mockResolvedValue([appWithHistory])
+
+    const res = await GET()
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.totalDeploys).toBe(2)
+    expect(body.recent.every((d: { status: string }) => d.status === "Unknown")).toBe(true)
+    expect(body.knownOutcomeDeploys).toBe(0)
+    expect(body.unknownOutcomeDeploys).toBe(2)
+    // No known-outcome deploys -> rate is unknown, not a false-healthy 0%.
+    expect(body.changeFailureRate).toBeNull()
+  })
+
+  it("counts a Failed latest operation phase as a known Failed outcome and computes a rate over known outcomes only", async () => {
+    vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
+    const failedLatestApp: ArgoApp = {
+      metadata: { name: "platform-app" },
+      spec: { project: "platform", destination: { namespace: "platform-system" } },
+      status: {
+        sync: { status: "Synced" },
+        health: { status: "Degraded" },
+        operationState: { phase: "Failed" },
+        history: [
+          { id: 1, revision: "older-rev", deployedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+          { id: 2, revision: "latest-rev", deployedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() },
+        ],
+      },
+    }
+    vi.mocked(getArgoApps).mockResolvedValue([failedLatestApp])
+
+    const res = await GET()
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.totalDeploys).toBe(2)
+    expect(body.knownOutcomeDeploys).toBe(1)
+    expect(body.unknownOutcomeDeploys).toBe(1)
+    // 1 known outcome, 1 failed -> 100%, not diluted by the unknown entry.
+    expect(body.changeFailureRate).toBe(100)
+    const latest = body.recent.find((d: { revision: string }) => d.revision === "latest-".slice(0, 7))
+    expect(latest).toBeTruthy()
+    expect(latest.status).toBe("Failed")
+  })
+
+  it("exposes metric definition version, mttr source, and evidence window", async () => {
+    vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
+
+    const res = await GET()
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(typeof body.metricDefinitionVersion).toBe("string")
+    expect(body.metricDefinitionVersion.length).toBeGreaterThan(0)
+    expect(body.mttrSource).toBe("alert-episode-duration")
+    expect(body.evidenceWindow.start).toBeTruthy()
+    expect(body.evidenceWindow.end).toBeTruthy()
+  })
+})

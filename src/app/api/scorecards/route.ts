@@ -10,7 +10,16 @@ export const dynamic = "force-dynamic"
 export interface ScorecardListResponse {
   evaluatedAt: string
   rulesVersion: number
+  // portal#27: `evaluatedAt` is when this response was assembled, not when the
+  // underlying (cached, up to 5min old) per-service evaluations actually ran —
+  // exposing the oldest evaluation timestamp in the returned set lets callers
+  // tell a fresh-looking response from one built on stale evaluation data.
+  oldestEvaluationAt: string | null
   totalServices: number
+  // Count of services in the returned set with at least one rule whose source
+  // (ArgoCD/K8s) could not be queried, so the score/tier for that service is
+  // incomplete rather than a clean pass/fail signal.
+  servicesWithIncompleteEvidence: number
   tierCounts: { gold: number; silver: number; bronze: number; none: number }
   services: Array<{
     id: string
@@ -20,6 +29,8 @@ export interface ScorecardListResponse {
     score: number
     tier: "gold" | "silver" | "bronze" | "none"
     failedRuleIds: string[]
+    unavailableRuleIds: string[]
+    evaluationComplete: boolean
   }>
 }
 
@@ -60,7 +71,7 @@ export async function GET(req: NextRequest) {
   try {
     const [apps, evals, scope] = await Promise.all([
       getArgoApps(),
-      evaluateAll(ownerFilter, tierFilter),
+      evaluateAll(tierFilter),
       getEffectiveScope(gate.session),
     ])
 
@@ -68,19 +79,23 @@ export async function GET(req: NextRequest) {
 
     // portal#31: this endpoint returned every service's scorecard to any
     // developer/viewer regardless of team ownership — filter to the same scope
-    // /api/catalog applies, before computing tierCounts so the aggregate counts
-    // don't leak cross-tenant data either. An app absent from serviceMap (deleted
-    // between fetches, or evaluateAll referencing a stale id) is excluded rather
-    // than assumed visible.
-    const scopedEvals = evals.filter((e) => {
+    // /api/catalog applies, plus the requested owner, before computing tierCounts
+    // so aggregates and returned services share one visibility-filtered set. An
+    // app absent from serviceMap (deleted between fetches, or evaluateAll
+    // referencing a stale id) is excluded rather than assumed visible.
+    const filteredEvals = evals.filter((e) => {
       const svc = serviceMap.get(e.serviceId)
-      return svc ? appVisible(svc.project, svc.namespace, scope) : false
+      return (
+        svc !== undefined &&
+        appVisible(svc.project, svc.namespace, scope) &&
+        (!ownerFilter || svc.owner === ownerFilter)
+      )
     })
 
     const tierCounts = { gold: 0, silver: 0, bronze: 0, none: 0 }
-    for (const e of scopedEvals) tierCounts[e.tier]++
+    for (const e of filteredEvals) tierCounts[e.tier]++
 
-    const services = scopedEvals.map((e) => {
+    const services = filteredEvals.map((e) => {
       const svc = serviceMap.get(e.serviceId)
       return {
         id: e.serviceId,
@@ -90,20 +105,23 @@ export async function GET(req: NextRequest) {
         score: e.score,
         tier: e.tier,
         failedRuleIds: e.failed.map((f) => f.ruleId),
+        unavailableRuleIds: e.unavailable.map((u) => u.ruleId),
+        evaluationComplete: e.evaluationComplete,
       }
     })
 
-    // Owner filter applied in-memory if evaluateAll didn't handle it
-    const filtered = ownerFilter
-      ? services.filter((s) => s.owner === ownerFilter)
-      : services
+    const oldestEvaluationAt = filteredEvals.length
+      ? filteredEvals.reduce((oldest, e) => (e.evaluatedAt < oldest ? e.evaluatedAt : oldest), filteredEvals[0].evaluatedAt)
+      : null
 
     const response: ScorecardListResponse = {
       evaluatedAt: new Date().toISOString(),
       rulesVersion,
-      totalServices: filtered.length,
+      oldestEvaluationAt,
+      totalServices: services.length,
+      servicesWithIncompleteEvidence: services.filter((s) => !s.evaluationComplete).length,
       tierCounts,
-      services: filtered,
+      services,
     }
 
     return NextResponse.json(response)

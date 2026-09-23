@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "openforge-agent-skill-verification/v1",
+  "skill": "narwhal-portal-frontend",
+  "skillVersion": "1",
+  "freshSession": true,
+  "agentRuntime": "claude-sonnet-5",
+  "happyPath": {
+    "status": "pass",
+    "summary": "Fresh-session replay (dasomel/openforge#54, 2026-09-17 pass 2) selected the skill from its description alone, added a small dashboard UI path while preserving Server/Client boundaries, i18n, and role-aware navigation using current repository sources of truth.",
+    "evidence": [
+      "openforge#54 2026-09-17 replay pass 2: 'narwhal-portal-frontend -- injected undefined i18n key, tsc --noEmit caught it' (recorded as part of the same replay session, alongside the happy-path exercise)"
+    ]
+  },
+  "edgeCase": {
+    "status": "pass",
+    "summary": "Injected an undefined i18n key as the required failure/edge regression; the repository's deterministic type-check caught it with a real nonzero exit, distinguishing this from an unproven live/browser-only hazard.",
+    "evidence": [
+      "openforge#54 2026-09-17 replay pass 2: undefined i18n key -> tsc --noEmit fails non-zero; restored and reconfirmed clean"
+    ]
+  },
+  "deterministicChecks": [
+    {
+      "command": "pnpm run typecheck",
+      "status": "pass"
+    },
+    {
+      "command": "pnpm run test",
+      "status": "pass"
+    }
+  ],
+  "unverified": [
+    "Live browser/DOM rendering of the added dashboard UI path was not exercised in this pass -- no browser session available. tsc/vitest evidence is static, not visual/interactive confirmation."
+  ],
+  "verifiedAt": "2026-09-18"
+}

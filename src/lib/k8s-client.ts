@@ -1,7 +1,8 @@
-import { cacheGet, cacheSet } from "./valkey"
+import { cacheGet, cacheSet, cacheDel } from "./valkey"
 import { K8S_RECOMMENDED_KERNEL_PARAMS } from "./kernel-params"
 import { assertK8sName, assertK8sNamespace, assertK8sNodeName, safeK8sSegment } from "./validation"
-import { K8S_API_SERVER } from "./config"
+import { getK8sApiServer } from "./config"
+import { getK8sBearerToken, invalidateK8sBearerToken } from "./k8s-token"
 
 export type { Localized, MaybeLocalized } from "./i18n-utils"
 export { pick } from "./i18n-utils"
@@ -9,20 +10,122 @@ export { pick } from "./i18n-utils"
 import type { MaybeLocalized } from "./i18n-utils"
 import type { Locale } from "./i18n"
 
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
-// kubectl proxy (http://) authenticates via the local kubectl config → no Bearer needed.
-const USE_BEARER = K8S_API_SERVER.startsWith("https://") && K8S_TOKEN.length > 0
+function authHeaders(apiServer: string): Record<string, string> {
+  // kubectl proxy (http://) authenticates via the local kubectl config → no Bearer needed.
+  if (!apiServer.startsWith("https://")) return {}
+  const token = getK8sBearerToken()
+  return token.length > 0 ? { Authorization: `Bearer ${token}` } : {}
+}
 
 async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const apiServer = getK8sApiServer()
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
+    ...authHeaders(apiServer),
     ...(init?.headers as Record<string, string> | undefined),
   }
-  if (USE_BEARER) headers.Authorization = `Bearer ${K8S_TOKEN}`
-  const res = await fetch(`${K8S_API_SERVER}${path}`, { ...init, headers })
+  let res = await fetch(`${apiServer}${path}`, { ...init, headers })
+  if (res.status === 401) {
+    // Cached token may have rotated or expired underneath us — re-read the
+    // projected token file once and retry before giving up.
+    invalidateK8sBearerToken()
+    res = await fetch(`${apiServer}${path}`, { ...init, headers: { ...headers, ...authHeaders(apiServer) } })
+  }
   if (!res.ok) throw new Error(`K8s API ${res.status}: ${path}`)
   return res.json() as Promise<T>
+}
+
+// --- Bounded/paginated list helper (portal#52) ---
+//
+// A plain k8sFetch("/api/v1/pods") on a large cluster returns every pod in one
+// response with no server-side cap — the Kubernetes API happily returns
+// everything if `limit` is omitted. listBounded enforces a server-side `limit`
+// and follows metadata.continue up to a hard maxPages, so a caller either gets
+// the complete list (the common case) or an explicitly truncated one — never a
+// silent full cluster dump.
+
+interface K8sListMetadata {
+  continue?: string
+}
+
+interface K8sListResponse<T> {
+  metadata?: K8sListMetadata
+  items: T[]
+}
+
+export interface BoundedList<T> {
+  items: T[]
+  /** true if maxPages was hit before metadata.continue ran out — the list is incomplete. */
+  truncated: boolean
+  pages: number
+}
+
+export interface ListBoundedOptions {
+  /** Server-side page size (Kubernetes `limit` query param). */
+  limit?: number
+  /** Hard cap on continue-token follows, independent of cluster size. */
+  maxPages?: number
+  labelSelector?: string
+  fieldSelector?: string
+}
+
+export const DEFAULT_LIST_LIMIT = 500
+export const DEFAULT_LIST_MAX_PAGES = 20
+
+/**
+ * Fetches `path` (a base list path with no query string, e.g. "/api/v1/pods" or
+ * "/api/v1/namespaces/foo/pods") page by page, following `metadata.continue`
+ * until the list is exhausted or `maxPages` is reached.
+ */
+export async function listBounded<T>(path: string, opts: ListBoundedOptions = {}): Promise<BoundedList<T>> {
+  const limit = opts.limit ?? DEFAULT_LIST_LIMIT
+  const maxPages = opts.maxPages ?? DEFAULT_LIST_MAX_PAGES
+  const items: T[] = []
+  let continueToken: string | undefined
+  let pages = 0
+  let truncated = false
+
+  while (pages < maxPages) {
+    const params = new URLSearchParams()
+    params.set("limit", String(limit))
+    if (opts.labelSelector) params.set("labelSelector", opts.labelSelector)
+    if (opts.fieldSelector) params.set("fieldSelector", opts.fieldSelector)
+    if (continueToken) params.set("continue", continueToken)
+
+    const sep = path.includes("?") ? "&" : "?"
+    const data = await k8sFetch<K8sListResponse<T>>(`${path}${sep}${params.toString()}`)
+    items.push(...(data.items ?? []))
+    pages++
+
+    continueToken = data.metadata?.continue
+    if (!continueToken) break
+    if (pages >= maxPages) {
+      // More pages exist (continue is set) but we hit the hard cap — the list is incomplete.
+      truncated = true
+    }
+  }
+
+  return { items, truncated, pages }
+}
+
+/** Runs `fn` over `items` with at most `concurrency` in flight at once. */
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    for (;;) {
+      const i = cursor++
+      if (i >= items.length) return
+      results[i] = await fn(items[i])
+    }
+  })
+  await Promise.all(workers)
+  return results
 }
 
 // --- Live cluster config fetchers ---
@@ -160,23 +263,81 @@ export interface NamespaceInfo {
   createdAt: string
 }
 
+interface RawNamespace {
+  metadata: { name: string; labels?: Record<string, string>; creationTimestamp: string }
+  status: { phase: string }
+}
+
+function toNamespaceInfo(i: RawNamespace): NamespaceInfo {
+  return {
+    name: i.metadata.name,
+    status: i.status.phase,
+    labels: i.metadata.labels ?? {},
+    createdAt: i.metadata.creationTimestamp,
+  }
+}
+
 export async function getNamespaces(): Promise<NamespaceInfo[]> {
   const cached = await cacheGet<NamespaceInfo[]>("k8s:namespaces")
   if (cached) return cached
   try {
-    const data = await k8sFetch<{ items: Array<{ metadata: { name: string; labels?: Record<string, string>; creationTimestamp: string }; status: { phase: string } }> }>("/api/v1/namespaces")
-    const ns = data.items.map((i) => ({
-      name: i.metadata.name,
-      status: i.status.phase,
-      labels: i.metadata.labels ?? {},
-      createdAt: i.metadata.creationTimestamp,
-    }))
+    const { items, truncated } = await listBounded<RawNamespace>("/api/v1/namespaces")
+    if (truncated) {
+      // Namespace count is the one list that feeds RBAC scope resolution (scope.ts) —
+      // a silently truncated result would deny access to real namespaces that just
+      // didn't fit in DEFAULT_LIST_MAX_PAGES pages, so this is loud rather than a
+      // generic fetch-failed warning.
+      console.warn(`[k8s] Namespaces list truncated after ${DEFAULT_LIST_MAX_PAGES} pages — some namespaces are missing`)
+    }
+    const ns = items.map(toNamespaceInfo)
     await cacheSet("k8s:namespaces", ns, 30)
     return ns
   } catch (err) {
     console.warn("[k8s] Namespaces fetch failed:", (err as Error).message)
     return []
   }
+}
+
+// portal#52: below this many namespaces, N individual GETs (fanned out with a
+// concurrency cap) cost less than one paginated cluster-wide LIST plus an
+// in-memory filter — and it means a scoped caller's request never causes the
+// portal to fetch namespaces outside their scope at all, cluster-wide LIST
+// included. Above the threshold the per-request overhead of N round trips
+// outweighs the saving, so it falls back to the (cached, bounded) cluster-wide
+// list. 20 is a starting point, not a measured value — most teams here own a
+// handful of namespaces; revisit with real fan-out latency numbers if that
+// changes (see issue #52's "load fixtures" follow-up).
+export const SMALL_SCOPE_NAMESPACE_THRESHOLD = 20
+const NAMESPACE_FANOUT_CONCURRENCY = 10
+
+/**
+ * Namespace list for one caller's effective scope. When the scope names a small,
+ * bounded set of namespaces, fetches each directly instead of the cluster-wide
+ * LIST (getNamespaces) + in-memory filter that /api/namespaces used before.
+ */
+export async function getNamespacesForScope(scope: {
+  all: boolean
+  namespaces: Set<string>
+}): Promise<NamespaceInfo[]> {
+  if (scope.all) return getNamespaces()
+
+  const names = Array.from(scope.namespaces)
+  if (names.length === 0 || names.length > SMALL_SCOPE_NAMESPACE_THRESHOLD) {
+    const all = await getNamespaces()
+    return all.filter((ns) => scope.namespaces.has(ns.name))
+  }
+
+  const results = await mapWithConcurrency(names, NAMESPACE_FANOUT_CONCURRENCY, async (name): Promise<NamespaceInfo | null> => {
+    try {
+      assertK8sNamespace(name)
+      const raw = await k8sFetch<RawNamespace>(`/api/v1/namespaces/${safeK8sSegment(name)}`)
+      return toNamespaceInfo(raw)
+    } catch (err) {
+      console.warn(`[k8s] Namespace fetch failed for ${name}:`, (err as Error).message)
+      return null
+    }
+  })
+  return results.filter((r): r is NamespaceInfo => r !== null)
 }
 
 // createNamespace was removed with the switch to the pull-request flow.
@@ -202,16 +363,18 @@ export async function getRbacBindings(): Promise<RbacBinding[]> {
   if (cached) return cached
   try {
     const [cluster, namespaced] = await Promise.allSettled([
-      k8sFetch<{ items: Array<{ metadata: { name: string }; roleRef: { kind: string; name: string }; subjects?: Array<{ kind: string; name: string; namespace?: string }> }> }>("/apis/rbac.authorization.k8s.io/v1/clusterrolebindings"),
-      k8sFetch<{ items: Array<{ metadata: { name: string; namespace: string }; roleRef: { kind: string; name: string }; subjects?: Array<{ kind: string; name: string; namespace?: string }> }> }>("/apis/rbac.authorization.k8s.io/v1/rolebindings"),
+      listBounded<{ metadata: { name: string }; roleRef: { kind: string; name: string }; subjects?: Array<{ kind: string; name: string; namespace?: string }> }>("/apis/rbac.authorization.k8s.io/v1/clusterrolebindings"),
+      listBounded<{ metadata: { name: string; namespace: string }; roleRef: { kind: string; name: string }; subjects?: Array<{ kind: string; name: string; namespace?: string }> }>("/apis/rbac.authorization.k8s.io/v1/rolebindings"),
     ])
     const bindings: RbacBinding[] = []
     if (cluster.status === "fulfilled") {
+      if (cluster.value.truncated) console.warn("[k8s] ClusterRoleBindings list truncated — some bindings are missing")
       for (const i of cluster.value.items) {
         bindings.push({ name: i.metadata.name, namespace: null, scope: "cluster", roleRef: i.roleRef, subjects: i.subjects ?? [] })
       }
     }
     if (namespaced.status === "fulfilled") {
+      if (namespaced.value.truncated) console.warn("[k8s] RoleBindings list truncated — some bindings are missing")
       for (const i of namespaced.value.items) {
         bindings.push({ name: i.metadata.name, namespace: i.metadata.namespace, scope: "namespace", roleRef: i.roleRef, subjects: i.subjects ?? [] })
       }
@@ -237,10 +400,16 @@ export interface NamespaceResourceUsage {
 
 // --- Cert renewal ---
 
+// portal#35: renewCertificate used to swallow assertK8sName/assertK8sNamespace
+// failures into the same bare `false` as a transient PATCH failure, so the
+// route couldn't tell "caller gave us a bad name/namespace" (400) apart from
+// "the renewal call itself failed" (500, safe to retry). Validation errors now
+// propagate — the route catches ValidationError the same way other mutation
+// routes do (e.g. PATCH /api/settings/users/[pk]).
 export async function renewCertificate(name: string, namespace: string): Promise<boolean> {
+  assertK8sNamespace(namespace)
+  assertK8sName(name, "certificate")
   try {
-    assertK8sNamespace(namespace)
-    assertK8sName(name, "certificate")
     await k8sFetch(
       `/apis/cert-manager.io/v1/namespaces/${safeK8sSegment(namespace)}/certificates/${safeK8sSegment(name)}`,
       {
@@ -272,17 +441,32 @@ export interface K8sEvent {
   source?: { component?: string; host?: string }
 }
 
+interface RawEvent {
+  type: string
+  reason: string
+  message: string
+  metadata: { namespace: string }
+  involvedObject: { kind: string; name: string }
+  lastTimestamp: string | null
+  firstTimestamp: string | null
+}
+
 export async function getEvents(namespace?: string): Promise<K8sEvent[]> {
   if (namespace !== undefined) assertK8sNamespace(namespace)
   const path = namespace
     ? `/api/v1/namespaces/${safeK8sSegment(namespace)}/events`
-    : "/api/v1/events?limit=100"
+    : "/api/v1/events"
   const cacheKey = `k8s:events:${namespace ?? "all"}`
   const cached = await cacheGet<K8sEvent[]>(cacheKey)
   if (cached) return cached
   try {
-    const data = await k8sFetch<{ items: Array<{ type: string; reason: string; message: string; metadata: { namespace: string }; involvedObject: { kind: string; name: string }; lastTimestamp: string | null; firstTimestamp: string | null }> }>(path)
-    const events = data.items.map((i) => ({
+    // A specific namespace's events are already scoped; the cluster-wide branch
+    // (namespace undefined, e.g. /api/governance/audit) previously took a fixed
+    // `?limit=100` with no continue-following, silently hiding anything past the
+    // first page. listBounded follows continue so the cap is explicit instead.
+    const { items, truncated } = await listBounded<RawEvent>(path, namespace ? undefined : { maxPages: 10 })
+    if (truncated) console.warn(`[k8s] Events list truncated for ${namespace ?? "cluster-wide"} — some events are missing`)
+    const events = items.map((i) => ({
       type: i.type,
       reason: i.reason,
       message: i.message,
@@ -309,20 +493,35 @@ export interface Certificate {
   renewalTime: string | null
 }
 
+interface RawCertificate {
+  metadata: { name: string; namespace: string }
+  spec: {
+    dnsNames?: string[]
+    issuerRef?: { name: string; kind: string }
+  }
+  status?: {
+    conditions?: Array<{ type: string; status: string }>
+    notAfter?: string
+    notBefore?: string
+    renewalTime?: string
+  }
+}
+
 interface CertificateList {
-  items: Array<{
-    metadata: { name: string; namespace: string }
-    spec: {
-      dnsNames?: string[]
-      issuerRef?: { name: string; kind: string }
-    }
-    status?: {
-      conditions?: Array<{ type: string; status: string }>
-      notAfter?: string
-      notBefore?: string
-      renewalTime?: string
-    }
-  }>
+  items: RawCertificate[]
+}
+
+function mapCertificate(item: RawCertificate): Certificate {
+  return {
+    name: item.metadata.name,
+    namespace: item.metadata.namespace,
+    ready: item.status?.conditions?.some((c) => c.type === "Ready" && c.status === "True") ?? false,
+    notAfter: item.status?.notAfter ?? null,
+    notBefore: item.status?.notBefore ?? null,
+    dnsNames: item.spec.dnsNames ?? [],
+    issuer: item.spec.issuerRef?.name ?? "unknown",
+    renewalTime: item.status?.renewalTime ?? null,
+  }
 }
 
 export async function getCertificates(): Promise<Certificate[]> {
@@ -331,22 +530,39 @@ export async function getCertificates(): Promise<Certificate[]> {
 
   try {
     const data = await k8sFetch<CertificateList>("/apis/cert-manager.io/v1/certificates")
-    const certs = data.items.map((item) => ({
-      name: item.metadata.name,
-      namespace: item.metadata.namespace,
-      ready: item.status?.conditions?.some((c) => c.type === "Ready" && c.status === "True") ?? false,
-      notAfter: item.status?.notAfter ?? null,
-      notBefore: item.status?.notBefore ?? null,
-      dnsNames: item.spec.dnsNames ?? [],
-      issuer: item.spec.issuerRef?.name ?? "unknown",
-      renewalTime: item.status?.renewalTime ?? null,
-    }))
+    const certs = data.items.map(mapCertificate)
     await cacheSet("k8s:certs", certs, 60)
     return certs
   } catch (err) {
     console.warn("[k8s] Certificates fetch failed:", (err as Error).message)
     return []
   }
+}
+
+// portal#35: single, always-uncached fetch of one Certificate — used to check
+// renewal eligibility (the target must exist) before mutating, and again
+// afterward as the post-renewal read-back so "success" reflects the object's
+// actual state, not just that the PATCH call returned 2xx. Returns `null` for
+// "not found" (404) so the route can 404 rather than 500.
+export async function getCertificate(name: string, namespace: string): Promise<Certificate | null> {
+  assertK8sNamespace(namespace)
+  assertK8sName(name, "certificate")
+  try {
+    const item = await k8sFetch<RawCertificate>(
+      `/apis/cert-manager.io/v1/namespaces/${safeK8sSegment(namespace)}/certificates/${safeK8sSegment(name)}`,
+    )
+    return mapCertificate(item)
+  } catch (err) {
+    if ((err as Error).message.includes("K8s API 404")) return null
+    throw err
+  }
+}
+
+// portal#35: getCertificates() caches the full list for 60s — a renewal that
+// just mutated one certificate must not be masked by that cache serving the
+// pre-renewal snapshot back to the next GET /api/settings/certs.
+export async function invalidateCertificatesCache(): Promise<void> {
+  await cacheDel("k8s:certs")
 }
 
 export interface KyvernoPolicy {
@@ -1613,10 +1829,11 @@ export interface K8sRole {
 
 export async function getClusterRoles(): Promise<K8sClusterRole[]> {
   try {
-    const data = await k8sFetch<{ items: Array<{ metadata: { name: string }; rules?: K8sPolicyRule[] }> }>(
+    const { items, truncated } = await listBounded<{ metadata: { name: string }; rules?: K8sPolicyRule[] }>(
       "/apis/rbac.authorization.k8s.io/v1/clusterroles"
     )
-    return (data.items ?? []).map((i) => ({
+    if (truncated) console.warn("[k8s] ClusterRoles list truncated — some roles are missing")
+    return items.map((i) => ({
       name: i.metadata.name,
       rules: i.rules,
     }))
@@ -1662,10 +1879,11 @@ export async function getClusterRoles(): Promise<K8sClusterRole[]> {
 
 export async function getRoles(): Promise<K8sRole[]> {
   try {
-    const data = await k8sFetch<{ items: Array<{ metadata: { name: string; namespace: string }; rules?: K8sPolicyRule[] }> }>(
+    const { items, truncated } = await listBounded<{ metadata: { name: string; namespace: string }; rules?: K8sPolicyRule[] }>(
       "/apis/rbac.authorization.k8s.io/v1/roles"
     )
-    return (data.items ?? []).map((i) => ({
+    if (truncated) console.warn("[k8s] Roles list truncated — some roles are missing")
+    return items.map((i) => ({
       name: i.metadata.name,
       namespace: i.metadata.namespace,
       rules: i.rules,
@@ -1709,41 +1927,50 @@ export interface K8sRawPodMinimal {
   }
 }
 
-export async function getAllPodsMinimal(): Promise<K8sRawPodMinimal[]> {
+// portal#52: pods can run into the thousands on a large cluster, so this follows
+// continue tokens (via listBounded) instead of a single unbounded LIST, and
+// returns `truncated` explicitly rather than silently dropping the tail.
+const CLUSTER_WIDE_POD_MAX_PAGES = 40
+
+export async function getAllPodsMinimal(): Promise<BoundedList<K8sRawPodMinimal>> {
   try {
-    const data = await k8sFetch<{ items: K8sRawPodMinimal[] }>("/api/v1/pods")
-    return data.items ?? []
+    return await listBounded<K8sRawPodMinimal>("/api/v1/pods", { maxPages: CLUSTER_WIDE_POD_MAX_PAGES })
   } catch (err) {
     console.warn("[k8s] Failed to fetch all pods:", (err as Error).message)
     if (process.env.NODE_ENV === "development") {
-      return [
-        {
-          metadata: { name: "frontend-pod-1", namespace: "default" },
-          spec: {
-            containers: [
-              { name: "web", resources: { requests: { cpu: "100m", memory: "128Mi" } } },
-            ],
+      return {
+        truncated: false,
+        pages: 1,
+        items: [
+          {
+            metadata: { name: "frontend-pod-1", namespace: "default" },
+            spec: {
+              containers: [
+                { name: "web", resources: { requests: { cpu: "100m", memory: "128Mi" } } },
+              ],
+            },
           },
-        },
-        {
-          metadata: { name: "frontend-pod-2", namespace: "default" },
-          spec: {
-            containers: [
-              { name: "web", resources: { requests: { cpu: "100m" } } },
-            ],
+          {
+            metadata: { name: "frontend-pod-2", namespace: "default" },
+            spec: {
+              containers: [
+                { name: "web", resources: { requests: { cpu: "100m" } } },
+              ],
+            },
           },
-        },
-        {
-          metadata: { name: "backend-pod-1", namespace: "default" },
-          spec: {
-            containers: [
-              { name: "api", resources: {} },
-            ],
+          {
+            metadata: { name: "backend-pod-1", namespace: "default" },
+            spec: {
+              containers: [
+                { name: "api", resources: {} },
+              ],
+            },
           },
-        },
-      ]
+        ],
+      }
     }
-    return []
+    // #52 review: a failed or expired pagination must not read as "empty cluster".
+    return { items: [], truncated: true, pages: 0 }
   }
 }
 
@@ -1774,32 +2001,35 @@ export interface K8sNodeForDistribution {
   }
 }
 
-export async function getAllNodesForDistribution(): Promise<K8sNodeForDistribution[]> {
+export async function getAllNodesForDistribution(): Promise<BoundedList<K8sNodeForDistribution>> {
   try {
-    const data = await k8sFetch<{ items: K8sNodeForDistribution[] }>("/api/v1/nodes")
-    return data.items ?? []
+    return await listBounded<K8sNodeForDistribution>("/api/v1/nodes")
   } catch (err) {
     console.warn("[k8s] Failed to fetch all nodes for distribution:", (err as Error).message)
     if (process.env.NODE_ENV === "development") {
-      return [
-        { metadata: { name: "node-master-1", labels: { "node-role.kubernetes.io/control-plane": "" } } },
-        { metadata: { name: "node-worker-1", labels: { "kubernetes.io/hostname": "node-worker-1" } } },
-        { metadata: { name: "node-worker-2", labels: { "kubernetes.io/hostname": "node-worker-2" } } },
-        { metadata: { name: "node-worker-3", labels: { "kubernetes.io/hostname": "node-worker-3" } } },
-      ]
+      return {
+        truncated: false,
+        pages: 1,
+        items: [
+          { metadata: { name: "node-master-1", labels: { "node-role.kubernetes.io/control-plane": "" } } },
+          { metadata: { name: "node-worker-1", labels: { "kubernetes.io/hostname": "node-worker-1" } } },
+          { metadata: { name: "node-worker-2", labels: { "kubernetes.io/hostname": "node-worker-2" } } },
+          { metadata: { name: "node-worker-3", labels: { "kubernetes.io/hostname": "node-worker-3" } } },
+        ],
+      }
     }
-    return []
+    // #52 review: a failed or expired pagination must not read as "empty cluster".
+    return { items: [], truncated: true, pages: 0 }
   }
 }
 
-export async function getAllPodsForDistribution(): Promise<K8sPodForDistribution[]> {
+export async function getAllPodsForDistribution(): Promise<BoundedList<K8sPodForDistribution>> {
   try {
-    const data = await k8sFetch<{ items: K8sPodForDistribution[] }>("/api/v1/pods")
-    return data.items ?? []
+    return await listBounded<K8sPodForDistribution>("/api/v1/pods", { maxPages: CLUSTER_WIDE_POD_MAX_PAGES })
   } catch (err) {
     console.warn("[k8s] Failed to fetch all pods for distribution:", (err as Error).message)
     if (process.env.NODE_ENV === "development") {
-      return [
+      return { truncated: false, pages: 1, items: [
         {
           metadata: {
             name: "app-auth-1",
@@ -1897,9 +2127,10 @@ export async function getAllPodsForDistribution(): Promise<K8sPodForDistribution
           },
           spec: { nodeName: "node-master-1" }
         }
-      ]
+      ] }
     }
-    return []
+    // #52 review: a failed or expired pagination must not read as "empty cluster".
+    return { items: [], truncated: true, pages: 0 }
   }
 }
 

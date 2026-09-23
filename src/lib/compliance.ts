@@ -1,5 +1,6 @@
 import "server-only"
-import { K8S_API_SERVER } from "./config"
+import { getK8sApiServer } from "./config"
+import { getK8sBearerToken } from "./k8s-token"
 import { cacheGet, cacheSet } from "./valkey"
 import type {
   Severity,
@@ -18,15 +19,15 @@ import type {
 } from "@/types/compliance"
 
 // --- K8s API helpers ---
-const K8S_TOKEN = process.env.K8S_SA_TOKEN ?? ""
-const USE_BEARER = K8S_API_SERVER.startsWith("https://") && K8S_TOKEN.length > 0
 
 async function complianceK8sFetch<T>(path: string): Promise<T> {
+  const apiServer = getK8sApiServer()
   const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (USE_BEARER) {
-    headers["Authorization"] = `Bearer ${K8S_TOKEN}`
+  if (apiServer.startsWith("https://")) {
+    const token = getK8sBearerToken()
+    if (token.length > 0) headers["Authorization"] = `Bearer ${token}`
   }
-  const res = await fetch(`${K8S_API_SERVER}${path}`, { headers })
+  const res = await fetch(`${apiServer}${path}`, { headers })
   if (!res.ok) {
     throw new Error(`K8s API ${res.status} ${res.statusText} for ${path}`)
   }

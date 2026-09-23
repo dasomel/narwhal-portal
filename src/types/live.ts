@@ -34,6 +34,8 @@ interface EventEnvelopeFields {
   // portal#12: required for a non-admin viewer to see an event that carries no
   // `resource.namespace` — absence of both is default-deny, not implicit public.
   visibility?: LiveEventVisibility | null
+  producer?: string | null
+  credential_scope?: string | null
 }
 
 export interface LiveEvent extends EventEnvelopeFields {

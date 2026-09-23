@@ -49,12 +49,17 @@ export interface ResourceEventsResponse {
   events: ResourceEvent[]
 }
 
+// D1: only the latest ArgoCD history entry has any outcome evidence
+// (operationState.phase reflects the most recent operation only) — older
+// entries and indeterminate phases are "Unknown", never assumed Succeeded.
+export type DoraDeploymentOutcome = "Succeeded" | "Failed" | "Unknown"
+
 export interface DoraDeployment {
   app: string
   namespace: string
   revision: string         // short sha (7)
   deployedAt: string
-  status: "Succeeded" | "Failed"
+  status: DoraDeploymentOutcome
 }
 
 export interface DoraPerApp {
@@ -67,11 +72,20 @@ export interface DoraPerApp {
 
 export interface DoraMetrics {
   period: "7d"
+  metricDefinitionVersion: string
   deployFrequency: number        // per day
   totalDeploys: number
   leadTimeHours: number | null   // REAL lead time: gitea commit ts -> argocd deployedAt (avg)
-  changeFailureRate: number      // % of deployments in period whose sync phase Failed
-  mttrMinutes: number | null     // avg resolved-alert episode duration over 7d
+  // % of deployments with a KNOWN outcome that failed; null when no
+  // deployment in the window has outcome evidence (distinct from 0%).
+  changeFailureRate: number | null
+  knownOutcomeDeploys: number
+  unknownOutcomeDeploys: number
+  // Prometheus ALERTS firing-episode duration, NOT incident-lifecycle MTTR
+  // (no ITSM/incident-command evidence source wired up — see #106).
+  mttrMinutes: number | null
+  mttrSource: "alert-episode-duration"
+  evidenceWindow: { start: string; end: string }
   dailyDeploys: { date: string; count: number }[]   // 7 entries, oldest first, date "MM-DD"
   perApp: DoraPerApp[]           // sorted by deploys desc, max 15
   recent: DoraDeployment[]       // newest first, max 20
