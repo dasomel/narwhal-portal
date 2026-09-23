@@ -1,6 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import type { KeycloakGroupDetailed, KeycloakUser } from "@/lib/keycloak-client"
-import { KEYCLOAK_CACHE_KEYS } from "@/lib/keycloak-client"
 
 const valkeyStore = new Map<string, unknown>()
 
@@ -9,7 +8,7 @@ vi.mock("@/lib/auth", () => ({
 }))
 
 vi.mock("@/lib/valkey", () => ({
-  cacheGet: vi.fn(async (key: string) => valkeyStore.get(key) ?? null),
+  cacheGet: vi.fn(async (key: string) => (valkeyStore.has(key) ? valkeyStore.get(key) : null)),
   cacheSet: vi.fn(async (key: string, val: unknown) => {
     valkeyStore.set(key, val)
   }),
@@ -18,33 +17,23 @@ vi.mock("@/lib/valkey", () => ({
   }),
 }))
 
+// Portal #49: keycloak-client is a plain mock here — its mutation functions
+// do NOT call the real invalidateKeycloakCaches (that would make this test
+// tautological: the route's correctness would depend on keycloak-client's
+// internal wiring instead of on the route's own contract with its
+// dependencies). Each mutation's default implementation below only deletes
+// the enriched key from the same in-memory valkey fake the route reads/
+// writes, mirroring the effect a real mutation has. That effect is itself
+// verified against the real implementation in keycloak-client.test.ts.
 vi.mock("@/lib/keycloak-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/keycloak-client")>()
   return {
-    ...actual,
+    KEYCLOAK_CACHE_KEYS: actual.KEYCLOAK_CACHE_KEYS,
     getGroupsDetailed: vi.fn(),
     getUsers: vi.fn(),
-    addUserToGroup: vi.fn(async (_groupPk: string, _userPk: string) => {
-      await actual.invalidateKeycloakCaches([
-        actual.KEYCLOAK_CACHE_KEYS.groupsDetailed,
-        actual.KEYCLOAK_CACHE_KEYS.users,
-        actual.KEYCLOAK_CACHE_KEYS.groupsEnriched,
-      ])
-    }),
-    removeUserFromGroup: vi.fn(async (_groupPk: string, _userPk: string) => {
-      await actual.invalidateKeycloakCaches([
-        actual.KEYCLOAK_CACHE_KEYS.groupsDetailed,
-        actual.KEYCLOAK_CACHE_KEYS.users,
-        actual.KEYCLOAK_CACHE_KEYS.groupsEnriched,
-      ])
-    }),
-    updateGroupAttributes: vi.fn(async (_groupPk: string, _attrs: Record<string, unknown>) => {
-      await actual.invalidateKeycloakCaches([
-        actual.KEYCLOAK_CACHE_KEYS.groups,
-        actual.KEYCLOAK_CACHE_KEYS.groupsDetailed,
-        actual.KEYCLOAK_CACHE_KEYS.groupsEnriched,
-      ])
-    }),
+    addUserToGroup: vi.fn(),
+    removeUserFromGroup: vi.fn(),
+    updateGroupAttributes: vi.fn(),
   }
 })
 
@@ -55,8 +44,9 @@ const {
   addUserToGroup,
   removeUserFromGroup,
   updateGroupAttributes,
+  KEYCLOAK_CACHE_KEYS,
 } = await import("@/lib/keycloak-client")
-const { cacheGet, cacheSet, cacheDel } = await import("@/lib/valkey")
+const { cacheSet, cacheDel } = await import("@/lib/valkey")
 const { GET, PATCH } = await import("./route")
 
 const adminSession = { user: { role: "cluster-admin", email: "admin@example.com" } }
@@ -97,6 +87,14 @@ const updatedGroup: KeycloakGroupDetailed = {
   users: ["user-1", "user-2"],
 }
 
+const partialGroup: KeycloakGroupDetailed = {
+  ...initialGroup,
+  pk: "grp-2",
+  name: "Incomplete Group",
+  users: [],
+  membersPartial: true,
+}
+
 function patchReq(body: unknown) {
   return new Request("http://localhost/api/settings/groups", {
     method: "PATCH",
@@ -108,6 +106,19 @@ function patchReq(body: unknown) {
 beforeEach(() => {
   vi.clearAllMocks()
   valkeyStore.clear()
+  vi.mocked(requireAdmin).mockResolvedValue({ session: adminSession as never })
+  // Default mutation behavior: invalidate the enriched projection, matching
+  // what the real keycloak-client mutations do (verified separately in
+  // keycloak-client.test.ts).
+  vi.mocked(addUserToGroup).mockImplementation(async () => {
+    await cacheDel(KEYCLOAK_CACHE_KEYS.groupsEnriched)
+  })
+  vi.mocked(removeUserFromGroup).mockImplementation(async () => {
+    await cacheDel(KEYCLOAK_CACHE_KEYS.groupsEnriched)
+  })
+  vi.mocked(updateGroupAttributes).mockImplementation(async () => {
+    await cacheDel(KEYCLOAK_CACHE_KEYS.groupsEnriched)
+  })
 })
 
 describe("GET /api/settings/groups — auth boundary", () => {
@@ -124,9 +135,8 @@ describe("GET /api/settings/groups — auth boundary", () => {
   })
 })
 
-describe("GET /api/settings/groups — caching and invalidation across layers", () => {
+describe("GET /api/settings/groups — caching", () => {
   it("populates and returns enriched groups on cache miss", async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ session: adminSession as never })
     vi.mocked(getGroupsDetailed).mockResolvedValue([initialGroup])
     vi.mocked(getUsers).mockResolvedValue([user1])
 
@@ -135,18 +145,11 @@ describe("GET /api/settings/groups — caching and invalidation across layers", 
     const body = await res.json()
 
     expect(body).toHaveLength(1)
-    expect(body[0].members).toEqual([
-      { pk: "user-1", username: "alice", email: "alice@example.com" },
-    ])
-    expect(cacheSet).toHaveBeenCalledWith(
-      KEYCLOAK_CACHE_KEYS.groupsEnriched,
-      expect.any(Array),
-      60
-    )
+    expect(body[0].members).toEqual([{ pk: "user-1", username: "alice", email: "alice@example.com" }])
+    expect(cacheSet).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsEnriched, expect.any(Array), 60)
   })
 
-  it("serves from cache when KEYCLOAK_CACHE_KEYS.groupsEnriched is present", async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ session: adminSession as never })
+  it("serves from cache when the enriched key is present", async () => {
     const cachedProjection = [{ pk: "cached-grp", name: "Cached Group", members: [] }]
     valkeyStore.set(KEYCLOAK_CACHE_KEYS.groupsEnriched, cachedProjection)
 
@@ -157,39 +160,49 @@ describe("GET /api/settings/groups — caching and invalidation across layers", 
     expect(getUsers).not.toHaveBeenCalled()
   })
 
-  it("after addUserToGroup the groups route re-reads instead of serving the stale enriched projection", async () => {
-    vi.mocked(requireAdmin).mockResolvedValue({ session: adminSession as never })
+  it("does not cache a partial getGroupsDetailed result", async () => {
+    vi.mocked(getGroupsDetailed).mockResolvedValue([initialGroup, partialGroup])
+    vi.mocked(getUsers).mockResolvedValue([user1])
 
-    // Step 1: Initial state - user-1 in group, cache is cold
+    const res = await GET()
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.some((g: { membersPartial: boolean }) => g.membersPartial)).toBe(true)
+
+    expect(cacheSet).not.toHaveBeenCalled()
+    expect(valkeyStore.has(KEYCLOAK_CACHE_KEYS.groupsEnriched)).toBe(false)
+  })
+})
+
+describe("GET -> PATCH -> GET through the real handlers", () => {
+  it("invalidates the enriched projection through PATCH and re-reads fresh data on the next GET", async () => {
+    // Step 1: cold cache, initial membership
     vi.mocked(getGroupsDetailed).mockResolvedValueOnce([initialGroup])
     vi.mocked(getUsers).mockResolvedValueOnce([user1, user2])
 
     const res1 = await GET()
-    expect(res1.status).toBe(200)
     const data1 = await res1.json()
     expect(data1[0].members).toHaveLength(1)
-    expect(data1[0].members[0].pk).toBe("user-1")
     expect(getGroupsDetailed).toHaveBeenCalledTimes(1)
     expect(valkeyStore.has(KEYCLOAK_CACHE_KEYS.groupsEnriched)).toBe(true)
 
-    // Step 2: Next GET serves from cache without re-fetching
+    // Step 2: next GET is served from cache
     const res2 = await GET()
-    expect(res2.status).toBe(200)
     const data2 = await res2.json()
     expect(data2[0].members).toHaveLength(1)
     expect(getGroupsDetailed).toHaveBeenCalledTimes(1)
 
-    // Step 3: Mutation via addUserToGroup invalidates KEYCLOAK_CACHE_KEYS.groupsEnriched
+    // Step 3: mutate through the real PATCH handler (not the mutation directly)
     vi.mocked(getGroupsDetailed).mockResolvedValueOnce([updatedGroup])
     vi.mocked(getUsers).mockResolvedValueOnce([user1, user2])
 
-    await addUserToGroup("grp-1", "user-2")
+    const patchRes = await PATCH(patchReq({ action: "add", groupPk: "grp-1", userPk: "user-2" }))
+    expect(patchRes.status).toBe(200)
+    expect(addUserToGroup).toHaveBeenCalledWith("grp-1", "user-2")
     expect(valkeyStore.has(KEYCLOAK_CACHE_KEYS.groupsEnriched)).toBe(false)
-    expect(cacheDel).toHaveBeenCalledWith(KEYCLOAK_CACHE_KEYS.groupsEnriched)
 
-    // Step 4: Next GET detects cache miss and re-reads fresh data
+    // Step 4: next GET detects the cache miss and re-reads fresh data
     const res3 = await GET()
-    expect(res3.status).toBe(200)
     const data3 = await res3.json()
     expect(data3[0].members).toHaveLength(2)
     expect(data3[0].members.map((m: { pk: string }) => m.pk)).toEqual(["user-1", "user-2"])
@@ -198,10 +211,6 @@ describe("GET /api/settings/groups — caching and invalidation across layers", 
 })
 
 describe("PATCH /api/settings/groups", () => {
-  beforeEach(() => {
-    vi.mocked(requireAdmin).mockResolvedValue({ session: adminSession as never })
-  })
-
   it("401s an unauthenticated session", async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ error: "unauthorized" })
     const res = await PATCH(patchReq({ action: "add", groupPk: "grp-1", userPk: "user-1" }))
@@ -236,7 +245,7 @@ describe("PATCH /api/settings/groups", () => {
     expect(res.status).toBe(400)
   })
 
-  it("executes add action and invalidates groupsEnriched cache", async () => {
+  it("executes add action and invalidates the enriched cache", async () => {
     valkeyStore.set(KEYCLOAK_CACHE_KEYS.groupsEnriched, [{ pk: "grp-1" }])
     const res = await PATCH(patchReq({ action: "add", groupPk: "grp-1", userPk: "user-2" }))
     expect(res.status).toBe(200)
@@ -244,7 +253,7 @@ describe("PATCH /api/settings/groups", () => {
     expect(valkeyStore.has(KEYCLOAK_CACHE_KEYS.groupsEnriched)).toBe(false)
   })
 
-  it("executes remove action and invalidates groupsEnriched cache", async () => {
+  it("executes remove action and invalidates the enriched cache", async () => {
     valkeyStore.set(KEYCLOAK_CACHE_KEYS.groupsEnriched, [{ pk: "grp-1" }])
     const res = await PATCH(patchReq({ action: "remove", groupPk: "grp-1", userPk: "user-2" }))
     expect(res.status).toBe(200)
@@ -252,7 +261,7 @@ describe("PATCH /api/settings/groups", () => {
     expect(valkeyStore.has(KEYCLOAK_CACHE_KEYS.groupsEnriched)).toBe(false)
   })
 
-  it("executes update-attributes action and invalidates groupsEnriched cache", async () => {
+  it("executes update-attributes action and invalidates the enriched cache", async () => {
     valkeyStore.set(KEYCLOAK_CACHE_KEYS.groupsEnriched, [{ pk: "grp-1" }])
     const res = await PATCH(
       patchReq({ action: "update-attributes", groupPk: "grp-1", attributes: { env: ["prod"] } })

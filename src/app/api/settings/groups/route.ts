@@ -6,7 +6,6 @@ import {
   removeUserFromGroup,
   updateGroupAttributes,
   KEYCLOAK_CACHE_KEYS,
-  invalidateKeycloakCaches,
 } from "@/lib/keycloak-client"
 import type { KeycloakUser } from "@/lib/keycloak-client"
 import { requireAdmin } from "@/lib/auth"
@@ -33,7 +32,14 @@ export async function GET() {
         .filter((u): u is KeycloakUser => !!u)
         .map((u) => ({ pk: u.pk, username: u.username, email: u.email })),
     }))
-    await cacheSet(KEYCLOAK_CACHE_KEYS.groupsEnriched, enriched, 60)
+    // Portal #49: getGroupsDetailed() marks a group membersPartial when its
+    // member fetch failed. Never cache that projection as complete — the
+    // next caller must re-fetch instead of being served dropped memberships
+    // for the TTL window.
+    const anyPartial = enriched.some((g) => g.membersPartial)
+    if (!anyPartial) {
+      await cacheSet(KEYCLOAK_CACHE_KEYS.groupsEnriched, enriched, 60)
+    }
     return NextResponse.json(enriched)
   } catch (err) {
     console.error("GET /api/settings/groups error:", err)
@@ -62,7 +68,9 @@ export async function PATCH(req: NextRequest) {
       if (!attributes) return NextResponse.json({ error: "attributes required" }, { status: 400 })
       await updateGroupAttributes(groupPk, attributes)
     }
-    await invalidateKeycloakCaches([KEYCLOAK_CACHE_KEYS.groupsEnriched])
+    // Portal #49: each keycloak-client mutation above already invalidates
+    // KEYCLOAK_CACHE_KEYS.groupsEnriched itself — keep invalidation
+    // single-owner there instead of duplicating it in this route.
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error("PATCH /api/settings/groups error:", err)
