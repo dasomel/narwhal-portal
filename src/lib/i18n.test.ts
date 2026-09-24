@@ -33,12 +33,76 @@ function walk(dir: string): string[] {
   return files
 }
 
-const SOURCE_FILES = walk(SRC_ROOT)
+// ---------------------------------------------------------------------------
+// t()/translate() call scanner
+// ---------------------------------------------------------------------------
+// Matches any call to a `t(` or `translate(` identifier — regardless of how
+// that identifier was bound (useT()'s return value, a destructured
+// `const { t } = useI18n()`-style binding, or the direct `t`/`translate`
+// import from ./i18n) — and extracts the key argument when it is a string
+// literal or an interpolation-free template literal. An optional leading
+// `identifier,` is consumed before the key so the locale-first server call
+// shape (`t(locale, "key")`, `translate(userLocale, "key")`) is covered
+// without hardcoding the parameter name. `\b` before `t`/`translate` means
+// this only matches a standalone identifier call (not e.g. `.filter(`),
+// verified against this repo's actual `t(`/`translate(` call sites (see the
+// fixture tests below) before relying on it for the real scan.
+const CALL_RE = /\b(?:t|translate)\(/g
+const ARG_RE =
+  /^\s*(?:[A-Za-z_$][\w$]*\s*,\s*)?(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`)/
 
-const RE_LITERAL = /\bt\(\s*"([A-Za-z][\w.-]*)"/g
-const RE_LOCALE_T = /\bt\(\s*locale\s*,\s*"([A-Za-z][\w.-]*)"/g
-const RE_TRANSLATE = /\btranslate\(\s*locale\s*,\s*"([A-Za-z][\w.-]*)"/g
-const RE_TODO_I18N = /TODO[^\n]*i18n|i18n[^\n]*TODO/i
+interface CallMatch {
+  key: string
+  dynamic: boolean
+}
+
+function extractCalls(content: string): CallMatch[] {
+  const out: CallMatch[] = []
+  CALL_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = CALL_RE.exec(content))) {
+    // Look only at what immediately follows the call's opening paren — bounded
+    // lookahead keeps this from ever matching across an unrelated later call.
+    const rest = content.slice(m.index + m[0].length, m.index + m[0].length + 500)
+    const arg = ARG_RE.exec(rest)
+    if (!arg) {
+      out.push({ key: "", dynamic: true })
+      continue
+    }
+    const isTemplate = arg[3] !== undefined
+    const raw = arg[1] ?? arg[2] ?? arg[3] ?? ""
+    if (isTemplate && raw.includes("${")) {
+      // interpolated template literal (e.g. `category.${cat}`) — dynamic
+      out.push({ key: "", dynamic: true })
+      continue
+    }
+    if (!/^[A-Za-z][\w.-]*$/.test(raw)) {
+      // not a plausible TranslationKey shape — treat as an unrelated call
+      out.push({ key: "", dynamic: true })
+      continue
+    }
+    out.push({ key: raw, dynamic: false })
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// TODO scanner — flags a TODO comment mentioning i18n on the same line, or
+// whose very next line does (covers a two-line `// TODO(...)\n// i18n ...`
+// comment block). Window is deliberately small: current line + next line.
+// ---------------------------------------------------------------------------
+function findI18nTodoLines(content: string): number[] {
+  const lines = content.split("\n")
+  const hits: number[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (!/TODO/i.test(lines[i])) continue
+    const next = lines[i + 1] ?? ""
+    if (/i18n/i.test(lines[i]) || /i18n/i.test(next)) hits.push(i + 1)
+  }
+  return hits
+}
+
+const SOURCE_FILES = walk(SRC_ROOT)
 
 describe("i18n dictionary completeness", () => {
   it("ko and en expose identical key sets", () => {
@@ -55,46 +119,36 @@ describe("i18n dictionary completeness", () => {
   it("every statically-referenced t() key exists in the dictionary", () => {
     const dictionaryKeys = new Set(Object.keys(ko))
     const unknown: string[] = []
-    let literalMatches = 0
-    let localeMatches = 0
-    let translateMatches = 0
-    let totalTCalls = 0
-    let totalTranslateCalls = 0
+    let staticMatches = 0
+    let dynamicMatches = 0
 
     for (const file of SOURCE_FILES) {
       const rel = path.relative(SRC_ROOT, file)
       const content = fs.readFileSync(file, "utf8")
-
-      totalTCalls += content.match(/\bt\(/g)?.length ?? 0
-      totalTranslateCalls += content.match(/\btranslate\(/g)?.length ?? 0
-
-      for (const re of [RE_LITERAL, RE_LOCALE_T, RE_TRANSLATE]) {
-        re.lastIndex = 0
-        let m: RegExpExecArray | null
-        while ((m = re.exec(content))) {
-          const key = m[1]
-          if (re === RE_LITERAL) literalMatches++
-          else if (re === RE_LOCALE_T) localeMatches++
-          else translateMatches++
-
-          if (!dictionaryKeys.has(key)) unknown.push(`${rel}: "${key}"`)
+      for (const call of extractCalls(content)) {
+        if (call.dynamic) {
+          dynamicMatches++
+          continue
         }
+        staticMatches++
+        if (!dictionaryKeys.has(call.key)) unknown.push(`${rel}: "${call.key}"`)
       }
     }
-
-    // Calls where the key is a variable/template expression (e.g. t(labelKey),
-    // t(`category.${cat}` as TranslationKey)) can't be resolved statically and
-    // are intentionally skipped — the dictionary values themselves are typed
-    // via `Record<TranslationKey, string>`, so a genuinely unknown dynamic key
-    // would only fail at the `t()` call's fallback-to-key-string behavior, not
-    // at compile time. Skipped call sites in this run:
-    const dynamicSkipped = totalTCalls - literalMatches - localeMatches + (totalTranslateCalls - translateMatches)
-    expect(dynamicSkipped).toBeGreaterThanOrEqual(0)
 
     expect(unknown, `t() call sites referencing keys missing from the dictionary:\n${unknown.join("\n")}`).toEqual([])
     // sanity: the scan actually found call sites, so a refactor that silently
     // breaks the walk/regex (e.g. renaming src/) doesn't pass vacuously.
-    expect(literalMatches + localeMatches + translateMatches).toBeGreaterThan(500)
+    expect(staticMatches).toBeGreaterThan(1000)
+
+    // Pinned baseline (recorded 2026-09-24 against this commit, after
+    // generalizing the extractor per code review on #62 to catch
+    // destructured/wrapper `t()` bindings and interpolation-free template
+    // literals). A genuinely new dynamic-key call site (t(someVar),
+    // t(`prefix.${x}`), etc.) bumps this number — update the constant
+    // deliberately when that's expected; don't raise it just to silence a
+    // failure without checking what changed.
+    const BASELINE_DYNAMIC_SKIPPED = 46
+    expect(dynamicMatches).toBe(BASELINE_DYNAMIC_SKIPPED)
   })
 
   it("has no leftover TODO-backed i18n work outside the documented out-of-scope list", () => {
@@ -102,12 +156,10 @@ describe("i18n dictionary completeness", () => {
 
     for (const file of SOURCE_FILES) {
       const rel = path.relative(SRC_ROOT, file)
+      if (KNOWN_OUT_OF_SCOPE_TODOS.has(rel)) continue
       const content = fs.readFileSync(file, "utf8")
-      const lines = content.split("\n")
-      for (let i = 0; i < lines.length; i++) {
-        if (RE_TODO_I18N.test(lines[i]) && !KNOWN_OUT_OF_SCOPE_TODOS.has(rel)) {
-          offenders.push(`${rel}:${i + 1}: ${lines[i].trim()}`)
-        }
+      for (const lineNo of findI18nTodoLines(content)) {
+        offenders.push(`${rel}:${lineNo}`)
       }
     }
 
@@ -123,5 +175,62 @@ describe("i18n dictionary completeness", () => {
       if (/TODO/i.test(value)) offenders.push(`en.${key}`)
     }
     expect(offenders, `dictionary values containing TODO placeholders: ${offenders.join(", ")}`).toEqual([])
+  })
+})
+
+describe("i18n key scanner (unit, fixture-based)", () => {
+  it("extracts a plain literal call", () => {
+    expect(extractCalls('t("nav.home")')).toEqual([{ key: "nav.home", dynamic: false }])
+  })
+
+  it("extracts a call bound via destructuring (const { t } = useI18n())", () => {
+    const src = 'const { t } = useI18n()\nconst label = t("scorecard.owner")'
+    expect(extractCalls(src)).toEqual([{ key: "scorecard.owner", dynamic: false }])
+  })
+
+  it("extracts a call with a params object second argument", () => {
+    expect(extractCalls('t("argocd.totalApps", { count: 3 })')).toEqual([
+      { key: "argocd.totalApps", dynamic: false },
+    ])
+  })
+
+  it("extracts a locale-first call regardless of the parameter name", () => {
+    expect(extractCalls('translate(userLocale, "time.years", { count: n })')).toEqual([
+      { key: "time.years", dynamic: false },
+    ])
+  })
+
+  it("extracts a multiline call", () => {
+    const src = 't(\n  "kubeconfig.download"\n)'
+    expect(extractCalls(src)).toEqual([{ key: "kubeconfig.download", dynamic: false }])
+  })
+
+  it("extracts an interpolation-free template literal", () => {
+    expect(extractCalls("t(`nav.home`)")).toEqual([{ key: "nav.home", dynamic: false }])
+  })
+
+  it("treats an interpolated template literal as dynamic, not a key", () => {
+    expect(extractCalls("t(`category.${cat}`)")).toEqual([{ key: "", dynamic: true }])
+  })
+
+  it("treats a bare identifier argument as dynamic", () => {
+    expect(extractCalls("t(labelKey)")).toEqual([{ key: "", dynamic: true }])
+  })
+
+  it("mutation check: still flags an unknown key inside a destructured/multiline call", () => {
+    const dictionaryKeys = new Set(Object.keys(ko))
+    const src = 'const { t } = useI18n()\nconst x = t(\n  "totally.missing.key"\n)'
+    const unknown = extractCalls(src).filter((c) => !c.dynamic && !dictionaryKeys.has(c.key))
+    expect(unknown).toEqual([{ key: "totally.missing.key", dynamic: false }])
+  })
+
+  it("flags a TODO whose i18n mention is on the next comment line", () => {
+    const src = "// TODO(wrap-up):\n// i18n keys still needed\nconst x = 1"
+    expect(findI18nTodoLines(src)).toEqual([1])
+  })
+
+  it("does not flag a TODO unrelated to i18n", () => {
+    const src = "// TODO: real values require node-exec integration\nconst x = 1"
+    expect(findI18nTodoLines(src)).toEqual([])
   })
 })
