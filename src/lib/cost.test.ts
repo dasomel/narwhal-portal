@@ -182,7 +182,10 @@ describe("cost cache multi-cluster and cross-scope isolation (Portal #64)", () =
     expect(clusterAResult.items.length).toBeGreaterThan(0)
     expect(cacheStore.size).toBe(1)
 
-    // 2. Mock fetch to return different metrics for Cluster B
+    // 2. Mock fetch to return different metrics for Cluster B. All three required
+    // queries (cpu/mem/storage) must resolve non-empty, or the new empty-vector
+    // classification (portal#64 Codex 리뷰 #1) marks this "partial" and skips
+    // caching — this test is about per-cluster cache isolation, not telemetry.
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url.includes("container_cpu_usage_seconds_total")) {
         return jsonResponse([
@@ -191,6 +194,12 @@ describe("cost cache multi-cluster and cross-scope isolation (Portal #64)", () =
             value: [0, "10.0"], // Distinct from cluster A's 1.5
           },
         ])
+      }
+      if (url.includes("container_memory_working_set_bytes")) {
+        return jsonResponse([{ metric: { namespace: "platform-system" }, value: [0, "2000000000"] }])
+      }
+      if (url.includes("kubelet_volume_stats_used_bytes")) {
+        return jsonResponse([{ metric: { namespace: "platform-system" }, value: [0, "500000000"] }])
       }
       return jsonResponse([])
     }))
@@ -354,7 +363,7 @@ describe("cost exclusions and telemetry (Portal #64 AC3/AC4)", () => {
     })
   })
 
-  it("AC3: getCost('service') keeps the legacy notice + telemetry ok when no labeled workloads exist (missing labels)", async () => {
+  it("AC3: getCost('service') keeps the legacy notice + telemetry empty when no labeled workloads exist (missing labels)", async () => {
     vi.stubGlobal("fetch", routedFetch({}))
     const session = { groups: ["developer"], teams: ["platform-team"] }
     const scope = await getEffectiveScope(session)
@@ -363,7 +372,11 @@ describe("cost exclusions and telemetry (Portal #64 AC3/AC4)", () => {
 
     expect(result.items).toEqual([])
     expect(result.notice).toContain("label_app_kubernetes_io_instance")
-    expect(result.telemetry.state).toBe("ok")
+    // 크리틱 리뷰(Codex) #1: 두 core 쿼리(cpu/mem-by-service) 모두 fulfilled인데
+    // 결과가 비어 있으므로 "ok"가 아니라 "empty" — 쿼리는 성공했지만 값이 없다는
+    // 뜻이지 장애는 아니다. exclusions는 emptiness와 무관하게(설령 그 자체) 계속
+    // 계산된다 — 아래에서 확인.
+    expect(result.telemetry.state).toBe("empty")
     // No labeled data and no total data either -> nothing to subtract from.
     expect(result.exclusions?.unlabeledWorkloads).toEqual({
       computable: true,
@@ -487,7 +500,7 @@ describe("cost exclusions and telemetry (Portal #64 AC3/AC4)", () => {
     expect(cacheSet).not.toHaveBeenCalled()
   })
 
-  it("AC4 (크리틱 리뷰 #1/#5): getCostTrend does not cache a partial result when only the cpu query fails", async () => {
+  it("AC4/Codex 리뷰 #2 (크리틱 리뷰 #1/#5): getCostTrend keeps mem-only points and does not cache when only the cpu query fails", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url.includes("container_cpu_usage_seconds_total")) {
         throw new Error("Prometheus range query failed: 500")
@@ -500,9 +513,10 @@ describe("cost exclusions and telemetry (Portal #64 AC3/AC4)", () => {
     const result = await getCostTrend("namespace", "platform-system", 7, scope)
 
     expect(result.telemetry.state).toBe("partial")
-    // The cpu series drives which timestamps get a point; losing it collapses
-    // points to empty even though mem succeeded — still must not be cached.
-    expect(result.points).toEqual([])
+    // Codex 리뷰 #2: cpu 쿼리가 실패해도 mem이 성공한 timestamp(union)의 point는
+    // 살아 있어야 한다 — 이전에는 cpuValues 하나로만 map해서 points 전체가 []가 됐다.
+    // cpu 기여는 없음(0)으로 처리되므로 이 픽스처의 total은 mem만의 기여(반올림 후 0).
+    expect(result.points).toEqual([{ date: "2023-11-14", total: 0 }])
     expect(cacheSet).not.toHaveBeenCalled()
   })
 
@@ -626,6 +640,12 @@ describe("cost exclusions and telemetry (Portal #64 AC3/AC4)", () => {
       if (url.includes("container_cpu_usage_seconds_total") && url.includes("kube_pod_labels")) {
         return jsonResponse([{ metric: { namespace: "platform-system", label_app_kubernetes_io_instance: "svc-a" }, value: [0, "1"] }])
       }
+      // mem-by-service must also resolve non-empty, or the two core queries
+      // (cpu ok, mem empty) would themselves classify as "partial" (Codex 리뷰 #1)
+      // and mask what this test actually exercises: aux-only failure.
+      if (url.includes("container_memory_working_set_bytes") && url.includes("kube_pod_labels")) {
+        return jsonResponse([{ metric: { namespace: "platform-system", label_app_kubernetes_io_instance: "svc-a" }, value: [0, "2000000000"] }])
+      }
       return jsonResponse([])
     }))
     const session = { groups: ["developer"], teams: ["platform-team"] }
@@ -638,12 +658,15 @@ describe("cost exclusions and telemetry (Portal #64 AC3/AC4)", () => {
     expect(result.items).toEqual([{
       id: "svc-a",
       cpu: { cores: 1, hourly: 0.04 },
-      memory: { gb: 0, hourly: 0 },
+      memory: { gb: 2, hourly: 0.01 },
       storage: { gb: 0, hourly: 0 },
-      totalHourly: 0.04,
-      totalMonthly: 29.2,
+      totalHourly: 0.05,
+      totalMonthly: 36.5,
     }])
     expect(result.exclusions?.unlabeledWorkloads).toEqual({ computable: false, count: null, cpu: null, memoryGb: null, hourly: null })
+    // Codex 리뷰 #4: core는 ok지만 exclusions가 computable=false면 캐시하지 않는다 —
+    // 그렇지 않으면 "집계 불가"가 TTL 동안 실제 값처럼 굳어버린다.
+    expect(cacheSet).not.toHaveBeenCalled()
   })
 
   it("AC4: getCostByService reports telemetry.state='unavailable' distinctly from a 200+notice-only response shape", async () => {
@@ -686,5 +709,52 @@ describe("cost exclusions and telemetry (Portal #64 AC3/AC4)", () => {
     expect(downResult.points).toEqual([])
     expect(downResult.telemetry.state).toBe("unavailable")
     expect(downResult.telemetry.state).not.toBe(emptyResult.telemetry.state)
+  })
+
+  it("Codex 리뷰 #1: getCost('cluster') treats all-fulfilled-but-empty vectors as telemetry.state='empty', not 'ok' with a $0 item", async () => {
+    // Prometheus responds 200 to every query but every vector is empty — the
+    // scrape-outage-lookalike scenario the review flagged. Must not compute a
+    // $0 cluster item, must not cache it, and must be distinguishable from a
+    // genuine "unavailable" (hard failure).
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([])))
+    const session = { groups: ["developer"], teams: ["platform-team"] }
+    const scope = await getEffectiveScope(session)
+
+    const result = await getCost("cluster", scope)
+
+    expect(result.items).toEqual([])
+    expect(result.telemetry.state).toBe("empty")
+    expect(result.telemetry.source).toBe("prometheus") // it DID respond, just empty
+    expect(result.notice).toBeTruthy()
+    expect(cacheSet).not.toHaveBeenCalled()
+  })
+
+  it("Codex 리뷰 #4: getCost('service') does not cache a computable=false exclusions result, so a later successful call re-fetches", async () => {
+    let countQueryShouldFail = true
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("unless")) {
+        if (countQueryShouldFail) throw new Error("Prometheus query failed: 500")
+        return jsonResponse([{ metric: { namespace: "platform-system" }, value: [0, "1"] }])
+      }
+      if (url.includes("container_cpu_usage_seconds_total") && url.includes("kube_pod_labels")) {
+        return jsonResponse([{ metric: { namespace: "platform-system", label_app_kubernetes_io_instance: "svc-a" }, value: [0, "1"] }])
+      }
+      if (url.includes("container_memory_working_set_bytes") && url.includes("kube_pod_labels")) {
+        return jsonResponse([{ metric: { namespace: "platform-system", label_app_kubernetes_io_instance: "svc-a" }, value: [0, "2000000000"] }])
+      }
+      return jsonResponse([])
+    }))
+    const session = { groups: ["developer"], teams: ["platform-team"] }
+    const scope = await getEffectiveScope(session)
+
+    const first = await getCost("service", scope)
+    expect(first.telemetry.state).toBe("ok")
+    expect(first.exclusions?.unlabeledWorkloads?.computable).toBe(false)
+    expect(cacheSet).not.toHaveBeenCalled()
+
+    countQueryShouldFail = false
+    const second = await getCost("service", scope)
+    expect(second.exclusions?.unlabeledWorkloads?.computable).toBe(true)
+    expect(cacheSet).toHaveBeenCalled()
   })
 })

@@ -381,18 +381,59 @@ export interface CostTrendResult {
   telemetry: CostTelemetry
 }
 
-// portal#64 AC4: 여러 PromQL 쿼리 중 일부만 실패했을 때 기존 Promise.all은 첫 실패에서
-// 즉시 reject해 "완전 실패"와 "일부 실패"를 구분하지 못했다. #51 getClusterMetrics의
-// okCount 패턴(okCount===N?"ok":okCount>0?"partial":"unavailable")을 그대로 재사용한다.
-function combineTelemetry(settled: PromiseSettledResult<unknown>[], queriedAt: string): CostTelemetry {
-  const okCount = settled.filter((r) => r.status === "fulfilled").length
-  const state: TelemetryStatus =
-    okCount === settled.length ? "ok" : okCount > 0 ? "partial" : "unavailable"
-  const reasons = settled
+type QueryStatus = "ok" | "empty" | "unavailable"
+
+// portal#64 Codex 리뷰 #1: settled.status==="fulfilled"만 보면 "쿼리는 성공했지만
+// 벡터가 비어 있음"(스크레이프 갭일 수 있음)과 "정상적으로 값이 들어옴"을 구분하지
+// 못해, 클러스터 전체가 empty vector인 스크레이프 아웃티지도 state="ok" + $0 아이템으로
+// 보였다. prometheus.ts의 queryVectorExplicit(~L351)이 쓰는 것과 동일한 구분
+// (seriesCount===0 → "empty")을 여기서도 재사용한다.
+function vectorStatus(settled: PromiseSettledResult<PromVectorResult[]>): QueryStatus {
+  if (settled.status === "rejected") return "unavailable"
+  return settled.value.length === 0 ? "empty" : "ok"
+}
+
+// range 쿼리는 series 자체가 없거나(빈 배열) series는 있지만 그 안의 values가 비어
+// 있을 수 있다 — 두 경우 모두 "이 기간에 대한 실측치가 없다"는 점에서 "empty"로 취급.
+function rangeStatus(
+  settled: PromiseSettledResult<Array<{ metric: Record<string, string>; values: [number, string][] }>>
+): QueryStatus {
+  if (settled.status === "rejected") return "unavailable"
+  // series.values is defensively optional-chained: a malformed/mocked response
+  // shaped like an instant-vector result (no `values` array) must not throw here.
+  return settled.value.some((series) => (series.values?.length ?? 0) > 0) ? "ok" : "empty"
+}
+
+function rejectReasons(settled: PromiseSettledResult<unknown>[]): string[] {
+  return settled
     .filter((r): r is PromiseRejectedResult => r.status === "rejected")
     .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)))
+}
+
+// portal#64 AC4: 여러 PromQL 쿼리 중 일부만 실패해도 이전에는 Promise.all이 첫 실패에서
+// 즉시 reject해 "완전 실패"와 "일부 실패"를 구분하지 못했다. #51 getClusterMetrics의
+// okCount 패턴(okCount===N?"ok":okCount>0?"partial":"unavailable")을 재사용하되,
+// "ok"는 실제 값이 있는 경우만 세고(크리틱 #1), 전부 fulfilled인데 전부 비어 있으면
+// "unavailable"이 아니라 prometheus.ts와 같은 어휘인 "empty"로 구분한다 — 호출부가
+// 이를 unavailable과 동일하게 취급(캐시 안 함, $0 아이템 대신 items:[])할지는 각
+// 함수가 스코프별로 결정한다.
+function combineTelemetry(statuses: QueryStatus[], queriedAt: string, reasons: string[] = []): CostTelemetry {
+  const okCount = statuses.filter((s) => s === "ok").length
+  const unavailableCount = statuses.filter((s) => s === "unavailable").length
+  let state: TelemetryStatus
+  if (okCount === statuses.length) {
+    state = "ok"
+  } else if (okCount > 0) {
+    state = "partial"
+  } else if (unavailableCount === statuses.length) {
+    state = "unavailable" // 전부 실패 — 진짜 장애.
+  } else if (unavailableCount === 0) {
+    state = "empty" // 전부 fulfilled인데 전부 empty — 응답은 왔지만 값이 없다.
+  } else {
+    state = "partial" // empty/unavailable 혼재, ok는 하나도 없음 — 신뢰 가능한 값 없음.
+  }
   return {
-    source: okCount > 0 ? "prometheus" : "none",
+    source: unavailableCount === statuses.length ? "none" : "prometheus",
     queriedAt,
     state,
     ...(reasons.length > 0 ? { reason: [...new Set(reasons)].join("; ") } : {}),
@@ -409,6 +450,11 @@ function timeoutNotice(settled: PromiseSettledResult<unknown>[]): string {
     ? "Prometheus 응답 시간 초과(5s). 잠시 후 다시 시도하세요."
     : "Prometheus 쿼리 실패. 메트릭 수집 서버 상태를 확인하세요."
 }
+
+// portal#64 Codex 리뷰 #1: 쿼리는 전부 성공했지만 값이 전혀 없을 때(state="empty")
+// 쓰는 notice — timeoutNotice의 실패 문구를 재사용하면 실제로는 실패가 아닌데
+// "쿼리 실패/타임아웃"이라고 잘못 알리게 된다.
+const EMPTY_NOTICE = "Prometheus 쿼리는 성공했지만 반환된 데이터가 없습니다. 스크레이프 상태를 확인하세요."
 
 // label_app_kubernetes_io_instance가 없는(또는 "unknown"인 — 아래 getCost 참고)
 // workload(pod) 개수를 namespace별로 반환한다. 이전 버전은 count(...)로 전체를
@@ -466,9 +512,13 @@ export async function getCost(
       queryVector(memByNamespaceQuery()),
       queryVector(storageByNamespaceQuery()),
     ])
-    const telemetry = combineTelemetry(settled, queriedAt)
-    if (telemetry.state === "unavailable") {
-      return { items: [], notice: timeoutNotice(settled), telemetry }
+    const telemetry = combineTelemetry(settled.map(vectorStatus), queriedAt, rejectReasons(settled))
+    // Codex 리뷰 #1: 전부 empty(스크레이프 아웃티지일 수 있음)도 unavailable과
+    // 동일하게 취급 — 그렇지 않으면 $0 cluster 아이템이 "실측된 0원"처럼 보이고
+    // 300초 캐시에 그대로 남는다.
+    if (telemetry.state === "unavailable" || telemetry.state === "empty") {
+      const notice = telemetry.state === "empty" ? EMPTY_NOTICE : timeoutNotice(settled)
+      return { items: [], notice, telemetry }
     }
     const cpuRes = settled[0].status === "fulfilled" ? settled[0].value : []
     const memRes = settled[1].status === "fulfilled" ? settled[1].value : []
@@ -489,9 +539,10 @@ export async function getCost(
       queryVector(memByNamespaceQuery()),
       queryVector(storageByNamespaceQuery()),
     ])
-    const telemetry = combineTelemetry(settled, queriedAt)
-    if (telemetry.state === "unavailable") {
-      return { items: [], notice: timeoutNotice(settled), telemetry }
+    const telemetry = combineTelemetry(settled.map(vectorStatus), queriedAt, rejectReasons(settled))
+    if (telemetry.state === "unavailable" || telemetry.state === "empty") {
+      const notice = telemetry.state === "empty" ? EMPTY_NOTICE : timeoutNotice(settled)
+      return { items: [], notice, telemetry }
     }
     const cpuRes = settled[0].status === "fulfilled" ? settled[0].value : []
     const memRes = settled[1].status === "fulfilled" ? settled[1].value : []
@@ -552,8 +603,14 @@ export async function getCost(
   // portal#64 AC4: telemetry.state는 items 계산에 실제로 쓰이는 앞의 두 쿼리(cpu/mem
   // by service)만 반영한다 — 나머지 3개는 exclusions 계산 전용 보조 쿼리라 그 실패는
   // exclusions.unlabeledWorkloads.computable=false로만 나타나야 하고, 정상 계산된
-  // items를 "partial"로 오염시키면 안 된다.
-  const telemetry = combineTelemetry([cpuSettled, memSettled], queriedAt)
+  // items를 "partial"로 오염시키면 안 된다. (service scope의 "전부 empty"는 라벨이
+  // 아예 없는 정상 상태일 수 있어 cluster/namespace와 달리 조기 반환하지 않는다 —
+  // 아래 items.length===0 분기가 이미 그 의미 있는 notice/exclusions를 만든다.)
+  const telemetry = combineTelemetry(
+    [vectorStatus(cpuSettled), vectorStatus(memSettled)],
+    queriedAt,
+    rejectReasons([cpuSettled, memSettled])
+  )
   if (telemetry.state === "unavailable") {
     return { items: [], notice: timeoutNotice([cpuSettled, memSettled]), telemetry }
   }
@@ -651,6 +708,12 @@ export async function getCost(
     unlabeledWorkloads,
     storageExcludedFromServiceScope: true,
   }
+  // Codex 리뷰 #4: telemetry.state==="ok"는 core(cpu/mem-by-service) 쿼리만 보므로
+  // 보조(exclusions) 쿼리가 실패해도 여기까지는 "ok"로 도달한다 — computable=false로
+  // degraded된 exclusions를 그대로 5분 캐시하면 아래 UI가 그 동안 계속 "집계 불가"를
+  // 실제 값처럼 보여준다(또는 조용히 숨긴다). computable할 때만 캐시해 다음 호출이
+  // 재조회하도록 한다.
+  const exclusionsComputable = unlabeledWorkloads.computable
 
   if (items.length === 0) {
     const result: CostResult = {
@@ -659,7 +722,7 @@ export async function getCost(
       telemetry,
       exclusions,
     }
-    if (telemetry.state === "ok") await cacheSet(cacheKey, result, 300)
+    if (telemetry.state === "ok" && exclusionsComputable) await cacheSet(cacheKey, result, 300)
     return result
   }
   items.sort((a, b) => b.totalHourly - a.totalHourly)
@@ -669,7 +732,7 @@ export async function getCost(
     telemetry,
     exclusions,
   }
-  if (telemetry.state === "ok") await cacheSet(cacheKey, result, 300)
+  if (telemetry.state === "ok" && exclusionsComputable) await cacheSet(cacheKey, result, 300)
   return result
 }
 
@@ -703,7 +766,7 @@ export async function getCostByService(
     queryVector(topPodCpuQuery(serviceId, serviceNamespace)),
     queryVector(topPodMemQuery(serviceId, serviceNamespace)),
   ])
-  const telemetry = combineTelemetry(settled, queriedAt)
+  const telemetry = combineTelemetry(settled.map(vectorStatus), queriedAt, rejectReasons(settled))
   if (telemetry.state === "unavailable") {
     return { notice: timeoutNotice(settled), telemetry }
   }
@@ -820,7 +883,7 @@ export async function getCostTrend(
     queryRangeVector(trendCpuQuery(scope, id, effScope, serviceNamespace), start, end, step),
     queryRangeVector(trendMemQuery(scope, id, effScope, serviceNamespace), start, end, step),
   ])
-  const telemetry = combineTelemetry(settled, queriedAt)
+  const telemetry = combineTelemetry(settled.map(rangeStatus), queriedAt, rejectReasons(settled))
   if (telemetry.state === "unavailable") {
     return { points: [], notice: timeoutNotice(settled), telemetry }
   }
@@ -832,15 +895,21 @@ export async function getCostTrend(
   const cpuValues = cpuRange[0]?.values ?? []
   const memValues = memRange[0]?.values ?? []
 
-  // timestamp 기준 매핑
-  const memMap = new Map<number, number>()
-  for (const [ts, val] of memValues) {
-    memMap.set(ts, parseFloat(val))
-  }
+  // Codex 리뷰 #2: 이전에는 points를 cpuValues 하나로만 map해서, cpu 쿼리가
+  // 실패(또는 결과가 비어)했으면 mem이 성공했어도 points 전체가 []가 됐다 — telemetry
+  // 는 partial인데 차트는 완전히 비어 보이는 모순. 두 시리즈 timestamp의 합집합을
+  // 기준으로 points를 만들고, 한쪽이 없는 timestamp는 그 component 기여를 0으로
+  // 처리한다(다른 쪽 데이터라도 보여주는 편이 points를 통째로 지우는 것보다 낫다 —
+  // telemetry.state가 이미 partial/empty로 저평가 가능성을 알린다).
+  const cpuByTs = new Map<number, number>()
+  for (const [ts, val] of cpuValues) cpuByTs.set(ts, parseFloat(val))
+  const memByTs = new Map<number, number>()
+  for (const [ts, val] of memValues) memByTs.set(ts, parseFloat(val))
+  const allTimestamps = [...new Set([...cpuByTs.keys(), ...memByTs.keys()])].sort((a, b) => a - b)
 
-  const points: CostTrendPoint[] = cpuValues.map(([ts, cpuVal]) => {
-    const cpuCores = parseFloat(cpuVal)
-    const memBytes = memMap.get(ts) ?? 0
+  const points: CostTrendPoint[] = allTimestamps.map((ts) => {
+    const cpuCores = cpuByTs.get(ts) ?? 0
+    const memBytes = memByTs.get(ts) ?? 0
     const totalHourly =
       cpuCores * unitPrices.cpuHourly + (memBytes / 1e9) * unitPrices.memGbHourly
     const date = new Date(ts * 1000).toISOString().slice(0, 10)

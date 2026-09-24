@@ -51,6 +51,13 @@ const namespaces: NamespaceInfo[] = [
 // frontend-app:    1 core  / 2GB mem -> totalHourly 0.05
 // (default unit prices: cpuHourly=0.04, memGbHourly=0.005; storage rows omitted -> 0)
 function fakeFetch(url: string) {
+  // getCostTrend uses query_range, not query — its result shape is {metric,values}
+  // (a series of points), not {metric,value} (a single instant sample). Route on
+  // "query_range" first or a trend call falls into the instant-vector branches below
+  // and gets a shape rangeStatus treats as empty (portal#64 Codex 리뷰 #1).
+  if (url.includes("query_range")) {
+    return jsonResponse([{ metric: {}, values: [[1700000000, "2.0"], [1700086400, "2.5"]] }])
+  }
   if (url.includes("container_cpu_usage_seconds_total")) {
     return jsonResponse([
       { metric: { namespace: "platform-system" }, value: [0, "2"] },

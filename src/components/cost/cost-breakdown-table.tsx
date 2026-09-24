@@ -178,17 +178,26 @@ export function CostBreakdownTable() {
           </p>
         )}
         {/* portal#64 AC3: unlabeled workload exclusion, shown as a structured
-            value rather than only inside the free-text `notice` above. */}
-        {scopeView === "service" &&
-          data?.exclusions?.unlabeledWorkloads?.computable &&
-          (data.exclusions.unlabeledWorkloads.count ?? 0) > 0 && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("cost.unlabeledWorkloadsExclusion", {
-                count: String(data.exclusions.unlabeledWorkloads.count),
-                hourly: `$${(data.exclusions.unlabeledWorkloads.hourly ?? 0).toFixed(4)}`,
-              })}
+            value rather than only inside the free-text `notice` above.
+            Codex 리뷰 #4: computable===false를 조용히 숨기지 않고 명시적으로
+            "집계 불가"라고 알린다 — 이전에는 그 조회 실패가 화면에서 사라져서
+            제외 항목이 실제로는 0인 것처럼 보였다. */}
+        {scopeView === "service" && data?.exclusions?.unlabeledWorkloads && (
+          data.exclusions.unlabeledWorkloads.computable ? (
+            (data.exclusions.unlabeledWorkloads.count ?? 0) > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("cost.unlabeledWorkloadsExclusion", {
+                  count: String(data.exclusions.unlabeledWorkloads.count),
+                  hourly: `$${(data.exclusions.unlabeledWorkloads.hourly ?? 0).toFixed(4)}`,
+                })}
+              </p>
+            )
+          ) : (
+            <p className="mt-1 text-xs text-yellow-700 dark:text-yellow-400">
+              {t("cost.exclusionsUnavailable")}
             </p>
-          )}
+          )
+        )}
       </CardHeader>
       <CardContent className="pt-0">
         {isLoading ? (

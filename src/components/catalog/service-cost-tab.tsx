@@ -201,6 +201,13 @@ export function ServiceCostTab({ serviceId }: Props) {
           <CardTitle className="text-sm font-medium text-foreground">
             {t("cost.trendTitle")}
           </CardTitle>
+          {/* Codex 리뷰 #3: trend telemetry가 partial이면(예: cpu는 실패, mem은
+              성공) 차트는 그려지지만 저평가됐을 수 있다는 경고가 전혀 없었다. */}
+          {trendData?.telemetry?.state === "partial" && (
+            <p className="mt-1 text-xs text-yellow-700 dark:text-yellow-400">
+              {t("cost.telemetryPartial")}
+            </p>
+          )}
         </CardHeader>
         <CardContent className="pt-0">
           {trendLoading ? (
