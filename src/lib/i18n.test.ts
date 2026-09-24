@@ -43,11 +43,11 @@ function walk(dir: string): string[] {
 // literal or an interpolation-free template literal. An optional leading
 // `identifier,` is consumed before the key so the locale-first server call
 // shape (`t(locale, "key")`, `translate(userLocale, "key")`) is covered
-// without hardcoding the parameter name. `\b` before `t`/`translate` means
+// without hardcoding the parameter name. The lookbehind before `t`/`translate` means
 // this only matches a standalone identifier call (not e.g. `.filter(`),
 // verified against this repo's actual `t(`/`translate(` call sites (see the
 // fixture tests below) before relying on it for the real scan.
-const CALL_RE = /\b(?:t|translate)\(/g
+const CALL_RE = /(?<![.\w$])(?:t|translate)\(/g // excludes obj.t( property calls
 const ARG_RE =
   /^\s*(?:[A-Za-z_$][\w$]*\s*,\s*)?(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`)/
 
@@ -181,6 +181,10 @@ describe("i18n dictionary completeness", () => {
 describe("i18n key scanner (unit, fixture-based)", () => {
   it("extracts a plain literal call", () => {
     expect(extractCalls('t("nav.home")')).toEqual([{ key: "nav.home", dynamic: false }])
+  })
+
+  it("ignores property calls like obj.t() and api.translate()", () => {
+    expect(extractCalls('obj.t("x.y"); api.translate(locale, "a.b")')).toEqual([])
   })
 
   it("extracts a call bound via destructuring (const { t } = useI18n())", () => {
