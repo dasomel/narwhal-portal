@@ -210,9 +210,25 @@ describe("GET /api/cost/trend pricing", () => {
     await GET(new NextRequest("http://localhost/api/cost/trend?scope=cluster&days=7"))
 
     const keys = vi.mocked(cacheSet).mock.calls.map(([key]) => key)
-    expect(keys.every((key) => key.includes("cost:trend:cluster:"))).toBe(true)
+    expect(keys.every((key) => key.includes("cost:trend:v2:cluster:"))).toBe(true)
     expect(new Set(keys).size).toBe(2)
     const query = decodeURIComponent(vi.mocked(fetch).mock.calls[0][0] as string)
     expect(query).toContain('namespace=~"^(?:frontend-app)$"')
+  })
+
+  // portal#64 AC4: a Prometheus outage on the trend endpoint must be exposed as
+  // telemetry.state="unavailable", distinct from a genuinely empty trend.
+  it("exposes telemetry.state=unavailable when Prometheus is down", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("ECONNREFUSED")
+    }))
+
+    const res = await GET(new NextRequest("http://localhost/api/cost/trend?scope=cluster&days=7"))
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.points).toEqual([])
+    expect(body.telemetry.state).toBe("unavailable")
   })
 })

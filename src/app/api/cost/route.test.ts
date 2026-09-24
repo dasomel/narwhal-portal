@@ -228,7 +228,7 @@ describe("GET /api/cost — scope enforcement", () => {
 
     const detailKeys = vi.mocked(cacheSet).mock.calls
       .map(([key]) => key)
-      .filter((key) => key.startsWith("cost:service:"))
+      .filter((key) => key.startsWith("cost:service:v2:"))
     expect(new Set(detailKeys).size).toBe(2)
   })
 
@@ -299,7 +299,7 @@ describe("GET /api/cost — scope enforcement", () => {
     await getCostTrend("cluster", "cluster", 7, scope)
 
     const setKeys = vi.mocked(cacheSet).mock.calls.map(([key]) => key)
-    for (const prefix of ["cost:cluster:", "cost:service:", "cost:trend:cluster:"]) {
+    for (const prefix of ["cost:v2:cluster:", "cost:service:v2:", "cost:trend:v2:cluster:"]) {
       const matching = setKeys.filter((key) => key.startsWith(prefix))
       expect(new Set(matching).size).toBe(2)
     }
@@ -309,5 +309,35 @@ describe("GET /api/cost — scope enforcement", () => {
     vi.mocked(requireRole).mockResolvedValue({ error: "unauthorized" } as never)
     const res = await GET(requestUrl())
     expect(res.status).toBe(401)
+  })
+
+  // portal#64 AC4: a Prometheus outage must be distinguishable from a genuinely
+  // empty result — both previously surfaced as `{ items: [], notice }`.
+  it("exposes telemetry.state=unavailable (not just an empty items array) when Prometheus is down", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("ECONNREFUSED")
+    }))
+
+    const res = await GET(requestUrl("cluster"))
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.items).toEqual([])
+    expect(body.telemetry.state).toBe("unavailable")
+  })
+
+  // portal#64 AC3: service scope must expose exclusions as structured fields, not
+  // only the free-text Korean `notice` prose.
+  it("exposes structured exclusions for service scope", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
+
+    const res = await GET(requestUrl("service"))
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.exclusions.storageExcludedFromServiceScope).toBe(true)
+    expect(body.exclusions.unlabeledWorkloads).toBeDefined()
+    expect(body.telemetry.state).toBe("ok")
   })
 })
