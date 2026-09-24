@@ -31,7 +31,7 @@ permissions:
 jobs:
   publish:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
-    uses: dasomel/openforge/.github/workflows/publish-project-status.yml@d702363e24bbb56d5e28aec9e7fb20a56c1ea519
+    uses: dasomel/openforge/.github/workflows/publish-project-status.yml@0276924d288d3426ad2c2c09f5b9878a86c68d11
     with:
       project: narwhal-portal
       repository: dasomel/narwhal-portal
