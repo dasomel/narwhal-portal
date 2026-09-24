@@ -2,7 +2,7 @@ export type Locale = "ko" | "en"
 export const defaultLocale: Locale = "ko"
 export const locales: Locale[] = ["ko", "en"]
 
-const ko = {
+export const ko = {
   // nav
   "nav.home": "홈",
   "nav.myApps": "내 앱",
@@ -1156,7 +1156,7 @@ const ko = {
   "status.generatedAt": "마지막 업데이트: {time}",
 } as const
 
-const en: Record<keyof typeof ko, string> = {
+export const en: Record<keyof typeof ko, string> = {
   // nav
   "nav.home": "Home",
   "nav.myApps": "My Apps",
