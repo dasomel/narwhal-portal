@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "openforge-agent-skill-verification/v1",
+  "skill": "narwhal-portal-backend",
+  "skillVersion": "1",
+  "freshSession": true,
+  "agentRuntime": "claude-sonnet-5",
+  "happyPath": {
+    "status": "pass",
+    "summary": "Fresh-session replay (dasomel/openforge#54, 2026-09-24) selected the skill from its description alone, then followed its workflow against src/app/api/settings/routes/route.ts + src/lib/apisix-client.ts: verified the companion Narwhal cluster contract (APISIX_ADMIN_URL, namespace, NetworkPolicy) against a sibling `../narwhal` checkout for the first time -- closing the 2026-09-17 replay's 'untestable single-repo' blocker -- and exported/typed the existing ApisixRoute response shape. Reverted after evidence capture (type-safety tightening, not a bug fix).",
+    "evidence": [
+      "research/issue-54-portal-backend-replay-2026-09-24.md#step-2-happy-path-real-change-scratch-only"
+    ]
+  },
+  "edgeCase": {
+    "status": "pass",
+    "summary": "Reintroduced the historical Portal#54 hazard in apisix-client.ts (readonly-key production fallback to the admin/write-scoped key); the repository's own pre-existing regression test caught it with a real nonzero exit, then the fault was reverted and the suite reconfirmed green.",
+    "evidence": [
+      "research/issue-54-portal-backend-replay-2026-09-24.md#step-3-failureedge-case-real-project-specific-hazard"
+    ]
+  },
+  "deterministicChecks": [
+    { "command": "pnpm typecheck", "status": "pass" },
+    { "command": "pnpm test", "status": "pass" },
+    { "command": "pnpm build", "status": "pass" }
+  ],
+  "unverified": [
+    "No live cluster or live upstream service (real APISIX/Keycloak/ArgoCD/Prometheus/OpenBao) was reachable; the companion-contract check is a real static source-to-source comparison across the two repositories, not a live network/auth handshake.",
+    "No browser/session/RBAC runtime evidence was gathered; final cross-boundary/live verification is explicitly owned by narwhal-portal-qa, not this skill."
+  ],
+  "verifiedAt": "2026-09-24"
+}

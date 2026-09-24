@@ -177,6 +177,21 @@ needed beyond the maturity field itself.
 - The happy-path change was a real, passing, revertable diff, not a shipped feature; it exists
   only to exercise the skill's steps, per this issue's instructions.
 
+## CI-enforced evidence artifact
+
+The first push of this PR's branch failed `agent-contract.yml` (`OpenForge agent contract`)
+with `ERROR SKILL-VERIFICATION-EVIDENCE: verified skill requires
+.agents/skill-evals/narwhal-portal-backend.json` — the pinned `audit-agent-skills.py@44d7efc`
+enforces the stricter policy from openforge#54's own comment thread (openforge#56: "`verified`/
+`stable` now require `.agents/skill-evals/<skill>.json` using
+`openforge-agent-skill-verification/v1`"), which this replay's first pass missed. Added
+`.agents/skill-evals/narwhal-portal-backend.json` following the same schema already used by the
+sibling `narwhal-portal-frontend.json`/`narwhal-portal-qa.json` evidence files, referencing this
+document's happy-path/edge-case sections and the three deterministic checks above. Re-ran the
+audit script locally against the corrected tree and confirmed no `SKILL-VERIFICATION-*` finding
+remains (the only residual findings are the macOS case-insensitive-filesystem duplicates
+described above, which do not reproduce on the Linux CI runner).
+
 ## Decision
 
 `openforge-maturity`: **draft -> verified**.
