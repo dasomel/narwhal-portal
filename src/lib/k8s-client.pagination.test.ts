@@ -142,8 +142,24 @@ describe("listBounded (portal#52)", () => {
     const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 10 })
 
     expect(mockFetch).toHaveBeenCalledTimes(4)
-    // Partial: only the items collected during the (also-failed) restart attempt.
+    // Partial: only the items (and page count) collected during the
+    // (also-failed) restart attempt — not 0, and not the discarded first attempt.
     expect(result.items.map((i) => i.metadata.name)).toEqual(["a"])
+    expect(result.pages).toBe(1)
+    expect(result.truncated).toBe(true)
+  })
+
+  it("reports items:[] and pages:0 when the restart 410s on its very first page", async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
+      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
+
+    const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 10 })
+
+    expect(mockFetch).toHaveBeenCalledTimes(3)
+    expect(result.items).toEqual([])
+    expect(result.pages).toBe(0)
     expect(result.truncated).toBe(true)
   })
 

@@ -127,8 +127,8 @@ export async function listBounded<T>(path: string, opts: ListBoundedOptions = {}
       } catch (err) {
         if (err instanceof K8sHttpError && err.status === 410) {
           // Signal the caller to restart; distinguish "expired mid-pagination"
-          // (items collected so far) from other failures, which just propagate.
-          throw new ListBoundedGoneError<T>(items)
+          // (items + pages collected so far) from other failures, which just propagate.
+          throw new ListBoundedGoneError<T>(items, pages)
         }
         throw err
       }
@@ -145,15 +145,17 @@ export async function listBounded<T>(path: string, opts: ListBoundedOptions = {}
       return await fetchPages()
     } catch (retryErr) {
       if (!(retryErr instanceof ListBoundedGoneError)) throw retryErr
-      // Expired again on the restart — report what we have rather than fail the caller.
-      return { items: (retryErr as ListBoundedGoneError<T>).items, truncated: true, pages: 0 }
+      // Expired again on the restart — report what we have (including pages
+      // actually collected during the restart) rather than fail the caller.
+      const gone = retryErr as ListBoundedGoneError<T>
+      return { items: gone.items, truncated: true, pages: gone.pages }
     }
   }
 }
 
 /** Internal signal from fetchPages: the continue token expired (410) mid-page. */
 class ListBoundedGoneError<T> extends Error {
-  constructor(public readonly items: T[]) {
+  constructor(public readonly items: T[], public readonly pages: number) {
     super("continue token expired (410 Gone)")
   }
 }
