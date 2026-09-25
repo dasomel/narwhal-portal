@@ -2,6 +2,7 @@ import { cacheDel, cacheGet, cacheSet } from "./valkey"
 import { getUserScope, type OwnershipMismatch } from "./role-filter"
 import { getEffectiveScope, namespaceVisible } from "./scope"
 import { getDependencyUrl, isProduction } from "./config"
+import { fetchWithPolicy } from "./http-client"
 
 function argocdUrl(): string {
   return getDependencyUrl("ARGOCD_URL", "http://localhost:8080")
@@ -77,14 +78,16 @@ export interface ArgoApp {
   }
 }
 
-async function argoFetch(path: string, timeout = 5000): Promise<Response> {
+async function argoFetch(path: string, timeoutMs = 5000): Promise<Response> {
   const token = getArgoToken()
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeout)
-  const res = await fetch(`${argocdUrl()}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    signal: controller.signal,
-  }).finally(() => clearTimeout(timer))
+  // portal#48: timeout + bounded retry (GET is idempotent, so a 502/503/504/429
+  // or a network blip gets retried automatically) now come from the shared
+  // client instead of a per-call AbortController/setTimeout pair.
+  const res = await fetchWithPolicy(
+    `${argocdUrl()}${path}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+    { timeoutMs }
+  )
   if (res.status === 401) {
     throw new ArgoCDCredentialError(
       `ArgoCD request rejected (HTTP ${res.status}): check ARGOCD_TOKEN`
@@ -234,14 +237,19 @@ export async function getArgoAppFresh(name: string): Promise<ArgoApp | null> {
 
 export async function syncArgoApp(name: string): Promise<SyncResult> {
   const token = getArgoToken()
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 10000)
-  const res = await fetch(`${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/sync`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-    signal: controller.signal,
-  }).finally(() => clearTimeout(timer))
+  // POST is a mutation (triggers a real sync) — never auto-retried, even on a
+  // 502/503/504, so the shared client's retry gate never engages here anyway;
+  // `retry: false` just makes that explicit instead of relying on the method
+  // check alone.
+  const res = await fetchWithPolicy(
+    `${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/sync`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+    { timeoutMs: 10000, retry: false }
+  )
 
   if (res.status === 401) {
     throw new ArgoCDCredentialError(
@@ -265,11 +273,18 @@ export async function syncArgoApp(name: string): Promise<SyncResult> {
 export async function rollbackArgoApp(name: string, id: number): Promise<boolean> {
   const token = getArgoToken()
   try {
-    const res = await fetch(`${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/rollback`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    })
+    // Previously had no timeout at all — inherits the shared client's default
+    // (10s, matching syncArgoApp) rather than being able to hang indefinitely.
+    // POST, so never retried.
+    const res = await fetchWithPolicy(
+      `${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/rollback`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      },
+      { timeoutMs: 10000, retry: false }
+    )
     if (res.status === 401) {
       throw new ArgoCDCredentialError(
         `ArgoCD rollback rejected (HTTP ${res.status}): check ARGOCD_TOKEN`

@@ -1,5 +1,6 @@
 import { cacheGet, cacheSet } from "./valkey"
 import { assertHttpsInProduction, getDependencyUrl, isProduction } from "./config"
+import { fetchWithPolicy } from "./http-client"
 
 // Gitea client for the one thing the portal writes: a namespace request.
 //
@@ -75,14 +76,22 @@ export class GiteaError extends Error {
 
 async function api<T>(path: string, init: RequestInit): Promise<T> {
   const token = getGiteaToken()
-  const res = await fetch(`${getGiteaUrl()}/api/v1${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `token ${token}`,
-      ...(init.headers as Record<string, string> | undefined),
+  // Every current caller of this helper is a POST that creates a commit or a
+  // pull request — never safe to retry automatically (a retried commit/PR
+  // create could double up), so retry is off explicitly rather than relying
+  // only on the shared client's idempotent-method gate.
+  const res = await fetchWithPolicy(
+    `${getGiteaUrl()}/api/v1${path}`,
+    {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `token ${token}`,
+        ...(init.headers as Record<string, string> | undefined),
+      },
     },
-  })
+    { timeoutMs: 10000, retry: false }
+  )
   if (res.status === 401) {
     throw new GiteaCredentialError(
       `Gitea request rejected (HTTP ${res.status}): check GITEA_TOKEN`
@@ -247,15 +256,19 @@ export async function getCommitTimestamp(sha: string): Promise<string | null> {
 
   try {
     const token = getGiteaToken()
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 5000)
     const url = `${getGiteaUrl()}/api/v1/repos/${GITEA_OWNER}/${GITEA_REPO}/git/commits/${encodeURIComponent(sha)}`
 
-    const res = await fetch(url, {
-      next: { revalidate: 0 },
-      signal: controller.signal,
-      headers: token ? { Authorization: `token ${token}` } : {},
-    }).finally(() => clearTimeout(timer))
+    // GET, so the shared client's default retry (idempotent + retryable
+    // failures only) applies — a transient 503/network blip no longer costs
+    // this sha's DORA lead-time datapoint outright.
+    const res = await fetchWithPolicy(
+      url,
+      {
+        next: { revalidate: 0 },
+        headers: token ? { Authorization: `token ${token}` } : {},
+      },
+      { timeoutMs: 5000 }
+    )
 
     if (res.status === 401) {
       throw new GiteaCredentialError(
