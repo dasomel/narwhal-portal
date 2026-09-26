@@ -39,7 +39,9 @@ export async function GET() {
     )
   }
 
-  const cacheKey = "governance:audit"
+  // New key: entries cached under the old "governance:audit" key carry the removed `actor`
+  // field and lack evidenceKind/reportingComponent, so they must not be served after deploy.
+  const cacheKey = "governance:operational-events:v2"
   const cached = await cacheGet<OperationalEventEntry[]>(cacheKey)
   if (cached) return NextResponse.json(cached)
 

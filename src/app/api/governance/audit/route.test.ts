@@ -59,6 +59,16 @@ describe("GET /api/governance/audit — role gate", () => {
   })
 })
 
+describe("GET /api/governance/audit — cache key (#16)", () => {
+  it("never reads the pre-#16 'governance:audit' cache entry, whose shape carried actor", async () => {
+    vi.mocked(getEvents).mockResolvedValue([fakeEvent()])
+    await GET()
+    const keys = vi.mocked(cacheGet).mock.calls.map(([k]) => k)
+    expect(keys).not.toContain("governance:audit")
+    expect(vi.mocked(cacheSet).mock.calls[0]?.[0]).toBe("governance:operational-events:v2")
+  })
+})
+
 describe("GET /api/governance/audit — operational-event labeling (#16)", () => {
   it("marks every entry as an operational event, never audit evidence", async () => {
     vi.mocked(getEvents).mockResolvedValue([fakeEvent()])
