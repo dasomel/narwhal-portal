@@ -14,13 +14,13 @@ import { claimIdempotencyKey, getIdempotencyStore } from "./idempotency"
 import type { LiveEventIngest, LiveEventType, LiveSeverity } from "@/types/live"
 import type { EventResource } from "@/types/event-envelope"
 
-function useBearer(apiServer: string): boolean {
+function needsBearerToken(apiServer: string): boolean {
   return apiServer.startsWith("https://")
 }
 
 /** True if the informer has a usable bearer token for `apiServer` right now — used both to decide whether to start and to log a clear disable reason instead of crashing on a production misconfiguration. */
 function hasBearerToken(apiServer: string): boolean {
-  if (!useBearer(apiServer)) return false
+  if (!needsBearerToken(apiServer)) return false
   try {
     return getK8sBearerToken().length > 0
   } catch {
@@ -57,7 +57,7 @@ interface K8sEvent {
 
 function headers(apiServer: string): Record<string, string> {
   const h: Record<string, string> = { Accept: "application/json" }
-  if (useBearer(apiServer)) {
+  if (needsBearerToken(apiServer)) {
     const token = getK8sBearerToken()
     if (token.length > 0) h.Authorization = `Bearer ${token}`
   }

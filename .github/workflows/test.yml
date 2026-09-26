@@ -1,14 +1,16 @@
 name: Unit Test Gate
 
-# Runs the Vitest regression suite (468+ tests covering RBAC, cluster/team scope,
-# event idempotency, and other security-critical paths) on every change to
-# application source, so a broken suite blocks merge instead of only being
-# discoverable by running it by hand.
+# Runs typecheck, lint, and the Vitest regression suite (619+ tests covering RBAC,
+# cluster/team scope, event idempotency, and other security-critical paths) on every
+# change to application source, so a broken suite or lint error blocks merge instead
+# of only being discoverable by running it by hand.
 #
 # WHY THIS EXISTS: `pnpm test` (vitest run) was a defined script with a real,
 # growing suite behind it, but no workflow ever invoked it — build-check.yml only
 # type-checks and builds, and neither runs on src/** changes. A regression in
 # authz/event logic could land on main with zero automated signal. See portal #18.
+# The lint step (`pnpm lint`, eslint.config.mjs) was added in the same issue: the
+# repo had no ESLint config or lint script at all before this.
 
 on:
   push:
@@ -19,6 +21,7 @@ on:
       - "pnpm-lock.yaml"
       - "vitest.config.*"
       - "tsconfig.json"
+      - "eslint.config.mjs"
       - ".github/workflows/test.yml"
   pull_request:
     paths:
@@ -27,6 +30,7 @@ on:
       - "pnpm-lock.yaml"
       - "vitest.config.*"
       - "tsconfig.json"
+      - "eslint.config.mjs"
       - ".github/workflows/test.yml"
 
 concurrency:
@@ -71,6 +75,9 @@ jobs:
 
       - name: Type-check
         run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
 
       - name: Unit / API tests
         run: pnpm test

@@ -60,6 +60,18 @@ type SortKey = "id" | "cpu" | "memory" | "storage" | "monthly"
 type SortDir = "asc" | "desc"
 type ScopeView = "namespace" | "service"
 
+// Hoisted out of CostBreakdownTable's render body: a component declared inside render
+// is recreated every render, resetting its (nonexistent, but future) local state and
+// forcing a full remount of the icon each time (react-hooks/static-components).
+function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; sortDir: SortDir }) {
+  if (sortKey !== col) return <span className="ml-1 text-muted-foreground/40">↕</span>
+  return (
+    <span className="ml-1 text-foreground">
+      {sortDir === "asc" ? "↑" : "↓"}
+    </span>
+  )
+}
+
 export function CostBreakdownTable() {
   const t = useT()
   const router = useRouter()
@@ -116,15 +128,6 @@ export function CostBreakdownTable() {
       return
     }
     router.push(`/catalog?namespace=${encodeURIComponent(item.id)}`)
-  }
-
-  function SortIcon({ col }: { col: SortKey }) {
-    if (sortKey !== col) return <span className="ml-1 text-muted-foreground/40">↕</span>
-    return (
-      <span className="ml-1 text-foreground">
-        {sortDir === "asc" ? "↑" : "↓"}
-      </span>
-    )
   }
 
   return (
@@ -234,7 +237,7 @@ export function CostBreakdownTable() {
                   }}
                 >
                   {scopeView === "namespace" ? t("cost.namespace") : t("cost.service")}
-                  <SortIcon col="id" />
+                  <SortIcon col="id" sortKey={sortKey} sortDir={sortDir} />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
@@ -250,7 +253,7 @@ export function CostBreakdownTable() {
                   }}
                 >
                   {t("cost.cpuHourlyShort")}
-                  <SortIcon col="cpu" />
+                  <SortIcon col="cpu" sortKey={sortKey} sortDir={sortDir} />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
@@ -266,7 +269,7 @@ export function CostBreakdownTable() {
                   }}
                 >
                   {t("cost.memoryHourlyShort")}
-                  <SortIcon col="memory" />
+                  <SortIcon col="memory" sortKey={sortKey} sortDir={sortDir} />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
@@ -282,7 +285,7 @@ export function CostBreakdownTable() {
                   }}
                 >
                   {t("cost.storageHourlyShort")}
-                  <SortIcon col="storage" />
+                  <SortIcon col="storage" sortKey={sortKey} sortDir={sortDir} />
                 </TableHead>
                 <TableHead
                   className="cursor-pointer select-none text-right"
@@ -298,7 +301,7 @@ export function CostBreakdownTable() {
                   }}
                 >
                   {t("cost.monthlyEstimate")}
-                  <SortIcon col="monthly" />
+                  <SortIcon col="monthly" sortKey={sortKey} sortDir={sortDir} />
                 </TableHead>
               </TableRow>
             </TableHeader>

@@ -78,16 +78,6 @@ export function RbacTable() {
     enabled: role === "cluster-admin",
   })
 
-  if (role !== "cluster-admin") {
-    return (
-      <Card className="p-5">
-        <div className="h-24 flex items-center justify-center text-sm text-muted-foreground">
-          {t("rbac.forbidden")}
-        </div>
-      </Card>
-    )
-  }
-
   const bindings = data?.bindings ?? []
   const summary = data?.summary ?? {
     total: 0,
@@ -133,6 +123,18 @@ export function RbacTable() {
       return sortDir === "asc" ? cmp : -cmp
     })
   }, [filtered, sortKey, sortDir])
+
+  // Moved below all hook calls: an early return here would call `useMemo` above
+  // conditionally on `role`, which violates the Rules of Hooks (react-hooks/rules-of-hooks).
+  if (role !== "cluster-admin") {
+    return (
+      <Card className="p-5">
+        <div className="h-24 flex items-center justify-center text-sm text-muted-foreground">
+          {t("rbac.forbidden")}
+        </div>
+      </Card>
+    )
+  }
 
   const getTranslatedReason = (reason: string) => {
     const key = `rbac.reason.${reason}` as any
