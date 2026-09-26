@@ -1,4 +1,3 @@
-// TODO(wrap-up): i18n keys for ko/en — see spec §5.7
 import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { getArgoApp, appToCatalogService } from "@/lib/argocd"
