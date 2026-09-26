@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getToolsForRole } from "@/lib/tools"
 import { cacheGet, cacheSet } from "@/lib/valkey"
-import { cacheKeys } from "@/lib/cache-keys"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { auth } from "@/lib/auth"
 import type { UserRole } from "@/lib/auth"
 
@@ -34,6 +34,6 @@ export async function GET() {
     tools.map(async (tool) => [tool.id, await checkHealth(tool.url)])
   )
   const health = Object.fromEntries(results)
-  await cacheSet(cacheKey, health, 30)
+  await cacheSet(cacheKey, health, cacheTtl("toolsHealth"))
   return NextResponse.json(health)
 }

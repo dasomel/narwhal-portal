@@ -2,7 +2,7 @@ import "server-only"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"
 import { cacheGet, cacheSet } from "./valkey"
-import { cacheKeys } from "./cache-keys"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import type {
   Severity,
   CheckSummary,
@@ -250,7 +250,7 @@ export async function getConfigAuditList(): Promise<ConfigAuditRow[]> {
         accepted: isSystemNamespace(namespace),
       }
     })
-    await cacheSet(cacheKey, rows, 60)
+    await cacheSet(cacheKey, rows, cacheTtl("complianceConfigAuditList"))
     return rows
   } catch (err) {
     console.warn("[compliance] getConfigAuditList failed:", err instanceof Error ? err.message : err)
@@ -292,7 +292,7 @@ export async function getConfigAuditDetail(
       accepted: isSystemNamespace(rNamespace),
       checks,
     }
-    await cacheSet(cacheKey, detail, 60)
+    await cacheSet(cacheKey, detail, cacheTtl("complianceConfigAuditDetail"))
     return detail
   } catch (err) {
     console.warn("[compliance] getConfigAuditDetail failed:", err instanceof Error ? err.message : err)
@@ -330,7 +330,7 @@ export async function getRbacAuditList(): Promise<RbacAuditRow[]> {
         accepted: isAcceptedRbacRole(name),
       }
     })
-    await cacheSet(cacheKey, rows, 60)
+    await cacheSet(cacheKey, rows, cacheTtl("complianceRbacAuditList"))
     return rows
   } catch (err) {
     console.warn("[compliance] getRbacAuditList failed:", err instanceof Error ? err.message : err)
@@ -378,7 +378,7 @@ export async function getRbacAuditDetail(
       accepted: isAcceptedRbacRole(rName),
       checks,
     }
-    await cacheSet(cacheKey, detail, 60)
+    await cacheSet(cacheKey, detail, cacheTtl("complianceRbacAuditDetail"))
     return detail
   } catch (err) {
     console.warn("[compliance] getRbacAuditDetail failed:", err instanceof Error ? err.message : err)
@@ -412,7 +412,7 @@ export async function getInfraAuditList(): Promise<InfraAuditRow[]> {
         summary: buildCheckSummaryFromCounts(item.report.summary),
       }
     })
-    await cacheSet(cacheKey, rows, 60)
+    await cacheSet(cacheKey, rows, cacheTtl("complianceInfraAuditList"))
     return rows
   } catch (err) {
     console.warn("[compliance] getInfraAuditList failed:", err instanceof Error ? err.message : err)
@@ -453,7 +453,7 @@ export async function getInfraAuditDetail(node: string): Promise<InfraAuditDetai
       summary: buildCheckSummaryFromCounts(item.report.summary),
       checks,
     }
-    await cacheSet(cacheKey, detail, 60)
+    await cacheSet(cacheKey, detail, cacheTtl("complianceInfraAuditDetail"))
     return detail
   } catch (err) {
     console.warn("[compliance] getInfraAuditDetail failed:", err instanceof Error ? err.message : err)
@@ -488,7 +488,7 @@ export async function getComplianceFrameworks(): Promise<ComplianceFramework[]> 
         passRate,
       }
     })
-    await cacheSet(cacheKey, frameworks, 60)
+    await cacheSet(cacheKey, frameworks, cacheTtl("complianceFrameworksList"))
     return frameworks
   } catch (err) {
     console.warn("[compliance] getComplianceFrameworks failed:", err instanceof Error ? err.message : err)
@@ -559,7 +559,7 @@ export async function getComplianceFrameworkDetail(
       passRate,
       controls,
     }
-    await cacheSet(cacheKey, detail, 60)
+    await cacheSet(cacheKey, detail, cacheTtl("complianceFrameworksDetail"))
     return detail
   } catch (err) {
     console.warn("[compliance] getComplianceFrameworkDetail failed:", err instanceof Error ? err.message : err)
@@ -659,7 +659,7 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
       scannedNodes: infraAuditList.length,
       lastUpdated,
     }
-    await cacheSet(cacheKey, result, 60)
+    await cacheSet(cacheKey, result, cacheTtl("complianceSummary"))
     return result
   } catch (err) {
     console.warn("[compliance] getComplianceSummary failed:", err instanceof Error ? err.message : err)

@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoApps } from "@/lib/argocd"
 import { getAlerts } from "@/lib/alertmanager"
 import { cacheGet, cacheSet } from "@/lib/valkey"
-import { cacheKeys } from "@/lib/cache-keys"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { alertVisible, appVisible, getEffectiveScope } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
@@ -118,7 +118,7 @@ export async function GET(request: Request) {
 
     // Only cache the unfiltered result
     if (!sinceDate) {
-      await cacheSet(cacheKey, result, 15)
+      await cacheSet(cacheKey, result, cacheTtl("eventsTimeline"))
     }
 
     return NextResponse.json(result)

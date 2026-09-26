@@ -5,7 +5,7 @@
  * Prometheus 미응답 시 빈 그래프 + notice를 반환 (graceful degradation).
  */
 import { cacheGet, cacheSet } from "./valkey"
-import { cacheKeys } from "./cache-keys"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getArgoApps } from "./argocd"
 import type { ScoreTier } from "./argocd"
 import { getDependencyUrl } from "./config"
@@ -540,6 +540,6 @@ export async function getServiceDependencies(
   }
 
   // 1분 TTL (spec §4.5)
-  await cacheSet(cacheKey, result, 60)
+  await cacheSet(cacheKey, result, cacheTtl("serviceGraphSvc"))
   return result
 }

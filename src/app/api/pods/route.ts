@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth"
 import { getK8sApiServer } from "@/lib/config"
 import { getK8sBearerToken } from "@/lib/k8s-token"
 import { cacheGet, cacheSet } from "@/lib/valkey"
-import { cacheKeys } from "@/lib/cache-keys"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { ValidationError, toValidationErrorBody, assertK8sNamespace } from "@/lib/validation"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 
@@ -67,7 +67,7 @@ async function fetchPodsByNamespace(namespace: string, instance?: string): Promi
     nodeName: p.spec.nodeName ?? "",
   }))
 
-  await cacheSet(cacheKey, pods, 15)
+  await cacheSet(cacheKey, pods, cacheTtl("podsList"))
   return pods
 }
 

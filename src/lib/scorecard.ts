@@ -2,7 +2,7 @@ import yaml from "js-yaml"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"
 import { cacheGet, cacheSet } from "./valkey"
-import { cacheKeys } from "./cache-keys"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getArgoApps, getArgoApp } from "./argocd"
 
 const SCORECARD_CM_NAME = process.env.SCORECARD_CONFIGMAP_NAME ?? "narwhal-scorecard-rules"
@@ -96,7 +96,7 @@ export async function loadRules(): Promise<ScorecardRulesDoc> {
   if (!rawYaml) throw new Error("ConfigMap missing rules.yaml key")
 
   const doc = yaml.load(rawYaml) as ScorecardRulesDoc
-  await cacheSet(cacheKey, doc, 300) // 5 min
+  await cacheSet(cacheKey, doc, cacheTtl("scorecardRules"))
   return doc
 }
 
@@ -399,7 +399,7 @@ export async function evaluateService(serviceId: string): Promise<ScorecardEvalu
     evaluationComplete: unavailable.length === 0,
   }
 
-  await cacheSet(cacheKey, evaluation, 300) // 5 min
+  await cacheSet(cacheKey, evaluation, cacheTtl("scorecardDetail"))
   return evaluation
 }
 
@@ -426,6 +426,6 @@ export async function evaluateAll(
     evals = evals.filter((e) => e.tier === tierFilter)
   }
 
-  await cacheSet(cacheKey, evals, 60) // 1 min
+  await cacheSet(cacheKey, evals, cacheTtl("scorecardAll"))
   return evals
 }

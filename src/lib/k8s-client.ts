@@ -1,5 +1,5 @@
 import { cacheGet, cacheSet, cacheDel } from "./valkey"
-import { cacheKeys } from "./cache-keys"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { K8S_RECOMMENDED_KERNEL_PARAMS } from "./kernel-params"
 import { assertK8sName, assertK8sNamespace, assertK8sNodeName, safeK8sSegment } from "./validation"
 import { getK8sApiServer } from "./config"
@@ -247,7 +247,7 @@ export async function getLiveCniPlugin(): Promise<CniPluginInfo | null> {
       autoApply: "kubectl",
     },
   }
-  await cacheSet(cacheKeys.k8sCniPlugin(), info, 60)
+  await cacheSet(cacheKeys.k8sCniPlugin(), info, cacheTtl("k8sCniPlugin"))
   return info
 }
 
@@ -299,7 +299,7 @@ export async function getLiveKubeletConfig(nodeName: string): Promise<KubeletCon
     if ("registryPullQPS" in kc) out.push(pick("registryPullQPS", kc.registryPullQPS, { ko: "이미지 레지스트리 Pull QPS 한도", en: "Image registry pull QPS limit" }, { ko: "레지스트리 레이트리밋 초과 방지", en: "Prevent registry rate limit violations" }))
 
     if (out.length === 0) return null
-    await cacheSet(cacheKeys.k8sKubeletConfig(nodeName), out, 60)
+    await cacheSet(cacheKeys.k8sKubeletConfig(nodeName), out, cacheTtl("k8sKubeletConfig"))
     return out
   } catch {
     return null
@@ -342,7 +342,7 @@ export async function getNamespaces(): Promise<NamespaceInfo[]> {
       console.warn(`[k8s] Namespaces list truncated after ${DEFAULT_LIST_MAX_PAGES} pages — some namespaces are missing`)
     }
     const ns = items.map(toNamespaceInfo)
-    await cacheSet(cacheKeys.k8sNamespaces(), ns, 30)
+    await cacheSet(cacheKeys.k8sNamespaces(), ns, cacheTtl("k8sNamespaces"))
     return ns
   } catch (err) {
     console.warn("[k8s] Namespaces fetch failed:", (err as Error).message)
@@ -431,7 +431,7 @@ export async function getRbacBindings(): Promise<RbacBinding[]> {
         bindings.push({ name: i.metadata.name, namespace: i.metadata.namespace, scope: "namespace", roleRef: i.roleRef, subjects: i.subjects ?? [] })
       }
     }
-    await cacheSet(cacheKeys.k8sRbac(), bindings, 30)
+    await cacheSet(cacheKeys.k8sRbac(), bindings, cacheTtl("k8sRbac"))
     return bindings
   } catch (err) {
     console.warn("[k8s] RBAC fetch failed:", (err as Error).message)
@@ -534,7 +534,7 @@ export async function getEvents(namespace?: string): Promise<K8sEvent[]> {
       reportingComponent: i.reportingComponent,
       source: i.source,
     }))
-    await cacheSet(cacheKey, events, 15)
+    await cacheSet(cacheKey, events, cacheTtl("k8sEventsAll"))
     return events
   } catch {
     return []
@@ -590,7 +590,7 @@ export async function getCertificates(): Promise<Certificate[]> {
   try {
     const data = await k8sFetch<CertificateList>("/apis/cert-manager.io/v1/certificates")
     const certs = data.items.map(mapCertificate)
-    await cacheSet(cacheKeys.k8sCerts(), certs, 60)
+    await cacheSet(cacheKeys.k8sCerts(), certs, cacheTtl("k8sCerts"))
     return certs
   } catch (err) {
     console.warn("[k8s] Certificates fetch failed:", (err as Error).message)
@@ -688,7 +688,7 @@ export async function getKyvernoPolicies(): Promise<KyvernoPolicy[]> {
       ...(cluster.status === "fulfilled" ? cluster.value.items.map((i) => mapPolicy(i, "cluster")) : []),
       ...(namespaced.status === "fulfilled" ? namespaced.value.items.map((i) => mapPolicy(i, "namespace")) : []),
     ]
-    await cacheSet(cacheKeys.k8sKyverno(), policies, 30)
+    await cacheSet(cacheKeys.k8sKyverno(), policies, cacheTtl("k8sKyverno"))
     return policies
   } catch (err) {
     console.warn("[k8s] Kyverno policies fetch failed:", (err as Error).message)
@@ -722,7 +722,7 @@ export async function getApiServerPods(): Promise<ApiServerPodInfo[]> {
       name: p.metadata.name,
       containerArgs: (p.spec.containers ?? []).flatMap((c) => [...(c.command ?? []), ...(c.args ?? [])]),
     }))
-    await cacheSet(cacheKeys.k8sApiserverPods(), pods, 60)
+    await cacheSet(cacheKeys.k8sApiserverPods(), pods, cacheTtl("k8sApiserverPods"))
     return pods
   } catch (err) {
     console.warn("[k8s] API server pods fetch failed:", (err as Error).message)
@@ -752,7 +752,7 @@ export async function getNodeReadiness(): Promise<NodeReadiness> {
       n.status.conditions.some((c) => c.type === "Ready" && c.status === "True"),
     ).length
     const result: NodeReadiness = { total: items.length, ready }
-    await cacheSet(cacheKeys.k8sNodeReadiness(), result, 30)
+    await cacheSet(cacheKeys.k8sNodeReadiness(), result, cacheTtl("k8sNodeReadiness"))
     return result
   } catch (err) {
     console.warn("[k8s] node readiness fetch failed:", (err as Error).message)
@@ -791,7 +791,7 @@ export async function getControlPlaneHealth(): Promise<ControlPlanePodHealth[]> 
       status: phaseMap[p.status.phase] ?? "Pending",
       restarts: p.status.containerStatuses?.reduce((s, c) => s + c.restartCount, 0) ?? 0,
     }))
-    await cacheSet(cacheKeys.k8sControlPlaneHealth(), pods, 30)
+    await cacheSet(cacheKeys.k8sControlPlaneHealth(), pods, cacheTtl("k8sControlPlaneHealth"))
     return pods
   } catch (err) {
     console.warn("[k8s] control-plane health fetch failed:", (err as Error).message)
@@ -834,7 +834,7 @@ export async function getNetworkPolicies(): Promise<NetworkPolicyInfo[]> {
         podSelectorEmpty,
       }
     })
-    await cacheSet(cacheKeys.k8sNetpol(), policies, 30)
+    await cacheSet(cacheKeys.k8sNetpol(), policies, cacheTtl("k8sNetpol"))
     return policies
   } catch (err) {
     console.warn("[k8s] NetworkPolicies fetch failed:", (err as Error).message)
@@ -1274,7 +1274,7 @@ export async function getNodeDetail(name: string): Promise<NodeDetail | null> {
       }
     }
 
-    await cacheSet(cacheKey, detail, 30)
+    await cacheSet(cacheKey, detail, cacheTtl("k8sNode"))
     return detail
   } catch (err) {
     console.warn(`[k8s] Node detail fetch failed for ${name}:`, (err as Error).message)

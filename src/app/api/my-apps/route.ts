@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoApps } from "@/lib/argocd"
 import { getAlerts } from "@/lib/alertmanager"
 import { cacheGet, cacheSet } from "@/lib/valkey"
-import { cacheKeys } from "@/lib/cache-keys"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { alertVisible, appVisible, getEffectiveScope, type EffectiveScope } from "@/lib/scope"
 import type { ArgoCDApp, HeroIncident, HeroAction, HeroMode, MascotState } from "@/types/api"
 import type { TimelineEvent } from "@/app/api/events/route"
@@ -271,7 +271,7 @@ export async function GET(): Promise<NextResponse<MyAppsResponse | { error: stri
       hero: emptyHero,
       generatedAt: new Date().toISOString(),
     }
-    await cacheSet(cacheKey, response, 15)
+    await cacheSet(cacheKey, response, cacheTtl("myApps"))
     return NextResponse.json(response)
   }
 
@@ -332,7 +332,7 @@ export async function GET(): Promise<NextResponse<MyAppsResponse | { error: stri
       generatedAt: new Date().toISOString(),
     }
 
-    await cacheSet(cacheKey, response, 15)
+    await cacheSet(cacheKey, response, cacheTtl("myApps"))
     return NextResponse.json(response)
   } catch (err) {
     console.error("[api/my-apps]", err)

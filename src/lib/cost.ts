@@ -6,7 +6,7 @@
  */
 
 import { cacheGet, cacheSet } from "./valkey"
-import { cacheKeys } from "./cache-keys"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { namespaceVisible, type EffectiveScope } from "./scope"
 import { getDependencyUrl, isProduction } from "./config"
 // portal#64 AC3/AC4: reuse the telemetry vocabulary #51 (ClusterMetricsProjection)
@@ -530,7 +530,7 @@ export async function getCost(
     const storTotal = storRes.filter(visible).reduce((s, r) => s + parseFloat(r.value[1]), 0)
     const items = [calcItem("cluster", cpuTotal, memTotal, storTotal, unitPrices)]
     const result: CostResult = { items, telemetry }
-    if (telemetry.state === "ok") await cacheSet(cacheKey, result, 300) // 5min
+    if (telemetry.state === "ok") await cacheSet(cacheKey, result, cacheTtl("costV2"))
     return result
   }
 
@@ -588,7 +588,7 @@ export async function getCost(
         : { computable: false, gb: null, hourly: null }
 
     const result: CostResult = { items, telemetry, exclusions: { unallocatedStorage } }
-    if (telemetry.state === "ok") await cacheSet(cacheKey, result, 300)
+    if (telemetry.state === "ok") await cacheSet(cacheKey, result, cacheTtl("costV2"))
     return result
   }
 
@@ -723,7 +723,7 @@ export async function getCost(
       telemetry,
       exclusions,
     }
-    if (telemetry.state === "ok" && exclusionsComputable) await cacheSet(cacheKey, result, 300)
+    if (telemetry.state === "ok" && exclusionsComputable) await cacheSet(cacheKey, result, cacheTtl("costV2"))
     return result
   }
   items.sort((a, b) => b.totalHourly - a.totalHourly)
@@ -733,7 +733,7 @@ export async function getCost(
     telemetry,
     exclusions,
   }
-  if (telemetry.state === "ok" && exclusionsComputable) await cacheSet(cacheKey, result, 300)
+  if (telemetry.state === "ok" && exclusionsComputable) await cacheSet(cacheKey, result, cacheTtl("costV2"))
   return result
 }
 
@@ -828,7 +828,7 @@ export async function getCostByService(
   }
   // 크리틱 리뷰 #1: partial(예: topPods 쿼리는 실패, cpu/mem은 성공)도 unavailable과
   // 마찬가지로 캐시하지 않는다 — state==="ok"일 때만 5분 TTL로 캐시한다.
-  if (telemetry.state === "ok") await cacheSet(cacheKey, result, 300)
+  if (telemetry.state === "ok") await cacheSet(cacheKey, result, cacheTtl("costServiceV2"))
   return result
 }
 
@@ -872,7 +872,7 @@ export async function getCostTrend(
       points: [],
       telemetry: { source: "none", queriedAt, state: "empty" },
     }
-    await cacheSet(cacheKey, empty, 3600)
+    await cacheSet(cacheKey, empty, cacheTtl("costTrendV2"))
     return empty
   }
 
@@ -919,6 +919,6 @@ export async function getCostTrend(
 
   const result: CostTrendResult = { points, telemetry }
   // 크리틱 리뷰 #1: partial도 캐시하지 않는다 — state==="ok"일 때만 1시간 TTL로 캐시.
-  if (telemetry.state === "ok") await cacheSet(cacheKey, result, 3600) // 1hour
+  if (telemetry.state === "ok") await cacheSet(cacheKey, result, cacheTtl("costTrendV2"))
   return result
 }

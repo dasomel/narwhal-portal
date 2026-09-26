@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth"
 import { getK8sApiServer } from "@/lib/config"
 import { getK8sBearerToken } from "@/lib/k8s-token"
 import { cacheGet, cacheSet } from "@/lib/valkey"
-import { cacheKeys } from "@/lib/cache-keys"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import {
   assertK8sName,
   assertK8sNamespace,
@@ -104,7 +104,7 @@ export async function GET(
       namespace,
     }
 
-    await cacheSet(cacheKey, result, 5)
+    await cacheSet(cacheKey, result, cacheTtl("podsLogs"))
     return NextResponse.json(result)
   } catch (err) {
     console.error("[api/pods/logs]", err)

@@ -1,6 +1,6 @@
 import "server-only"
 import { cacheGet, cacheSet } from "./valkey"
-import { cacheKeys } from "./cache-keys"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getDependencyUrl } from "./config"
 import { assertLogQLSafe } from "./validation"
 import type { FalcoEvent, FalcoEventPriority } from "@/types/security"
@@ -136,7 +136,7 @@ export async function getRuntimeEvents(opts: GetRuntimeEventsOpts = {}): Promise
 
     const events = await queryLoki(logql, sinceMinutes, limit)
 
-    await cacheSet(cacheKey, events, 30)
+    await cacheSet(cacheKey, events, cacheTtl("falcoEvents"))
     return events
   } catch (err) {
     console.warn("[falco] getRuntimeEvents failed:", err instanceof Error ? err.message : err)
@@ -155,7 +155,7 @@ export async function getCriticalRuntimeAlerts(): Promise<FalcoEvent[]> {
     // the same priority label set by Falcosidekick.
     const events = await getRuntimeEvents({ priority: "Critical", limit: 50 })
 
-    await cacheSet(cacheKey, events, 30)
+    await cacheSet(cacheKey, events, cacheTtl("falcoCritical"))
     return events
   } catch (err) {
     console.warn("[falco] getCriticalRuntimeAlerts failed:", err instanceof Error ? err.message : err)

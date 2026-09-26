@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getRoutes, toggleRoute } from "@/lib/apisix-client"
 import { requireAdmin } from "@/lib/auth"
 import { cacheGet, cacheSet, cacheDel } from "@/lib/valkey"
-import { cacheKeys } from "@/lib/cache-keys"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 
 export const dynamic = "force-dynamic"
 
@@ -17,7 +17,7 @@ export async function GET() {
     if (cached) return NextResponse.json(cached)
 
     const routes = await getRoutes()
-    await cacheSet(cacheKeys.routesList(), routes, 60)
+    await cacheSet(cacheKeys.routesList(), routes, cacheTtl("routesList"))
     return NextResponse.json(routes)
   }
   catch (err) {

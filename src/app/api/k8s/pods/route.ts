@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { getPodsList, PodSummary } from "@/lib/k8s-client"
 import { cacheGet, cacheSet } from "@/lib/valkey"
-import { cacheKeys } from "@/lib/cache-keys"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { ValidationError, toValidationErrorBody, assertK8sNamespace } from "@/lib/validation"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
     const pods = await getPodsList(namespace, app)
     
     try {
-      await cacheSet(cacheKey, pods, 10) // 10s cache
+      await cacheSet(cacheKey, pods, cacheTtl("k8sPods"))
     } catch (err) {
       console.warn("[k8s-pods-api] Cache save failed:", err)
     }

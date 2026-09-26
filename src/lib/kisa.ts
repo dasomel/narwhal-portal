@@ -1,6 +1,6 @@
 import "server-only"
 import { cacheGet, cacheSet } from "./valkey"
-import { cacheKeys } from "./cache-keys"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { KISA_CATALOG } from "./kisa-controls"
 import type { KisaControl, KisaResponse, KisaStatus } from "@/types/kisa"
 
@@ -408,6 +408,6 @@ export async function getKisaControls(): Promise<KisaResponse> {
   }
 
   const result: KisaResponse = { controls, summary }
-  await cacheSet(cacheKey, result, 60)
+  await cacheSet(cacheKey, result, cacheTtl("kisaComplianceList"))
   return result
 }

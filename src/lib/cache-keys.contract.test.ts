@@ -1,8 +1,22 @@
 import { describe, expect, it } from "vitest"
-import { CACHE_NAMESPACES, cacheKeys, type CacheDimension } from "./cache-keys"
+import { BUILDER_CHECKS, CACHE_NAMESPACES, cacheKeys, cacheTtl, type CacheDimension } from "./cache-keys"
 import { clusterCacheKey } from "./cluster-registry"
 
 const SCOPE_LIKE_DIMENSIONS: CacheDimension[] = ["scope", "user", "role", "cluster"]
+
+/** Invoke a `cacheKeys` builder with arbitrary sentinel args (heterogeneous arities/types across builders — `any` is the point here, not an oversight). */
+function invoke(name: keyof typeof cacheKeys, args: readonly unknown[]): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (cacheKeys[name] as (...a: any[]) => string)(...args)
+}
+
+/** A sentinel distinct from `value`, preserving its type so it still fits the builder's parameter. */
+function altSentinel(value: unknown): unknown {
+  if (typeof value === "string") return `${value}-ALT`
+  if (typeof value === "number") return value + 1
+  if (typeof value === "boolean") return !value
+  return value
+}
 
 describe("cache-keys contract (#53)", () => {
   it("every registered namespace declares its dimensions and TTL", () => {
@@ -16,18 +30,89 @@ describe("cache-keys contract (#53)", () => {
 
   // AC: "all security-sensitive/domain caches have documented scope dimensions" —
   // a namespace whose cached VALUE differs by caller identity/team/cluster must
-  // fold that into the key via `scope`, `user`, `role`, or `cluster`. This is the
-  // regression test: a future route that caches a per-caller projection under a
-  // namespace with `securitySensitive: true` but forgets a scope-like dimension
-  // fails here, the same class of bug #49 and #133 each found after the fact.
-  it("every security-sensitive namespace has at least one scope-like dimension", () => {
+  // fold that into the key via `scope`, `user`, `role`, or `cluster`. This check
+  // is deliberately NOT gated on `securitySensitive` (that flag is hand-set and
+  // made an earlier version of this test tautological — it only ever checked
+  // entries someone remembered to flag). Instead it applies to EVERY entry: a
+  // namespace with no scope-like dimension must justify that with a non-empty
+  // `unscopedReason`, so a new caller-scoped cache that forgets both the
+  // dimension AND the flag still fails here.
+  it("every namespace declares a scope-like dimension or an explicit unscopedReason", () => {
+    const offenders: string[] = []
+    for (const [name, spec] of Object.entries(CACHE_NAMESPACES)) {
+      const hasScopeDimension = spec.dimensions.some((d) => SCOPE_LIKE_DIMENSIONS.includes(d))
+      const hasReason = typeof spec.unscopedReason === "string" && spec.unscopedReason.length > 0
+      if (!hasScopeDimension && !hasReason) offenders.push(name)
+    }
+    expect(offenders, `namespaces with no scope-like dimension and no unscopedReason: ${offenders.join(", ")}`).toEqual([])
+  })
+
+  // Same AC, from the builder side: `securitySensitive: true` is still a useful
+  // human-facing flag, but it must agree with the dimensions actually declared —
+  // flip it on without a real scope-like dimension and this catches it too.
+  it("every securitySensitive:true namespace's dimensions actually justify the flag", () => {
     const offenders: string[] = []
     for (const [name, spec] of Object.entries(CACHE_NAMESPACES)) {
       if (!spec.securitySensitive) continue
       const hasScopeDimension = spec.dimensions.some((d) => SCOPE_LIKE_DIMENSIONS.includes(d))
       if (!hasScopeDimension) offenders.push(name)
     }
-    expect(offenders, `security-sensitive namespaces missing a scope/user/role/cluster dimension: ${offenders.join(", ")}`).toEqual([])
+    expect(offenders, `securitySensitive:true but no scope-like dimension: ${offenders.join(", ")}`).toEqual([])
+  })
+
+  // AC: "a new builder can't bypass the registry" — every exported cacheKeys
+  // builder must have a BUILDER_CHECKS entry, and that entry's registryKey must
+  // resolve to a real CACHE_NAMESPACES entry.
+  it("every exported cacheKeys builder is covered by BUILDER_CHECKS and maps to a real registry entry", () => {
+    const builderNames = Object.keys(cacheKeys) as Array<keyof typeof cacheKeys>
+    const checkedNames = Object.keys(BUILDER_CHECKS)
+    const uncovered = builderNames.filter((n) => !checkedNames.includes(n))
+    expect(uncovered, `cacheKeys builders missing a BUILDER_CHECKS entry: ${uncovered.join(", ")}`).toEqual([])
+
+    const danglingRegistryRefs = Object.entries(BUILDER_CHECKS)
+      .filter(([, check]) => !(check.registryKey in CACHE_NAMESPACES))
+      .map(([name, check]) => `${name} -> ${check.registryKey}`)
+    expect(danglingRegistryRefs, `BUILDER_CHECKS entries pointing at a nonexistent registry key: ${danglingRegistryRefs.join(", ")}`).toEqual([])
+  })
+
+  // AC: "call the builder with sentinel values per declared dimension and assert
+  // every sentinel appears in the key (and that two different scope values
+  // produce different keys)". This is the mechanical link between a builder's
+  // ACTUAL output and what BUILDER_CHECKS claims it depends on — a builder that
+  // silently drops an argument, or a dimension mapped to the wrong index, fails
+  // here even though the byte-for-byte test above only checks fixed examples.
+  it("every declared dimension's sentinel appears in the builder's output", () => {
+    const offenders: string[] = []
+    for (const [name, check] of Object.entries(BUILDER_CHECKS) as Array<[keyof typeof cacheKeys, (typeof BUILDER_CHECKS)[keyof typeof cacheKeys]]>) {
+      const key = invoke(name, check.args)
+      for (const [dim, index] of Object.entries(check.dimensionArgIndex)) {
+        const sentinel = String(check.args[index as number])
+        if (!key.includes(sentinel)) offenders.push(`${name}.${dim}@${index}: sentinel "${sentinel}" missing from "${key}"`)
+      }
+    }
+    expect(offenders, offenders.join("\n")).toEqual([])
+  })
+
+  it("varying a scope-like dimension's argument changes the builder's output", () => {
+    const offenders: string[] = []
+    for (const [name, check] of Object.entries(BUILDER_CHECKS) as Array<[keyof typeof cacheKeys, (typeof BUILDER_CHECKS)[keyof typeof cacheKeys]]>) {
+      const baseKey = invoke(name, check.args)
+      for (const [dim, index] of Object.entries(check.dimensionArgIndex)) {
+        if (!SCOPE_LIKE_DIMENSIONS.includes(dim as CacheDimension)) continue
+        const variedArgs = check.args.slice()
+        variedArgs[index as number] = altSentinel(check.args[index as number])
+        const variedKey = invoke(name, variedArgs)
+        if (variedKey === baseKey) offenders.push(`${name}.${dim}@${index}: varying it did not change the key ("${baseKey}")`)
+      }
+    }
+    expect(offenders, offenders.join("\n")).toEqual([])
+  })
+
+  it("cacheTtl resolves every migrated builder's TTL from BUILDER_CHECKS (single source of truth)", () => {
+    for (const name of Object.keys(cacheKeys) as Array<keyof typeof cacheKeys>) {
+      expect(cacheTtl(name)).toBe(BUILDER_CHECKS[name].ttlSeconds)
+      expect(typeof cacheTtl(name)).toBe("number")
+    }
   })
 
   it("no namespace caches a partial/failed provider response by default", () => {
@@ -50,6 +135,12 @@ describe("cross-user/team/cluster cache leakage", () => {
 
   it("governance:dora:v2 keys differ per scope fingerprint", () => {
     expect(cacheKeys.governanceDoraV2("fp-team-a")).not.toBe(cacheKeys.governanceDoraV2("fp-team-b"))
+  })
+
+  // #147: /api/governance/resources became scope-filtered (non-admins reach it
+  // too), so its cache key must carry scope.fingerprint the same way.
+  it("governance:resources:v3 keys differ per scope fingerprint", () => {
+    expect(cacheKeys.governanceResourcesV3("fp-team-a")).not.toBe(cacheKeys.governanceResourcesV3("fp-team-b"))
   })
 
   it("governance:scorecard keys differ per scope fingerprint", () => {

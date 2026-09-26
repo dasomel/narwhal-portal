@@ -67,6 +67,15 @@ export interface CacheNamespaceSpec {
    * cluster-admin-only global view where the value never varies by caller.
    */
   securitySensitive: boolean
+  /**
+   * Required when `dimensions` has no scope-like dimension (`scope`/`user`/
+   * `role`/`cluster`): why that's safe. Checked unconditionally by
+   * `cache-keys.contract.test.ts` for every entry, independent of
+   * `securitySensitive` — a hand-set flag alone made the old test
+   * tautological (it only ever checked entries someone remembered to flag).
+   * Entries that DO have a scope-like dimension don't need this.
+   */
+  unscopedReason?: string
   note?: string
 }
 
@@ -214,7 +223,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "cacheDel on POST (route create/update)",
     cachesPartial: false,
     securitySensitive: false,
-    note: "Cluster-admin-gated global APISIX route list; identical for every caller with access.",
+    unscopedReason: "requireAdmin()-gated; identical route list for every admin.",
   },
   traces: {
     example: "traces:{service}",
@@ -224,6 +233,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Tempo trace search results, not per-caller; `service` is a query filter, not an identity.",
   },
   "tools:health": {
     example: "tools:health:{role}",
@@ -243,7 +253,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    note: "Cluster-wide topology, same for every authenticated caller.",
+    unscopedReason: "Cluster-wide topology, same for every authenticated caller.",
   },
   "k8s:pods": {
     example: "k8s:pods:{namespace}:{app|all}",
@@ -253,7 +263,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    note: "Gate-then-serve: namespaceVisible() is checked on every request before the cache lookup, so the pod list itself never varies by caller — only whether they may read it does.",
+    unscopedReason: "Gate-then-serve: namespaceVisible() is checked on every request before the cache lookup, so the pod list itself never varies by caller — only whether they may read it does.",
   },
   "k8s:events (per-resource)": {
     example: "k8s:events:{namespace}:{name}",
@@ -263,7 +273,10 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    note: "#145 fixed the gap this note used to describe: namespaceVisible() is now checked before the cache lookup, same as /api/k8s/pods and /api/k8s/resource.",
+    // #145 fixed the gap this entry used to describe: namespaceVisible() is
+    // now checked before the cache lookup, same as /api/k8s/pods and
+    // /api/k8s/resource — so this is gate-then-serve like its siblings now.
+    unscopedReason: "Gate-then-serve (portal#145): namespaceVisible() is checked on every request before the cache lookup, same as /api/k8s/pods and /api/k8s/resource.",
   },
   "k8s:resource": {
     example: "k8s:resource:{namespace}:{name}",
@@ -273,7 +286,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    note: "Gate-then-serve, same as k8s:pods.",
+    unscopedReason: "Gate-then-serve, same as k8s:pods.",
   },
   "pods:list": {
     example: "pods:list:{namespace}:{instance|all}",
@@ -283,7 +296,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    note: "Gate-then-serve (portal#33): namespaceVisible() checked before every cache lookup.",
+    unscopedReason: "Gate-then-serve (portal#33): namespaceVisible() checked before every cache lookup.",
   },
   "pods:logs": {
     example: "pods:logs:{namespace}:{pod}:{container}:{tailLines}:{previous}",
@@ -293,7 +306,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    note: "Gate-then-serve, same as pods:list.",
+    unscopedReason: "Gate-then-serve, same as pods:list.",
   },
   "governance:rbac:v2": {
     example: "governance:rbac:v2",
@@ -303,7 +316,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    note: "requireRole('cluster-admin') gate; identical value for every cluster-admin.",
+    unscopedReason: "requireRole('cluster-admin') gate; identical value for every cluster-admin.",
   },
   "governance:resources:v3": {
     example: "governance:resources:v3:{scopeFingerprint}",
@@ -323,6 +336,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "auth()-gated global cluster resource view, identical for every authenticated caller.",
   },
   "governance:operational-events:v2": {
     example: "governance:operational-events:v2",
@@ -332,7 +346,8 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    note: "#144 (portal#16): renamed from governance:audit — this is an operational-events feed, not an audit trail; requireRole('cluster-admin') gate.",
+    unscopedReason: "requireRole('cluster-admin') gate; identical value for every cluster-admin.",
+    note: "#144 (portal#16): renamed from governance:audit — this is an operational-events feed, not an audit trail.",
   },
   "governance:dora:v2": {
     example: "governance:dora:v2:{scopeFingerprint}",
@@ -390,6 +405,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Cluster-wide runtime security events, not per-caller.",
   },
   "falco:critical": {
     example: "falco:critical",
@@ -399,6 +415,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Cluster-wide runtime security events, not per-caller.",
   },
   "compliance:kisa:list": {
     example: "compliance:kisa:list",
@@ -408,6 +425,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Cluster-wide KISA control status, not per-caller.",
   },
   "hero:summary": {
     example: "hero:summary",
@@ -417,6 +435,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Cluster-wide dashboard summary, not per-caller.",
   },
   "cost:v2": {
     example: "cost:v2:{scope}:{scopeFingerprint}:{pricingKey}",
@@ -453,6 +472,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "cacheDel on route mutation",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "requireAdmin()-gated; identical route list for every admin.",
   },
   "prom (query/vector/range/node/cluster)": {
     example: "prom:{clusterId}:{promql}",
@@ -472,6 +492,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Cluster-wide platform status, not per-caller.",
   },
   "security:*": {
     example: "security:summary | security:workloads | security:image:{image} | security:top-vulnerable:{limit}",
@@ -481,7 +502,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    note: "Cluster-wide vulnerability data, not per-caller.",
+    unscopedReason: "Cluster-wide vulnerability data, not per-caller.",
   },
   "scorecard:*": {
     example: "scorecard:rules | scorecard:detail:{rulesVersion}:{serviceId} | scorecard:all:{rulesVersion}:{tierFilter}",
@@ -491,6 +512,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only; keyed by the rules ConfigMap version so a rules change is a cache-key change, not an invalidation",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Rules/evaluation results are per-rules-version, not per-caller — every caller who can reach the route sees the same evaluation for the same service+rules version.",
   },
   "openbao:secrets": {
     example: "openbao:secrets",
@@ -500,7 +522,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    note: "Secret metadata only (paths/keys), never secret values.",
+    unscopedReason: "Secret metadata only (paths/keys), never secret values, and not per-caller.",
   },
   "alerts:active": {
     example: "alerts:active",
@@ -510,6 +532,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Cluster-wide Alertmanager feed, not per-caller (per-caller filtering happens downstream in my-apps/events, which carry their own scope dimension).",
   },
   "compliance:*": {
     example: "compliance:config-audit:list | compliance:config-audit:{namespace}:{name} | compliance:rbac-audit:* | compliance:infra-audit:* | compliance:frameworks:* | compliance:summary",
@@ -519,6 +542,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Cluster-wide compliance audit data, not per-caller.",
   },
   "graph:*": {
     example: "graph:cluster:{window}:{namespace|all} | graph:svc:{serviceId}:{window}",
@@ -528,6 +552,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Cluster-wide service dependency graph, not per-caller.",
   },
   "k8s:* (cluster-state)": {
     example: "k8s:cni-plugin | k8s:kubelet-config:{node} | k8s:namespaces | k8s:rbac | k8s:certs | k8s:kyverno | k8s:apiserver-pods | k8s:node-readiness | k8s:control-plane-health | k8s:netpol | k8s:node:{name} | k8s:events:{namespace|all}",
@@ -537,6 +562,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "cacheDel(k8s:certs) on cert rotation; TTL only otherwise",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Cluster infrastructure state, not per-caller; RBAC/certs/namespaces lists are cluster-admin surfaces gated at the route level.",
     note: "Cluster infrastructure state, not per-caller; RBAC/certs/namespaces lists are cluster-admin surfaces gated at the route level.",
   },
   "keycloak:* / api:groups-enriched": {
@@ -547,6 +573,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "invalidateKeycloakCaches() on every membership/attribute mutation",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Admin-facing user/group directory projections, not per-caller.",
     note: "Not migrated to cacheKeys here — already owns its own centralized key/invalidation module; documented for completeness only.",
   },
   "argocd:apps / argocd:app:{name}": {
@@ -557,6 +584,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "cacheDel on sync",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Cluster-wide ArgoCD application state; per-caller filtering (appVisible) happens downstream at the route level, not in this cache.",
     note: "Out of scope for #53 per task instructions (src/lib/argocd.ts and its route caller are excluded — open PR #143 dependency).",
   },
   "dora:commit:{sha}": {
@@ -567,6 +595,155 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only (commit SHAs are immutable)",
     cachesPartial: false,
     securitySensitive: false,
+    unscopedReason: "Keyed by immutable commit SHA — content-addressed, so there is no caller identity to leak across.",
     note: "Out of scope for #53 per task instructions.",
   },
+}
+
+/**
+ * Per-builder validation entry: which `CACHE_NAMESPACES` family a `cacheKeys`
+ * builder belongs to, its real TTL (the single source of truth call sites
+ * read via `cacheTtl` below — several `CACHE_NAMESPACES` entries above are
+ * documented as `"varies"` because they group multiple builders with
+ * different TTLs; this table carries the exact per-builder number instead),
+ * and which argument index feeds which dimension.
+ *
+ * `dimensionArgIndex` only maps dimensions that correspond 1:1 to a single
+ * argument — some builders take extra non-dimension qualifiers (e.g.
+ * `k8sPods`'s `app`) that aren't part of the documented contract and are
+ * covered by the byte-for-byte reproduction test instead.
+ *
+ * `cache-keys.contract.test.ts` uses this to mechanically verify, for every
+ * exported builder: (1) it's declared here at all — a new builder that
+ * skips this table fails a coverage test; (2) every sentinel value at a
+ * declared dimension's argument index actually appears in the produced key;
+ * (3) varying a scope-like dimension (`scope`/`user`/`role`/`cluster`)
+ * produces a different key.
+ */
+export interface BuilderCheck {
+  registryKey: keyof typeof CACHE_NAMESPACES
+  ttlSeconds: number
+  args: readonly unknown[]
+  dimensionArgIndex: Partial<Record<CacheDimension, number>>
+}
+
+export const BUILDER_CHECKS: Record<keyof typeof cacheKeys, BuilderCheck> = {
+  myApps: { registryKey: "my-apps", ttlSeconds: 15, args: ["user-1", "fp-1"], dimensionArgIndex: { user: 0, scope: 1 } },
+  routesList: { registryKey: "api:routes-list", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  traces: { registryKey: "traces", ttlSeconds: 15, args: ["svc-1"], dimensionArgIndex: { query: 0 } },
+  toolsHealth: { registryKey: "tools:health", ttlSeconds: 30, args: ["role-1"], dimensionArgIndex: { role: 0 } },
+  architectureTopology: { registryKey: "architecture:topology", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+
+  k8sPods: { registryKey: "k8s:pods", ttlSeconds: 10, args: ["ns-1", "app-1"], dimensionArgIndex: { namespace: 0 } },
+  k8sEvents: { registryKey: "k8s:events (per-resource)", ttlSeconds: 10, args: ["ns-1", "name-1"], dimensionArgIndex: { namespace: 0, query: 1 } },
+  k8sResource: { registryKey: "k8s:resource", ttlSeconds: 10, args: ["ns-1", "name-1"], dimensionArgIndex: { namespace: 0 } },
+  podsList: { registryKey: "pods:list", ttlSeconds: 15, args: ["ns-1", "inst-1"], dimensionArgIndex: { namespace: 0 } },
+  podsLogs: {
+    registryKey: "pods:logs",
+    ttlSeconds: 5,
+    args: ["ns-1", "pod-1", "c-1", 200, false],
+    dimensionArgIndex: { namespace: 0, query: 1 },
+  },
+
+  governanceRbacV2: { registryKey: "governance:rbac:v2", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  governanceResourcesV3: { registryKey: "governance:resources:v3", ttlSeconds: 30, args: ["fp-1"], dimensionArgIndex: { scope: 0 } },
+  governanceDistributionV2: { registryKey: "governance:distribution:v2", ttlSeconds: 15, args: [], dimensionArgIndex: {} },
+  governanceOperationalEventsV2: { registryKey: "governance:operational-events:v2", ttlSeconds: 15, args: [], dimensionArgIndex: {} },
+  governanceDoraV2: { registryKey: "governance:dora:v2", ttlSeconds: 120, args: ["fp-1"], dimensionArgIndex: { scope: 0 } },
+  governanceScorecard: { registryKey: "governance:scorecard", ttlSeconds: 30, args: ["fp-1"], dimensionArgIndex: { scope: 0 } },
+
+  eventsTimeline: { registryKey: "events:timeline", ttlSeconds: 15, args: ["fp-1"], dimensionArgIndex: { scope: 0 } },
+
+  falcoEvents: { registryKey: "falco:events", ttlSeconds: 30, args: ["Critical", 60, 100], dimensionArgIndex: { query: 0 } },
+  falcoCritical: { registryKey: "falco:critical", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+
+  kisaComplianceList: { registryKey: "compliance:kisa:list", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+
+  heroSummary: { registryKey: "hero:summary", ttlSeconds: 10, args: [], dimensionArgIndex: {} },
+
+  costV2: { registryKey: "cost:v2", ttlSeconds: 300, args: ["cluster", "fp-1", "price-1"], dimensionArgIndex: { query: 0, scope: 1 } },
+  costServiceV2: {
+    registryKey: "cost:service:v2",
+    ttlSeconds: 300,
+    args: ["fp-1", "ns-1", "svc-1", "price-1"],
+    dimensionArgIndex: { scope: 0, query: 1 },
+  },
+  costTrendV2: {
+    registryKey: "cost:trend:v2",
+    ttlSeconds: 3600,
+    args: ["cluster", "fp-1", "ns-1", "id-1", 7, "price-1"],
+    dimensionArgIndex: { query: 0, scope: 1 },
+  },
+
+  apisixRoutes: { registryKey: "apisix:routes", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+
+  promQuery: { registryKey: "prom (query/vector/range/node/cluster)", ttlSeconds: 15, args: ["primary", "up"], dimensionArgIndex: { cluster: 0, query: 1 } },
+  promVector: {
+    registryKey: "prom (query/vector/range/node/cluster)",
+    ttlSeconds: 15,
+    args: ["primary", "up"],
+    dimensionArgIndex: { cluster: 0, query: 1 },
+  },
+  promRange: {
+    registryKey: "prom (query/vector/range/node/cluster)",
+    ttlSeconds: 30,
+    args: ["primary", "up", 15],
+    dimensionArgIndex: { cluster: 0, query: 1 },
+  },
+  promNodeMetrics: { registryKey: "prom (query/vector/range/node/cluster)", ttlSeconds: 15, args: ["primary"], dimensionArgIndex: { cluster: 0 } },
+  promCluster: { registryKey: "prom (query/vector/range/node/cluster)", ttlSeconds: 15, args: ["primary"], dimensionArgIndex: { cluster: 0 } },
+
+  platformStatus: { registryKey: "status:platform", ttlSeconds: 15, args: [], dimensionArgIndex: {} },
+
+  trivySummary: { registryKey: "security:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  trivyWorkloads: { registryKey: "security:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  trivyImage: { registryKey: "security:*", ttlSeconds: 60, args: ["img-1"], dimensionArgIndex: { query: 0 } },
+  trivyTopVulnerable: { registryKey: "security:*", ttlSeconds: 60, args: [10], dimensionArgIndex: { query: 0 } },
+
+  scorecardRules: { registryKey: "scorecard:*", ttlSeconds: 300, args: [], dimensionArgIndex: {} },
+  scorecardDetail: { registryKey: "scorecard:*", ttlSeconds: 300, args: [3, "svc-1"], dimensionArgIndex: { version: 0, query: 1 } },
+  scorecardAll: { registryKey: "scorecard:*", ttlSeconds: 60, args: [3, "tier-1"], dimensionArgIndex: { version: 0, query: 1 } },
+
+  openbaoSecrets: { registryKey: "openbao:secrets", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+
+  alertmanagerActive: { registryKey: "alerts:active", ttlSeconds: 15, args: [], dimensionArgIndex: {} },
+
+  complianceConfigAuditList: { registryKey: "compliance:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  complianceConfigAuditDetail: { registryKey: "compliance:*", ttlSeconds: 60, args: ["ns-1", "name-1"], dimensionArgIndex: { query: 0 } },
+  complianceRbacAuditList: { registryKey: "compliance:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  complianceRbacAuditDetail: { registryKey: "compliance:*", ttlSeconds: 60, args: ["ns-1", "name-1"], dimensionArgIndex: { query: 0 } },
+  complianceInfraAuditList: { registryKey: "compliance:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  complianceInfraAuditDetail: { registryKey: "compliance:*", ttlSeconds: 60, args: ["node-1"], dimensionArgIndex: { query: 0 } },
+  complianceFrameworksList: { registryKey: "compliance:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  complianceFrameworksDetail: { registryKey: "compliance:*", ttlSeconds: 60, args: ["id-1"], dimensionArgIndex: { query: 0 } },
+  complianceSummary: { registryKey: "compliance:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+
+  // serviceGraphCluster's real TTL is computed at the call site (5s for the "1m"
+  // window, 60s otherwise) — not a fixed per-namespace constant, so it's the one
+  // migrated builder `cacheTtl()` deliberately does NOT cover; see the call site
+  // in src/lib/service-graph.ts for the inline ternary this intentionally leaves alone.
+  serviceGraphCluster: { registryKey: "graph:*", ttlSeconds: 60, args: ["1m", "ns-1"], dimensionArgIndex: { query: 0 } },
+  serviceGraphSvc: { registryKey: "graph:*", ttlSeconds: 60, args: ["svc-1", "1m"], dimensionArgIndex: { query: 0 } },
+
+  k8sCniPlugin: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  k8sKubeletConfig: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 60, args: ["node-1"], dimensionArgIndex: { query: 0 } },
+  k8sNamespaces: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sRbac: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sEventsAll: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 15, args: ["ns-1"], dimensionArgIndex: { query: 0 } },
+  k8sCerts: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  k8sKyverno: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sApiserverPods: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  k8sNodeReadiness: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sControlPlaneHealth: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sNetpol: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sNode: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: ["node-1"], dimensionArgIndex: { query: 0 } },
+}
+
+/**
+ * Single source of truth for a migrated builder's TTL — call sites use this
+ * instead of a hand-typed literal so the number can't drift from what's
+ * documented in `BUILDER_CHECKS`/`CACHE_NAMESPACES`.
+ */
+export function cacheTtl(name: keyof typeof cacheKeys): number {
+  return BUILDER_CHECKS[name].ttlSeconds
 }

@@ -1,5 +1,5 @@
 import { cacheGet, cacheSet } from "./valkey"
-import { cacheKeys } from "./cache-keys"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { assertPromQLSafe, K8S_NODE_NAME_RE } from "./validation"
 import { getK8sApiServer, getDependencyUrl } from "./config"
 import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
@@ -223,7 +223,7 @@ export async function queryScalarExplicit(
         query: promql,
         source: "prometheus",
       }
-      await cacheSet(cacheKey, emptyResult, 15)
+      await cacheSet(cacheKey, emptyResult, cacheTtl("promQuery"))
       return emptyResult
     }
 
@@ -282,7 +282,7 @@ export async function queryScalarExplicit(
       ...(isStale ? { warning: `Telemetry is stale by ${Math.round(nowSec - ts)}s` } : {}),
     }
 
-    await cacheSet(cacheKey, result, 15)
+    await cacheSet(cacheKey, result, cacheTtl("promQuery"))
     return result
   } catch (err: unknown) {
     return {
@@ -359,7 +359,7 @@ export async function queryVectorExplicit(
       source: "prometheus",
     }
 
-    await cacheSet(cacheKey, finalResult, 15)
+    await cacheSet(cacheKey, finalResult, cacheTtl("promVector"))
     return finalResult
   } catch (err: unknown) {
     return {
@@ -459,7 +459,7 @@ export async function queryRangeExplicit(
       source: "prometheus",
     }
 
-    await cacheSet(cacheKey, result, 30)
+    await cacheSet(cacheKey, result, cacheTtl("promRange"))
     return result
   } catch (err: unknown) {
     return {
@@ -610,7 +610,7 @@ export async function getNodeMetrics(clusterId: string = DEFAULT_CLUSTER_ID): Pr
     }
   })
 
-  await cacheSet(cacheKey, metrics, 15)
+  await cacheSet(cacheKey, metrics, cacheTtl("promNodeMetrics"))
   return metrics
 }
 
@@ -770,6 +770,6 @@ export async function getClusterMetrics(
     },
   }
 
-  await cacheSet(cacheKey, projection, 15)
+  await cacheSet(cacheKey, projection, cacheTtl("promCluster"))
   return projection
 }

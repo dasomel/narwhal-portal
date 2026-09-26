@@ -1,5 +1,5 @@
 import { cacheGet, cacheSet } from "./valkey"
-import { cacheKeys } from "./cache-keys"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getArgoApps } from "./argocd"
 import { getAlerts } from "./alertmanager"
 import { getNodeReadiness, getControlPlaneHealth, type ControlPlanePodHealth } from "./k8s-client"
@@ -192,6 +192,6 @@ export async function getPlatformStatus(): Promise<PlatformStatus> {
     generatedAt: new Date().toISOString(),
   }
 
-  await cacheSet(cacheKeys.platformStatus(), result, 15)
+  await cacheSet(cacheKeys.platformStatus(), result, cacheTtl("platformStatus"))
   return result
 }
