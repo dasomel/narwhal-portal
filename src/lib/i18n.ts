@@ -1068,6 +1068,10 @@ export const ko = {
   // resource page extensions
   "resources.stat.cpuUsage": "클러스터 CPU 사용률",
   "resources.stat.memUsage": "클러스터 메모리 사용률",
+  "resources.stat.cpuUsageScoped": "CPU 사용률 (내 네임스페이스, requests 대비)",
+  "resources.stat.memUsageScoped": "메모리 사용률 (내 네임스페이스, requests 대비)",
+  "resources.stat.usageTooltip.clusterCapacity": "노드 총 용량 대비 클러스터 전체 사용률",
+  "resources.stat.usageTooltip.visibleRequests": "내가 볼 수 있는 네임스페이스의 사용량 ÷ requests 합",
   "resources.stat.totalPods": "총 파드 수",
   "resources.stat.noRequestPods": "requests 미설정 파드 수",
   "resources.stat.noRequestPodsCaption": "거버넌스: 모든 파드에 requests 설정 권장",
@@ -2238,6 +2242,10 @@ export const en: Record<keyof typeof ko, string> = {
   // resource page extensions
   "resources.stat.cpuUsage": "Cluster CPU Usage",
   "resources.stat.memUsage": "Cluster Memory Usage",
+  "resources.stat.cpuUsageScoped": "CPU Usage (your namespaces, vs. requests)",
+  "resources.stat.memUsageScoped": "Memory Usage (your namespaces, vs. requests)",
+  "resources.stat.usageTooltip.clusterCapacity": "Cluster-wide utilization against total node capacity",
+  "resources.stat.usageTooltip.visibleRequests": "Usage ÷ requests, summed over the namespaces you can see",
   "resources.stat.totalPods": "Total Pods",
   "resources.stat.noRequestPods": "Pods Lacking Requests",
   "resources.stat.noRequestPodsCaption": "Governance: Resource requests recommended for all pods",

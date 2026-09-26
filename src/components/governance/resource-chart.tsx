@@ -3,7 +3,13 @@ import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Tooltip as InfoTooltip,
+  TooltipTrigger as InfoTooltipTrigger,
+  TooltipContent as InfoTooltipContent,
+} from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n-client"
+import type { TranslationKey } from "@/lib/i18n"
 import { ResourceDetailDrawer } from "./resource-detail-drawer"
 import type { ResourcesResponseV2, NamespaceUsageV2 } from "./types"
 import {
@@ -15,6 +21,30 @@ import {
 } from "@/components/ui/dialog"
 
 const toGiB = (bytes: number) => (bytes / (1024 * 1024 * 1024)).toFixed(2)
+
+// Pure and exported so a plain unit test can cover both bases without rendering the
+// component (this repo has no jsdom/testing-library setup for hook-bearing components —
+// see resource-chart.basis.test.ts). cpuPercent/memPercent mean different things per
+// basis (usage/node-capacity vs. usage/visible-requests), so the label AND the tooltip
+// explaining it must both switch, not just the number.
+export function basisLabelKeys(basis: "cluster-capacity" | "visible-requests"): {
+  cpuLabelKey: TranslationKey
+  memLabelKey: TranslationKey
+  tooltipKey: TranslationKey
+} {
+  if (basis === "visible-requests") {
+    return {
+      cpuLabelKey: "resources.stat.cpuUsageScoped",
+      memLabelKey: "resources.stat.memUsageScoped",
+      tooltipKey: "resources.stat.usageTooltip.visibleRequests",
+    }
+  }
+  return {
+    cpuLabelKey: "resources.stat.cpuUsage",
+    memLabelKey: "resources.stat.memUsage",
+    tooltipKey: "resources.stat.usageTooltip.clusterCapacity",
+  }
+}
 
 const formatBytes = (bytes: number) => {
   const mib = bytes / (1024 * 1024)
@@ -40,7 +70,14 @@ export function ResourceChart() {
   const namespaces = data?.namespaces ?? []
   const topCpuPods = data?.topCpuPods ?? []
   const topMemPods = data?.topMemPods ?? []
-  const cluster = data?.cluster ?? { cpuPercent: 0, memPercent: 0, totalPods: 0, noRequestPods: 0 }
+  const cluster = data?.cluster ?? {
+    cpuPercent: 0,
+    memPercent: 0,
+    totalPods: 0,
+    noRequestPods: 0,
+    basis: "cluster-capacity" as const,
+  }
+  const { cpuLabelKey, memLabelKey, tooltipKey } = basisLabelKeys(cluster.basis)
 
   const noRequestPodsList = data?.noRequestPodsList ?? []
   const uniqueNamespaces = Array.from(new Set(noRequestPodsList.map((p) => p.namespace))).sort()
@@ -68,18 +105,22 @@ export function ResourceChart() {
     ? "text-amber-500 dark:text-amber-400"
     : "text-foreground"
 
+  const usageTooltip = t(tooltipKey)
+
   const statCards = [
     {
-      label: t("resources.stat.cpuUsage"),
+      label: t(cpuLabelKey),
       value: `${cluster.cpuPercent.toFixed(1)}%`,
       color: "text-indigo-600 dark:text-indigo-400",
-      bg: "bg-indigo-50/50 border-indigo-150/40 dark:bg-indigo-950/20 dark:border-indigo-900/40"
+      bg: "bg-indigo-50/50 border-indigo-150/40 dark:bg-indigo-950/20 dark:border-indigo-900/40",
+      tooltip: usageTooltip,
     },
     {
-      label: t("resources.stat.memUsage"),
+      label: t(memLabelKey),
       value: `${cluster.memPercent.toFixed(1)}%`,
       color: "text-emerald-600 dark:text-emerald-400",
-      bg: "bg-emerald-50/50 border-emerald-150/40 dark:bg-emerald-950/20 dark:border-emerald-900/40"
+      bg: "bg-emerald-50/50 border-emerald-150/40 dark:bg-emerald-950/20 dark:border-emerald-900/40",
+      tooltip: usageTooltip,
     },
     {
       label: t("resources.stat.totalPods"),
@@ -113,7 +154,18 @@ export function ResourceChart() {
               onClick={isClickable ? () => setNoRequestDialogOpen(true) : undefined}
             >
               <div>
-                <div className="text-xs font-medium text-muted-foreground">{card.label}</div>
+                <div className="text-xs font-medium text-muted-foreground">
+                  {card.tooltip ? (
+                    <InfoTooltip>
+                      <InfoTooltipTrigger className="cursor-default underline decoration-dotted decoration-muted-foreground/50">
+                        {card.label}
+                      </InfoTooltipTrigger>
+                      <InfoTooltipContent>{card.tooltip}</InfoTooltipContent>
+                    </InfoTooltip>
+                  ) : (
+                    card.label
+                  )}
+                </div>
                 <div className={`text-2xl font-bold mt-1.5 ${card.color}`}>{card.value}</div>
               </div>
               {isClickable ? (

@@ -36,9 +36,32 @@ export interface ResourcesResponseV2 {
   namespaces: NamespaceUsageV2[]
   topCpuPods: TopPod[]        // top 10 by cpu usage, cluster-wide (exclude kube-*)
   topMemPods: TopPod[]        // top 10 by memory
-  cluster: { cpuPercent: number; memPercent: number; totalPods: number; noRequestPods: number }
+  cluster: {
+    cpuPercent: number
+    memPercent: number
+    totalPods: number
+    noRequestPods: number
+    /**
+     * cpuPercent/memPercent mean different things depending on the caller's scope, and
+     * the UI must label them accordingly instead of showing the same "CPU Usage" caption
+     * for both: "cluster-capacity" (scope.all) is usage against total node capacity
+     * (getClusterMetrics), "visible-requests" (scoped) is usage against the SUM OF
+     * REQUESTS across the caller's own visible namespaces — a different denominator, not
+     * just a filtered version of the same number.
+     */
+    basis: "cluster-capacity" | "visible-requests"
+  }
   noRequestPodsList: NoRequestPod[]
-  /** portal#52: true when the cluster-wide pod list hit its page cap — noRequestPods/topPods are then a partial view, not the full cluster. */
+  /**
+   * portal#52: true when the cluster-wide pod list hit its page cap — noRequestPods/topPods
+   * are then a partial view, not the full cluster.
+   *
+   * For a scoped caller this is NOT simply passed through: the raw cluster-wide flag would
+   * leak whether the whole cluster's pod count is large enough to hit the page cap, which is
+   * information about namespaces outside their scope. Instead it is derived from a
+   * scope-safe comparison (see `scopedTruncated` below) — true only when the caller's OWN
+   * visible namespaces demonstrably lost pods, which they are entitled to know.
+   */
   truncated: boolean
 }
 
@@ -104,10 +127,16 @@ export async function GET() {
     const noRequestPodsByNs: Record<string, number> = {}
     let clusterNoRequestPods = 0
     const noRequestPodsList: NoRequestPod[] = []
+    // How many of the (possibly truncated) k8s API pod list's items actually belong to
+    // each visible namespace — compared below against podByNs (Prometheus's independent,
+    // always-complete kube_pod_info count) to detect whether truncation cost THIS caller
+    // any of their own pods, without ever comparing namespaces outside their scope.
+    const actualPodCountByNs: Record<string, number> = {}
 
     for (const pod of allK8sPods) {
       const ns = pod.metadata.namespace || ""
       if (!namespaceVisible(ns, scope)) continue
+      actualPodCountByNs[ns] = (actualPodCountByNs[ns] || 0) + 1
       const podName = pod.metadata.name || ""
       const containers = pod.spec?.containers || []
 
@@ -210,6 +239,7 @@ export async function GET() {
           memPercent: clusterMetrics.memory ?? 0,
           totalPods: clusterMetrics.pods?.total ?? 0,
           noRequestPods: clusterNoRequestPods,
+          basis: "cluster-capacity" as const,
         }
       : (() => {
           let cpuUsed = 0, cpuReq = 0, memUsed = 0, memReq = 0, podCount = 0
@@ -225,8 +255,19 @@ export async function GET() {
             memPercent: memReq > 0 ? Math.round((memUsed / memReq) * 100) : 0,
             totalPods: Math.round(podCount),
             noRequestPods: clusterNoRequestPods,
+            basis: "visible-requests" as const,
           }
         })()
+
+    // scope.all: pass the raw flag through unchanged (admin already sees the whole
+    // cluster, so it leaks nothing new). Scoped: only report truncation if the caller's
+    // OWN visible namespaces actually came up short against Prometheus's independent
+    // count — a global truncation that happened to land entirely in namespaces outside
+    // their scope must stay invisible to them.
+    const scopedTruncated = userNs.some(
+      (ns) => (actualPodCountByNs[ns.name] ?? 0) < Math.round(podByNs[ns.name] ?? 0)
+    )
+    const truncated = scope.all ? allPodsResult.truncated : allPodsResult.truncated && scopedTruncated
 
     const response: ResourcesResponseV2 = {
       namespaces: resultNamespaces,
@@ -234,7 +275,7 @@ export async function GET() {
       topMemPods,
       cluster: clusterAggregate,
       noRequestPodsList: noRequestPodsList.slice(0, 300),
-      truncated: allPodsResult.truncated,
+      truncated,
     }
 
     try {

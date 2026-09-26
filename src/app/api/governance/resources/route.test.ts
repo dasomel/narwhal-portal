@@ -112,6 +112,10 @@ describe("GET /api/governance/resources — scope enforcement", () => {
     // "not equal to admin's number" assertion — assert the exact scoped value instead.
     expect(body.cluster.totalPods).toBe(3)
     expect(body.cluster.noRequestPods).toBe(1)
+    // cpuPercent for a scoped caller means usage/requests over their own visible
+    // namespaces, not usage/node-capacity like the admin's — the UI must label these
+    // differently, so the response says which one this is.
+    expect(body.cluster.basis).toBe("visible-requests")
   })
 
   it("cluster-admin retains full cluster visibility and totals", async () => {
@@ -130,6 +134,7 @@ describe("GET /api/governance/resources — scope enforcement", () => {
     expect(body.cluster.totalPods).toBe(20)
     expect(body.cluster.cpuPercent).toBe(42)
     expect(body.cluster.noRequestPods).toBe(2)
+    expect(body.cluster.basis).toBe("cluster-capacity")
   })
 
   it("401s an unauthenticated caller", async () => {
@@ -137,5 +142,48 @@ describe("GET /api/governance/resources — scope enforcement", () => {
     const res = await GET()
     expect(res.status).toBe(401)
     expect(getNamespaces).not.toHaveBeenCalled()
+  })
+})
+
+// The `truncated` flag says the cluster-wide k8s API pod scan (getAllPodsMinimal) hit its
+// page cap. Simply passing that raw flag through to a scoped caller would leak a fact
+// about namespaces outside their scope (that the CLUSTER has enough pods to hit the cap).
+// It must instead reflect whether the caller's OWN visible namespaces actually lost pods,
+// derived from comparing against Prometheus's independent kube_pod_info count.
+describe("GET /api/governance/resources — truncated flag does not leak cluster scale", () => {
+  it("stays false for a scoped caller whose own namespace is fully represented, even though the cluster-wide scan was truncated", async () => {
+    vi.mocked(auth).mockResolvedValue(frontendTeamSession as never)
+    vi.mocked(getAllPodsMinimal).mockResolvedValue({ items: pods, truncated: true, pages: 5 })
+    // Prometheus's frontend-app count (1) now matches the single frontend-app pod the
+    // (truncated) k8s list actually returned — this caller's own view lost nothing.
+    vi.mocked(queryVector).mockImplementation(async (promql: string) => {
+      if (promql.includes("kube_pod_info")) return [vec("platform-system", 5), vec("frontend-app", 1)]
+      if (promql.includes("namespace, pod")) return []
+      return [vec("frontend-app", 1)]
+    })
+
+    const res = await GET()
+    const body = await res.json()
+    // Mutation check: reverting to a plain `truncated: allPodsResult.truncated`
+    // pass-through would make this true, since the underlying scan was truncated.
+    expect(body.truncated).toBe(false)
+  })
+
+  it("reports true for a scoped caller whose own namespace actually lost pods to the truncation", async () => {
+    vi.mocked(auth).mockResolvedValue(frontendTeamSession as never)
+    vi.mocked(getAllPodsMinimal).mockResolvedValue({ items: pods, truncated: true, pages: 5 })
+    // Default fixture already sets frontend-app's Prometheus count to 3 while the item
+    // list carries only 1 frontend-app pod — a genuine shortfall for THIS caller.
+    const res = await GET()
+    const body = await res.json()
+    expect(body.truncated).toBe(true)
+  })
+
+  it("passes the raw cluster-wide flag through unchanged for cluster-admin", async () => {
+    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(getAllPodsMinimal).mockResolvedValue({ items: pods, truncated: true, pages: 5 })
+    const res = await GET()
+    const body = await res.json()
+    expect(body.truncated).toBe(true)
   })
 })
