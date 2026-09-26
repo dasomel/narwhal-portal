@@ -141,11 +141,12 @@ describe("i18n dictionary completeness", () => {
     // t(`prefix.${x}`), etc.) bumps this number — update the constant
     // deliberately when that's expected; don't raise it just to silence a
     // failure without checking what changed.
-    // 2026-09-27 (+3): resource-chart.tsx's utilization-basis fix (Codex review of
-    // a2ff120) reads its CPU/mem stat card labels and tooltip from `basisLabelKeys()`
-    // — `t(cpuLabelKey)`, `t(memLabelKey)`, `t(tooltipKey)` — genuinely dynamic since
-    // the key depends on the caller's scope basis, not a string literal.
-    const BASELINE_DYNAMIC_SKIPPED = 49
+    //
+    // resource-chart.tsx's utilization-basis fix (a2ff120/9d57c8e) deliberately does
+    // NOT bump this: `isScopedBasis()` only picks a boolean branch, and each branch
+    // calls t() with a literal key (t("resources.stat.cpuUsageScoped") etc.), not a
+    // variable — see that file's isScopedBasis comment for why.
+    const BASELINE_DYNAMIC_SKIPPED = 46
     expect(dynamicMatches).toBe(BASELINE_DYNAMIC_SKIPPED)
   })
 

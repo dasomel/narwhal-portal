@@ -146,37 +146,21 @@ describe("GET /api/governance/resources — scope enforcement", () => {
 })
 
 // The `truncated` flag says the cluster-wide k8s API pod scan (getAllPodsMinimal) hit its
-// page cap. Simply passing that raw flag through to a scoped caller would leak a fact
-// about namespaces outside their scope (that the CLUSTER has enough pods to hit the cap).
-// It must instead reflect whether the caller's OWN visible namespaces actually lost pods,
-// derived from comparing against Prometheus's independent kube_pod_info count.
-describe("GET /api/governance/resources — truncated flag does not leak cluster scale", () => {
-  it("stays false for a scoped caller whose own namespace is fully represented, even though the cluster-wide scan was truncated", async () => {
+// page cap. Passing that raw flag through to a scoped caller would leak a fact about
+// namespaces outside their scope (that the CLUSTER has enough pods to hit the cap). A
+// per-namespace derived signal was tried and rejected (Codex review of 9d57c8e: false
+// positives from Prometheus scrape lag / duplicate kube_pod_info series) — the field is
+// simply omitted for scoped callers instead of reported, guessed, or defaulted.
+describe("GET /api/governance/resources — truncated flag is scope-safe", () => {
+  it("omits the truncated key entirely for a scoped caller, even when the cluster-wide scan was truncated", async () => {
     vi.mocked(auth).mockResolvedValue(frontendTeamSession as never)
     vi.mocked(getAllPodsMinimal).mockResolvedValue({ items: pods, truncated: true, pages: 5 })
-    // Prometheus's frontend-app count (1) now matches the single frontend-app pod the
-    // (truncated) k8s list actually returned — this caller's own view lost nothing.
-    vi.mocked(queryVector).mockImplementation(async (promql: string) => {
-      if (promql.includes("kube_pod_info")) return [vec("platform-system", 5), vec("frontend-app", 1)]
-      if (promql.includes("namespace, pod")) return []
-      return [vec("frontend-app", 1)]
-    })
 
     const res = await GET()
     const body = await res.json()
-    // Mutation check: reverting to a plain `truncated: allPodsResult.truncated`
-    // pass-through would make this true, since the underlying scan was truncated.
-    expect(body.truncated).toBe(false)
-  })
-
-  it("reports true for a scoped caller whose own namespace actually lost pods to the truncation", async () => {
-    vi.mocked(auth).mockResolvedValue(frontendTeamSession as never)
-    vi.mocked(getAllPodsMinimal).mockResolvedValue({ items: pods, truncated: true, pages: 5 })
-    // Default fixture already sets frontend-app's Prometheus count to 3 while the item
-    // list carries only 1 frontend-app pod — a genuine shortfall for THIS caller.
-    const res = await GET()
-    const body = await res.json()
-    expect(body.truncated).toBe(true)
+    // Mutation check: reverting to `truncated: allPodsResult.truncated` for everyone
+    // would put a `true` here instead of omitting the key.
+    expect("truncated" in body).toBe(false)
   })
 
   it("passes the raw cluster-wide flag through unchanged for cluster-admin", async () => {

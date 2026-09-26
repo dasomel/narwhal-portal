@@ -56,13 +56,13 @@ export interface ResourcesResponseV2 {
    * portal#52: true when the cluster-wide pod list hit its page cap — noRequestPods/topPods
    * are then a partial view, not the full cluster.
    *
-   * For a scoped caller this is NOT simply passed through: the raw cluster-wide flag would
-   * leak whether the whole cluster's pod count is large enough to hit the page cap, which is
-   * information about namespaces outside their scope. Instead it is derived from a
-   * scope-safe comparison (see `scopedTruncated` below) — true only when the caller's OWN
-   * visible namespaces demonstrably lost pods, which they are entitled to know.
+   * Only present for scope.all (admin): the sole source of this signal is the cluster-wide
+   * scan (getAllPodsMinimal), and there is no way to attribute a truncation to specific
+   * namespaces — any attempt at a per-namespace derived value either leaks the cluster's
+   * total pod count to a scoped caller or produces false positives/negatives (Prometheus
+   * scrape lag, duplicate kube_pod_info series). Omitted, not guessed, for scoped callers.
    */
-  truncated: boolean
+  truncated?: boolean
 }
 
 export async function GET() {
@@ -127,16 +127,10 @@ export async function GET() {
     const noRequestPodsByNs: Record<string, number> = {}
     let clusterNoRequestPods = 0
     const noRequestPodsList: NoRequestPod[] = []
-    // How many of the (possibly truncated) k8s API pod list's items actually belong to
-    // each visible namespace — compared below against podByNs (Prometheus's independent,
-    // always-complete kube_pod_info count) to detect whether truncation cost THIS caller
-    // any of their own pods, without ever comparing namespaces outside their scope.
-    const actualPodCountByNs: Record<string, number> = {}
 
     for (const pod of allK8sPods) {
       const ns = pod.metadata.namespace || ""
       if (!namespaceVisible(ns, scope)) continue
-      actualPodCountByNs[ns] = (actualPodCountByNs[ns] || 0) + 1
       const podName = pod.metadata.name || ""
       const containers = pod.spec?.containers || []
 
@@ -259,23 +253,15 @@ export async function GET() {
           }
         })()
 
-    // scope.all: pass the raw flag through unchanged (admin already sees the whole
-    // cluster, so it leaks nothing new). Scoped: only report truncation if the caller's
-    // OWN visible namespaces actually came up short against Prometheus's independent
-    // count — a global truncation that happened to land entirely in namespaces outside
-    // their scope must stay invisible to them.
-    const scopedTruncated = userNs.some(
-      (ns) => (actualPodCountByNs[ns.name] ?? 0) < Math.round(podByNs[ns.name] ?? 0)
-    )
-    const truncated = scope.all ? allPodsResult.truncated : allPodsResult.truncated && scopedTruncated
-
     const response: ResourcesResponseV2 = {
       namespaces: resultNamespaces,
       topCpuPods,
       topMemPods,
       cluster: clusterAggregate,
       noRequestPodsList: noRequestPodsList.slice(0, 300),
-      truncated,
+      // See the interface doc comment: omitted entirely for a scoped caller, not
+      // derived — there is no scope-safe way to tell them anything about it.
+      ...(scope.all ? { truncated: allPodsResult.truncated } : {}),
     }
 
     try {
