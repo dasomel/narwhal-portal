@@ -99,6 +99,16 @@ describe("Prometheus Telemetry Semantics & Projections (Issue #51)", () => {
       expect(res.error).toContain("Connection refused")
     })
 
+    it("does not retry an overloaded Prometheus (503/429) — one attempt per query", async () => {
+      for (const status of [503, 429]) {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "error" }, status))
+        vi.stubGlobal("fetch", fetchMock)
+        const res = await queryScalarExplicit("up")
+        expect(res.status).toBe("unavailable")
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+      }
+    })
+
     it("reports 'unavailable' on HTTP 500 / 503 response", async () => {
       vi.stubGlobal(
         "fetch",

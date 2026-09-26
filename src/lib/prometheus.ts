@@ -3,6 +3,11 @@ import { cacheKeys, cacheTtl } from "./cache-keys"
 import { assertPromQLSafe, K8S_NODE_NAME_RE } from "./validation"
 import { getK8sApiServer, getDependencyUrl } from "./config"
 import { fetchWithPolicy, readJsonWithPolicy, HttpClientError } from "./http-client"
+
+// No automatic retry: these queries back polled dashboards that re-query on
+// their own, and retrying 429/5xx would multiply load on a Prometheus that is
+// already overloaded. A failed attempt surfaces as "unavailable" telemetry.
+const PROM_POLICY = { retry: false } as const
 import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 
 // portal#48: queryScalarExplicit/queryVectorExplicit/queryRangeExplicit had NO
@@ -224,7 +229,7 @@ export async function queryScalarExplicit(
   const evaluatedAt = new Date().toISOString()
 
   try {
-    const res = await fetchWithPolicy(url, { next: { revalidate: 0 } })
+    const res = await fetchWithPolicy(url, { next: { revalidate: 0 } }, PROM_POLICY)
     if (!res.ok) {
       return {
         status: "unavailable",
@@ -353,7 +358,7 @@ export async function queryVectorExplicit(
   const evaluatedAt = new Date().toISOString()
 
   try {
-    const res = await fetchWithPolicy(url, { next: { revalidate: 0 } })
+    const res = await fetchWithPolicy(url, { next: { revalidate: 0 } }, PROM_POLICY)
     if (!res.ok) {
       return {
         status: "unavailable",
@@ -433,7 +438,7 @@ export async function queryRangeExplicit(
   const evaluatedAt = new Date().toISOString()
 
   try {
-    const res = await fetchWithPolicy(url, { next: { revalidate: 0 } })
+    const res = await fetchWithPolicy(url, { next: { revalidate: 0 } }, PROM_POLICY)
     if (!res.ok) {
       return {
         status: "unavailable",
