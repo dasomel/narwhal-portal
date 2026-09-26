@@ -8,11 +8,15 @@ import { Badge } from "@/components/ui/badge"
 import { useT, useLocale } from "@/lib/i18n-client"
 import type { TranslationKey } from "@/lib/i18n"
 
-interface AuditEntry {
+// portal#16: these are Kubernetes Events (operational signal), not Kubernetes
+// Audit evidence. `reportingComponent` is the event producer, never a
+// user/API-actor identity — do not relabel it as one.
+interface OperationalEventEntry {
   id: string
+  evidenceKind: "operational-event"
   timestamp: string
   firstTimestamp: string
-  actor: string
+  reportingComponent: string
   action: string
   resource: string
   kind: string
@@ -30,6 +34,9 @@ type SortDir = "asc" | "desc"
 function relativeTime(ts: string, tFn: (key: TranslationKey, params?: Record<string, string | number>) => string): string {
   const diff = Date.now() - new Date(ts).getTime()
   const mins = Math.floor(diff / 60000)
+  // "audit.*" here is a shared "time ago" key group used by several unrelated
+  // components (not audit-specific) — left as-is; only this component's own
+  // audit.* keys are renamed for portal#16.
   if (mins < 1) return tFn("audit.justNow")
   if (mins < 60) return tFn("audit.minsAgo", { mins })
   const hrs = Math.floor(mins / 60)
@@ -92,11 +99,11 @@ export function AuditTable() {
   const { data: session } = useSession()
   const role = session?.user?.role ?? "guest"
   const [nsFilter, setNsFilter] = useState("all")
-  const [selected, setSelected] = useState<AuditEntry | null>(null)
+  const [selected, setSelected] = useState<OperationalEventEntry | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>("timestamp")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
-  const { data = [], isLoading } = useQuery<AuditEntry[]>({
+  const { data = [], isLoading } = useQuery<OperationalEventEntry[]>({
     queryKey: ["governance-audit"],
     queryFn: () => fetch("/api/governance/audit").then((r) => r.json()),
     refetchInterval: 30_000,
@@ -140,7 +147,7 @@ export function AuditTable() {
     return (
       <Card className="p-5">
         <div className="h-24 flex items-center justify-center text-sm text-muted-foreground">
-          {t("audit.forbidden")}
+          {t("opEvents.forbidden")}
         </div>
       </Card>
     )
@@ -150,13 +157,16 @@ export function AuditTable() {
     <>
       <Card className="p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-foreground">{t("audit.title")}</h2>
+          <div>
+            <h2 className="font-semibold text-foreground">{t("opEvents.title")}</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">{t("opEvents.notAuditEvidence")}</p>
+          </div>
           <select
             value={nsFilter}
             onChange={(e) => setNsFilter(e.target.value)}
             className="text-xs border border-border rounded px-2 py-1 text-muted-foreground bg-background focus:outline-none focus:ring-1 focus:ring-gray-300"
           >
-            <option value="all">{t("audit.filterAll")}</option>
+            <option value="all">{t("opEvents.filterAll")}</option>
             {namespaces.map((ns) => (
               <option key={ns} value={ns}>{ns}</option>
             ))}
@@ -168,7 +178,7 @@ export function AuditTable() {
           </div>
         ) : sorted.length === 0 ? (
           <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-            <span className="text-sm text-muted-foreground">{t("audit.empty")}</span>
+            <span className="text-sm text-muted-foreground">{t("opEvents.empty")}</span>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -176,7 +186,7 @@ export function AuditTable() {
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
                   <SortHeader
-                    label={t("audit.time")}
+                    label={t("opEvents.time")}
                     sortKey="timestamp"
                     currentKey={sortKey}
                     currentDir={sortDir}
@@ -184,27 +194,27 @@ export function AuditTable() {
                     className="w-20"
                   />
                   <SortHeader
-                    label={t("audit.action")}
+                    label={t("opEvents.action")}
                     sortKey="action"
                     currentKey={sortKey}
                     currentDir={sortDir}
                     onToggle={toggleSort}
                   />
                   <SortHeader
-                    label={t("audit.resource")}
+                    label={t("opEvents.resource")}
                     sortKey="resource"
                     currentKey={sortKey}
                     currentDir={sortDir}
                     onToggle={toggleSort}
                   />
                   <SortHeader
-                    label={t("audit.namespace")}
+                    label={t("opEvents.namespace")}
                     sortKey="namespace"
                     currentKey={sortKey}
                     currentDir={sortDir}
                     onToggle={toggleSort}
                   />
-                  <th className="pb-2 font-medium">{t("audit.detail")}</th>
+                  <th className="pb-2 font-medium">{t("opEvents.detail")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -243,7 +253,7 @@ export function AuditTable() {
           {selected && (
             <>
               <SheetHeader className="mb-2">
-                <SheetTitle className="text-base">{t("audit.detail.title")}</SheetTitle>
+                <SheetTitle className="text-base">{t("opEvents.detail.title")}</SheetTitle>
                 <div className="flex items-center gap-2 mt-1">
                   <Badge variant={selected.type === "Warning" ? "destructive" : "secondary"}>
                     {selected.type || "Normal"}
@@ -255,19 +265,20 @@ export function AuditTable() {
               </SheetHeader>
 
               <div className="px-4 pb-4">
-                <DetailRow label={t("audit.action")} value={
+                <DetailRow label={t("opEvents.action")} value={
                   <span className="font-medium">{selected.action}</span>
                 } />
-                <DetailRow label={t("audit.resource")} value={
+                <DetailRow label={t("opEvents.resource")} value={
                   <span className="font-mono text-xs break-all">{selected.resource}</span>
                 } />
-                <DetailRow label={t("audit.namespace")} value={selected.namespace || "—"} />
-                <DetailRow label={t("audit.detail.lastSeen")} value={formatTs(selected.timestamp, locale)} />
-                <DetailRow label={t("audit.detail.firstSeen")} value={formatTs(selected.firstTimestamp, locale)} />
-                <DetailRow label={t("audit.detail.count")} value={String(selected.count ?? 1)} />
-                <DetailRow label={t("audit.detail.actor")} value={selected.actor} />
-                <DetailRow label={t("audit.detail.source")} value={selected.source || "—"} />
-                <DetailRow label={t("audit.detail.message")} value={
+                <DetailRow label={t("opEvents.namespace")} value={selected.namespace || "—"} />
+                <DetailRow label={t("opEvents.detail.lastSeen")} value={formatTs(selected.timestamp, locale)} />
+                <DetailRow label={t("opEvents.detail.firstSeen")} value={formatTs(selected.firstTimestamp, locale)} />
+                <DetailRow label={t("opEvents.detail.count")} value={String(selected.count ?? 1)} />
+                {/* Producer identity only (portal#16) — never a user/API actor. */}
+                <DetailRow label={t("opEvents.detail.reportingComponent")} value={selected.reportingComponent} />
+                <DetailRow label={t("opEvents.detail.source")} value={selected.source || "—"} />
+                <DetailRow label={t("opEvents.detail.message")} value={
                   <span className="text-xs leading-relaxed whitespace-pre-wrap">{selected.detail}</span>
                 } />
               </div>

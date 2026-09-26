@@ -500,6 +500,11 @@ interface RawEvent {
   involvedObject: { kind: string; name: string }
   lastTimestamp: string | null
   firstTimestamp: string | null
+  // Event *producer* identifiers (portal#16) — the component that reported the
+  // event, never a user/API-actor identity. Kept distinct from anything that
+  // could be mistaken for `user.username` in real Kubernetes Audit records.
+  reportingComponent?: string
+  source?: { component?: string; host?: string }
 }
 
 export async function getEvents(namespace?: string): Promise<K8sEvent[]> {
@@ -525,6 +530,8 @@ export async function getEvents(namespace?: string): Promise<K8sEvent[]> {
       involvedObject: i.involvedObject,
       lastTimestamp: i.lastTimestamp,
       firstTimestamp: i.firstTimestamp,
+      reportingComponent: i.reportingComponent,
+      source: i.source,
     }))
     await cacheSet(cacheKey, events, 15)
     return events

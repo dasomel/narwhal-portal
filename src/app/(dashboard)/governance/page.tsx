@@ -25,7 +25,7 @@ export default async function GovernancePage() {
           <TabsTrigger value="rbac">{t(locale, "governance.tabRbac")}</TabsTrigger>
           <TabsTrigger value="resources">{t(locale, "governance.tabResources")}</TabsTrigger>
           <TabsTrigger value="distribution">{t(locale, "governance.tabDistribution")}</TabsTrigger>
-          <TabsTrigger value="audit">{t(locale, "governance.tabAudit")}</TabsTrigger>
+          <TabsTrigger value="audit">{t(locale, "governance.tabEvents")}</TabsTrigger>
           <TabsTrigger value="dora">{t(locale, "governance.tabDora")}</TabsTrigger>
           <TabsTrigger value="traces">{t(locale, "governance.tabTraces")}</TabsTrigger>
         </TabsList>
