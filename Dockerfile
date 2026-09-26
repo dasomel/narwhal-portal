@@ -35,6 +35,8 @@ COPY --from=bun-source /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG GIT_SHA=dev
+ENV GIT_SHA=${GIT_SHA}
 RUN if [ -f bun.lock ]; then bun run build; else pnpm build; fi
 
 FROM base AS runner

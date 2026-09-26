@@ -9,11 +9,25 @@ import { LocaleSwitcher } from "@/lib/i18n-client"
 import { ThemeToggle } from "@/components/theme-toggle"
 import type { UserRole } from "@/lib/auth"
 import type { TranslationKey } from "@/lib/i18n"
+import { getAppVersion } from "@/lib/app-version"
 
 interface MenuItem {
   href: string
   labelKey: TranslationKey
   roles: UserRole[]
+}
+
+export function NavVersion({ label }: { label: string }) {
+  const appVersion = getAppVersion()
+  return (
+    <span
+      aria-label={label}
+      className="text-[10px] leading-3 text-muted-foreground"
+      title={appVersion.commit}
+    >
+      {appVersion.display}
+    </span>
+  )
 }
 
 // WO-D16 Role Mapping: UI role 'viewer' maps to OIDC group 'oidc:viewer', which binds to the Kubernetes ClusterRole 'platform-viewer'.
@@ -49,9 +63,12 @@ export function Nav() {
   return (
     <nav className="border-b bg-background px-6 py-3 flex items-center justify-between shadow-sm">
       <div className="flex items-center gap-6">
-        <Link href="/" className="font-bold text-lg text-foreground">
-          Narwhal IDP
-        </Link>
+        <div className="flex flex-col">
+          <Link href="/" className="font-bold text-lg text-foreground">
+            Narwhal IDP
+          </Link>
+          <NavVersion label={t("nav.versionLabel")} />
+        </div>
         <div className="flex gap-1">
           {menuItems
             .filter((item) => item.roles.includes(role))

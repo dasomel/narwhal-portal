@@ -108,6 +108,7 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
+          build-args: GIT_SHA=${{ github.sha }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: true
           sbom: true

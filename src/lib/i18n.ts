@@ -12,6 +12,7 @@ export const ko = {
   "nav.settings": "설정",
   "nav.onboarding": "온보딩",
   "nav.logout": "로그아웃",
+  "nav.versionLabel": "포털 버전 및 커밋",
 
   // login
   "login.welcome": "Internal Developer Platform에 오신 것을 환영합니다",
@@ -1186,6 +1187,7 @@ export const en: Record<keyof typeof ko, string> = {
   "nav.settings": "Settings",
   "nav.onboarding": "Onboarding",
   "nav.logout": "Logout",
+  "nav.versionLabel": "Portal version and commit",
 
   // login
   "login.welcome": "Welcome to Internal Developer Platform",
