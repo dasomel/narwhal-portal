@@ -28,12 +28,32 @@ interface CostItem {
   totalMonthly: number
 }
 
+// portal#64 AC3/AC4: structured mirrors of CostExclusions/CostTelemetry in
+// src/lib/cost.ts, so this table can show exclusions and render an "unavailable"
+// telemetry state distinctly from a genuinely empty result.
+interface UnlabeledWorkloadsExclusion {
+  computable: boolean
+  count: number | null
+  hourly: number | null
+}
+
+interface CostExclusions {
+  unlabeledWorkloads?: UnlabeledWorkloadsExclusion
+  storageExcludedFromServiceScope?: boolean
+}
+
+interface CostTelemetry {
+  state: "ok" | "empty" | "unavailable" | "partial" | "ambiguous" | "stale"
+}
+
 interface CostResponse {
   scope: string
   generatedAt: string
   unitPrices: { cpuHourly: number; memGbHourly: number; storageGbHourly: number }
   items: CostItem[]
   notice?: string
+  telemetry?: CostTelemetry
+  exclusions?: CostExclusions
 }
 
 type SortKey = "id" | "cpu" | "memory" | "storage" | "monthly"
@@ -140,10 +160,43 @@ export function CostBreakdownTable() {
             </button>
           </div>
         </div>
+        {/* 크리틱 리뷰 #4: partial/unavailable을 notice 유무와 무관하게 명시적 배너로
+            보여준다 — 이전에는 items가 비어 있을 때만 텍스트를 바꿨고, partial처럼
+            items가 채워져 있는 degraded 상태는 아예 표시되지 않았다. */}
+        {data?.telemetry?.state === "unavailable" ? (
+          <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {t("cost.telemetryUnavailable")}
+          </div>
+        ) : data?.telemetry?.state === "partial" ? (
+          <p className="mt-2 text-xs text-yellow-700 dark:text-yellow-400">
+            {t("cost.telemetryPartial")}
+          </p>
+        ) : null}
         {data?.notice && (
           <p className="mt-2 text-xs text-yellow-700 dark:text-yellow-400">
             {data.notice}
           </p>
+        )}
+        {/* portal#64 AC3: unlabeled workload exclusion, shown as a structured
+            value rather than only inside the free-text `notice` above.
+            Codex 리뷰 #4: computable===false를 조용히 숨기지 않고 명시적으로
+            "집계 불가"라고 알린다 — 이전에는 그 조회 실패가 화면에서 사라져서
+            제외 항목이 실제로는 0인 것처럼 보였다. */}
+        {scopeView === "service" && data?.exclusions?.unlabeledWorkloads && (
+          data.exclusions.unlabeledWorkloads.computable ? (
+            (data.exclusions.unlabeledWorkloads.count ?? 0) > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("cost.unlabeledWorkloadsExclusion", {
+                  count: String(data.exclusions.unlabeledWorkloads.count),
+                  hourly: `$${(data.exclusions.unlabeledWorkloads.hourly ?? 0).toFixed(4)}`,
+                })}
+              </p>
+            )
+          ) : (
+            <p className="mt-1 text-xs text-yellow-700 dark:text-yellow-400">
+              {t("cost.exclusionsUnavailable")}
+            </p>
+          )
         )}
       </CardHeader>
       <CardContent className="pt-0">
@@ -159,7 +212,9 @@ export function CostBreakdownTable() {
           </div>
         ) : sorted.length === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">
-            {t("cost.noDataPrometheus")}
+            {data?.telemetry?.state === "unavailable"
+              ? t("cost.telemetryUnavailable")
+              : t("cost.noDataPrometheus")}
           </div>
         ) : (
           <Table>

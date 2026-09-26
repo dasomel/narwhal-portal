@@ -904,6 +904,10 @@ const ko = {
   "cost.openDetails": "{name} 비용 상세 열기",
   "cost.cores": "코어",
   "cost.gb": "GB",
+  "cost.telemetryUnavailable": "Prometheus에서 텔레메트리를 가져올 수 없습니다. 아래 값은 실제 비용이 아니라 조회 실패 상태입니다.",
+  "cost.telemetryPartial": "일부 메트릭 조회에 실패했습니다 — 아래 비용은 실제보다 낮게 집계될 수 있습니다.",
+  "cost.unlabeledWorkloadsExclusion": "라벨 없는 워크로드 {count}개가 제외됨 (약 {hourly}/h)",
+  "cost.exclusionsUnavailable": "제외 항목 집계 불가 — 일부 조회가 실패했습니다.",
 
   // scorecard page additions
   "scorecard.pageTitle": "서비스 품질 점수 (Scorecard)",
@@ -2058,6 +2062,10 @@ const en: Record<keyof typeof ko, string> = {
   "cost.openDetails": "Open cost details for {name}",
   "cost.cores": "cores",
   "cost.gb": "GB",
+  "cost.telemetryUnavailable": "Telemetry could not be retrieved from Prometheus. The values below reflect a query failure, not actual cost.",
+  "cost.telemetryPartial": "Some metric queries failed — the cost below may be underestimated.",
+  "cost.unlabeledWorkloadsExclusion": "{count} unlabeled workload(s) excluded (~{hourly}/h)",
+  "cost.exclusionsUnavailable": "Exclusion totals unavailable — some queries failed.",
 
   // scorecard page additions
   "scorecard.pageTitle": "Service Quality Scorecard",

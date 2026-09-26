@@ -22,6 +22,11 @@ export interface CostResponse {
   pricing: ReturnType<typeof getCostPricing>["metadata"]
   items: Awaited<ReturnType<typeof getCost>>["items"]
   notice?: string
+  // portal#64 AC4/AC3: explicit telemetry state (so "unavailable" isn't
+  // indistinguishable from a genuinely empty result) + structured exclusions
+  // (so consumers don't parse the Korean `notice` prose).
+  telemetry: Awaited<ReturnType<typeof getCost>>["telemetry"]
+  exclusions?: Awaited<ReturnType<typeof getCost>>["exclusions"]
 }
 
 export async function GET(req: NextRequest) {
@@ -47,7 +52,7 @@ export async function GET(req: NextRequest) {
     // effective scope the other scoped routes apply, before any aggregation happens.
     const effScope = await getEffectiveScope(gate.session)
     const pricing = getCostPricing()
-    const { items, notice } = await getCost(
+    const { items, notice, telemetry, exclusions } = await getCost(
       scope as "cluster" | "namespace" | "service",
       effScope
     )
@@ -58,8 +63,10 @@ export async function GET(req: NextRequest) {
       unitPrices: pricing.unitPrices,
       pricing: pricing.metadata,
       items,
+      telemetry,
     }
     if (notice) body.notice = notice
+    if (exclusions) body.exclusions = exclusions
 
     return NextResponse.json(body)
   } catch (err) {

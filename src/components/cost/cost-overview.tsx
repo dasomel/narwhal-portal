@@ -27,6 +27,13 @@ interface CostItem {
   totalMonthly: number
 }
 
+// portal#64 AC4: mirrors CostTelemetry in src/lib/cost.ts — "ok"/"partial" are real
+// data (possibly degraded), "unavailable" means Prometheus could not be queried at
+// all and must not be rendered as "$0 / no data".
+interface CostTelemetry {
+  state: "ok" | "empty" | "unavailable" | "partial" | "ambiguous" | "stale"
+}
+
 interface CostResponse {
   scope: string
   generatedAt: string
@@ -42,6 +49,7 @@ interface CostResponse {
   }
   items: CostItem[]
   notice?: string
+  telemetry?: CostTelemetry
 }
 
 interface TrendPoint {
@@ -55,6 +63,7 @@ interface TrendResponse {
   days: number
   points: TrendPoint[]
   notice?: string
+  telemetry?: CostTelemetry
 }
 
 export function CostOverview() {
@@ -79,6 +88,7 @@ export function CostOverview() {
     refetchInterval: 300_000,
   })
 
+  const telemetryUnavailable = costData?.telemetry?.state === "unavailable"
   const item = costData?.items?.[0]
   const totalHourly = item?.totalHourly ?? 0
   const totalMonthly = item?.totalMonthly ?? 0
@@ -104,6 +114,17 @@ export function CostOverview() {
 
   return (
     <div className="space-y-4">
+      {/* portal#64 AC4: Prometheus 실패는 "$0/데이터 없음"이 아니라 명시적 unavailable
+          배너로 표시한다 — telemetry.state가 notice와 별도로 이를 구분해준다. */}
+      {telemetryUnavailable ? (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {t("cost.telemetryUnavailable")}
+        </div>
+      ) : costData?.telemetry?.state === "partial" ? (
+        <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
+          {t("cost.telemetryPartial")}
+        </div>
+      ) : null}
       {costData?.notice && (
         <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
           {costData.notice}
@@ -127,7 +148,9 @@ export function CostOverview() {
         </div>
       )}
 
-      {/* 상단 요약 카드 */}
+      {/* 상단 요약 카드 — telemetry.state가 unavailable이면 "$0"으로 오인될 수 있는
+          숫자 카드 대신 위의 배너만 보인다 */}
+      {!telemetryUnavailable && (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card>
           <CardHeader className="pb-1">
@@ -207,6 +230,7 @@ export function CostOverview() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Storage 카드 (스펙 §5.5 분해) */}
       {storHourly > 0 && (
@@ -235,6 +259,13 @@ export function CostOverview() {
           <CardTitle className="text-sm font-medium text-foreground">
             {t("cost.trendTitle30d")}
           </CardTitle>
+          {/* Codex 리뷰 #3: trend telemetry가 partial이면(예: cpu는 실패, mem은
+              성공) 차트는 그려지지만 저평가됐을 수 있다는 경고가 전혀 없었다. */}
+          {trendData?.telemetry?.state === "partial" && (
+            <p className="mt-1 text-xs text-yellow-700 dark:text-yellow-400">
+              {t("cost.telemetryPartial")}
+            </p>
+          )}
         </CardHeader>
         <CardContent className="pt-0">
           {trendLoading ? (
@@ -247,7 +278,11 @@ export function CostOverview() {
             </div>
           ) : chartData.length === 0 ? (
             <div className="h-52 flex items-center justify-center text-xs text-muted-foreground">
-              {trendData?.notice ?? t("cost.noTrendData")}
+              {/* 크리틱 리뷰 #4: trend telemetry가 unavailable이면 빈 차트를 "데이터 없음"으로
+                  오인시키지 않고 명시적으로 알린다. */}
+              {trendData?.telemetry?.state === "unavailable"
+                ? t("cost.telemetryUnavailable")
+                : trendData?.notice ?? t("cost.noTrendData")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={200}>
