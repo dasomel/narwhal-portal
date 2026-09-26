@@ -105,6 +105,8 @@ pnpm build            # production build
 pnpm run dev:skaffold # in-cluster HMR dev loop (Skaffold + Kaniko)
 pnpm run harbor:setup # one-time Kaniko/Harbor auth secret bootstrap
 npx tsc --noEmit      # type check
+pnpm test             # unit/API tests (vitest)
+pnpm lint             # eslint
 npx shadcn@latest add {component}  # add a shadcn/ui component
 ```
 

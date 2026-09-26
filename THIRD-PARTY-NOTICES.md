@@ -13,7 +13,7 @@ pnpm run notices
 
 Scope: production dependencies only (`pnpm licenses list --prod`) — 669 packages.
 Development-only tooling is not redistributed and is therefore out of scope.
-Platform-gated native packages are excluded and listed separately (73 in the lockfile).
+Platform-gated native packages are excluded and listed separately (95 in the lockfile).
 
 This is a **superset** of what any single image ships. Platform-specific optional binaries
 resolve for the build host's architecture, and Next.js file tracing drops packages the server
@@ -90,6 +90,28 @@ also covers dev-only build tooling that was never in scope for attribution.
 - `@tailwindcss/oxide-wasm32-wasi`
 - `@tailwindcss/oxide-win32-arm64-msvc`
 - `@tailwindcss/oxide-win32-x64-msvc`
+- `@unrs/resolver-binding-android-arm-eabi`
+- `@unrs/resolver-binding-android-arm64`
+- `@unrs/resolver-binding-darwin-arm64`
+- `@unrs/resolver-binding-darwin-x64`
+- `@unrs/resolver-binding-freebsd-x64`
+- `@unrs/resolver-binding-linux-arm-gnueabihf`
+- `@unrs/resolver-binding-linux-arm-musleabihf`
+- `@unrs/resolver-binding-linux-arm64-gnu`
+- `@unrs/resolver-binding-linux-arm64-musl`
+- `@unrs/resolver-binding-linux-loong64-gnu`
+- `@unrs/resolver-binding-linux-loong64-musl`
+- `@unrs/resolver-binding-linux-ppc64-gnu`
+- `@unrs/resolver-binding-linux-riscv64-gnu`
+- `@unrs/resolver-binding-linux-riscv64-musl`
+- `@unrs/resolver-binding-linux-s390x-gnu`
+- `@unrs/resolver-binding-linux-x64-gnu`
+- `@unrs/resolver-binding-linux-x64-musl`
+- `@unrs/resolver-binding-openharmony-arm64`
+- `@unrs/resolver-binding-wasm32-wasi`
+- `@unrs/resolver-binding-win32-arm64-msvc`
+- `@unrs/resolver-binding-win32-ia32-msvc`
+- `@unrs/resolver-binding-win32-x64-msvc`
 - `fsevents`
 - `lightningcss-android-arm64`
 - `lightningcss-darwin-arm64`
@@ -32648,7 +32670,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
-### ignore@5.3.2
+### ignore@7.0.9
 
 - License: `MIT`
 - Author: kael

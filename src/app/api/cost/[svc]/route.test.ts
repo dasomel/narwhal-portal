@@ -107,7 +107,7 @@ describe("GET /api/cost/[svc] — scope enforcement", () => {
     vi.mocked(getArgoApp).mockResolvedValue(app("frontend-app") as never)
     await GET(request(), params("platform-app"))
 
-    const keys = vi.mocked(cacheSet).mock.calls.map(([key]) => key).filter((key) => key.startsWith("cost:service:"))
+    const keys = vi.mocked(cacheSet).mock.calls.map(([key]) => key).filter((key) => key.startsWith("cost:service:v2:"))
     expect(new Set(keys).size).toBe(2)
   })
 
@@ -138,5 +138,22 @@ describe("GET /api/cost/[svc] — scope enforcement", () => {
 
     expect(res.status).toBe(200)
     expect(decodeURIComponent(vi.mocked(fetch).mock.calls[0][0] as string)).toContain('namespace="default"')
+  })
+
+  // portal#64 AC4: Prometheus outage must be exposed as telemetry.state="unavailable",
+  // not just a bare `{ items: [], notice }` indistinguishable from "no cost data".
+  it("exposes telemetry.state=unavailable when Prometheus is down for the service detail", async () => {
+    vi.mocked(requireRole).mockResolvedValue({ session: platformTeamSession } as never)
+    vi.mocked(getArgoApp).mockResolvedValue(app("platform-system") as never)
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("ECONNREFUSED")
+    }))
+
+    const res = await GET(request("platform-app"), params("platform-app"))
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.items).toEqual([])
+    expect(body.telemetry.state).toBe("unavailable")
   })
 })

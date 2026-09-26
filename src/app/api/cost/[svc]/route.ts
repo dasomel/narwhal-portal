@@ -54,7 +54,8 @@ export async function GET(
     const result = await getCostByService(svc, effScope, namespace)
 
     if ("notice" in result && !("serviceId" in result)) {
-      // Prometheus 미응답 — 200 + notice (graceful degradation)
+      // Prometheus 미응답 — 200 + notice + telemetry.state="unavailable"
+      // (graceful degradation, portal#64 AC4)
       return NextResponse.json({
         serviceId: svc,
         generatedAt: new Date().toISOString(),
@@ -62,6 +63,7 @@ export async function GET(
         pricing: pricing.metadata,
         items: [],
         notice: result.notice,
+        telemetry: result.telemetry,
       })
     }
 

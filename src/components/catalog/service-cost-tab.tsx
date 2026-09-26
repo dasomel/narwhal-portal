@@ -34,6 +34,11 @@ interface TopPod {
   hourly: number
 }
 
+// portal#64 AC4: mirrors CostTelemetry in src/lib/cost.ts.
+interface CostTelemetry {
+  state: "ok" | "empty" | "unavailable" | "partial" | "ambiguous" | "stale"
+}
+
 interface CostDetailResponse {
   serviceId: string
   generatedAt: string
@@ -46,6 +51,7 @@ interface CostDetailResponse {
   totalMonthly: number
   topPods: TopPod[]
   notice?: string
+  telemetry?: CostTelemetry
 }
 
 interface TrendPoint {
@@ -59,6 +65,7 @@ interface TrendResponse {
   days: number
   points: TrendPoint[]
   notice?: string
+  telemetry?: CostTelemetry
 }
 
 interface Props {
@@ -91,6 +98,11 @@ export function ServiceCostTab({ serviceId }: Props) {
     date: p.date.slice(5), // MM-DD
     total: p.total,
   }))
+  const telemetryUnavailable = detail?.telemetry?.state === "unavailable"
+  // 크리틱 리뷰 #4: partial(예: cpu/mem 쿼리는 실패했지만 topPods 쿼리는 성공)일 때
+  // 숫자 카드는 그대로 보여주되(완전히 없는 데이터가 아니므로), 저평가됐을 수 있다는
+  // 경고를 덧붙인다.
+  const telemetryPartial = detail?.telemetry?.state === "partial"
 
   if (detailError) {
     return (
@@ -102,7 +114,18 @@ export function ServiceCostTab({ serviceId }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* 에러/notice 배너 */}
+      {/* 에러/notice 배너 — portal#64 AC4: unavailable은 "$0"으로 오인될 수 있는
+          숫자 카드 대신 명시적 배너로 표시한다 */}
+      {telemetryUnavailable && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {t("cost.telemetryUnavailable")}
+        </div>
+      )}
+      {telemetryPartial && (
+        <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
+          {t("cost.telemetryPartial")}
+        </div>
+      )}
       {detail?.notice && (
         <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
           {detail.notice}
@@ -110,6 +133,7 @@ export function ServiceCostTab({ serviceId }: Props) {
       )}
 
       {/* 비용 요약 카드 */}
+      {!telemetryUnavailable && (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader className="pb-1">
@@ -169,6 +193,7 @@ export function ServiceCostTab({ serviceId }: Props) {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* 7일 추이 차트 */}
       <Card>
@@ -176,6 +201,13 @@ export function ServiceCostTab({ serviceId }: Props) {
           <CardTitle className="text-sm font-medium text-foreground">
             {t("cost.trendTitle")}
           </CardTitle>
+          {/* Codex 리뷰 #3: trend telemetry가 partial이면(예: cpu는 실패, mem은
+              성공) 차트는 그려지지만 저평가됐을 수 있다는 경고가 전혀 없었다. */}
+          {trendData?.telemetry?.state === "partial" && (
+            <p className="mt-1 text-xs text-yellow-700 dark:text-yellow-400">
+              {t("cost.telemetryPartial")}
+            </p>
+          )}
         </CardHeader>
         <CardContent className="pt-0">
           {trendLoading ? (
@@ -188,7 +220,11 @@ export function ServiceCostTab({ serviceId }: Props) {
             </div>
           ) : chartData.length === 0 ? (
             <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">
-              {trendData?.notice ?? t("cost.noTrendData")}
+              {/* 크리틱 리뷰 #4: trend telemetry가 unavailable이면 빈 차트를 "데이터 없음"으로
+                  오인시키지 않고 명시적으로 알린다. */}
+              {trendData?.telemetry?.state === "unavailable"
+                ? t("cost.telemetryUnavailable")
+                : trendData?.notice ?? t("cost.noTrendData")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={160}>

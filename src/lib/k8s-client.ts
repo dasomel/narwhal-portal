@@ -17,6 +17,16 @@ function authHeaders(apiServer: string): Record<string, string> {
   return token.length > 0 ? { Authorization: `Bearer ${token}` } : {}
 }
 
+// Thrown by k8sFetch on a non-OK response. Carries the HTTP status so callers
+// (listBounded's 410/Gone restart logic) can branch on it without parsing
+// the message string.
+export class K8sHttpError extends Error {
+  constructor(public readonly status: number, path: string) {
+    super(`K8s API ${status}: ${path}`)
+    this.name = "K8sHttpError"
+  }
+}
+
 async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const apiServer = getK8sApiServer()
   const headers: Record<string, string> = {
@@ -32,7 +42,7 @@ async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
     invalidateK8sBearerToken()
     res = await fetch(`${apiServer}${path}`, { ...init, headers: { ...headers, ...authHeaders(apiServer) } })
   }
-  if (!res.ok) throw new Error(`K8s API ${res.status}: ${path}`)
+  if (!res.ok) throw new K8sHttpError(res.status, path)
   return res.json() as Promise<T>
 }
 
@@ -77,36 +87,77 @@ export const DEFAULT_LIST_MAX_PAGES = 20
  * Fetches `path` (a base list path with no query string, e.g. "/api/v1/pods" or
  * "/api/v1/namespaces/foo/pods") page by page, following `metadata.continue`
  * until the list is exhausted or `maxPages` is reached.
+ *
+ * A `continue` token can expire mid-pagination (etcd compacts the watch
+ * history it points into), which the API server reports as 410 Gone. On a
+ * 410, the whole list is restarted from scratch once (a fresh token is only
+ * valid against a resourceVersion the server still holds). If the restart
+ * also hits a 410, the items already collected are returned as an explicit
+ * partial result (`truncated: true`) instead of throwing.
  */
 export async function listBounded<T>(path: string, opts: ListBoundedOptions = {}): Promise<BoundedList<T>> {
   const limit = opts.limit ?? DEFAULT_LIST_LIMIT
   const maxPages = opts.maxPages ?? DEFAULT_LIST_MAX_PAGES
-  const items: T[] = []
-  let continueToken: string | undefined
-  let pages = 0
-  let truncated = false
 
-  while (pages < maxPages) {
-    const params = new URLSearchParams()
-    params.set("limit", String(limit))
-    if (opts.labelSelector) params.set("labelSelector", opts.labelSelector)
-    if (opts.fieldSelector) params.set("fieldSelector", opts.fieldSelector)
-    if (continueToken) params.set("continue", continueToken)
+  const fetchPages = async (): Promise<BoundedList<T>> => {
+    const items: T[] = []
+    let continueToken: string | undefined
+    let pages = 0
+    let truncated = false
 
-    const sep = path.includes("?") ? "&" : "?"
-    const data = await k8sFetch<K8sListResponse<T>>(`${path}${sep}${params.toString()}`)
-    items.push(...(data.items ?? []))
-    pages++
+    while (pages < maxPages) {
+      const params = new URLSearchParams()
+      params.set("limit", String(limit))
+      if (opts.labelSelector) params.set("labelSelector", opts.labelSelector)
+      if (opts.fieldSelector) params.set("fieldSelector", opts.fieldSelector)
+      if (continueToken) params.set("continue", continueToken)
 
-    continueToken = data.metadata?.continue
-    if (!continueToken) break
-    if (pages >= maxPages) {
-      // More pages exist (continue is set) but we hit the hard cap — the list is incomplete.
-      truncated = true
+      const sep = path.includes("?") ? "&" : "?"
+      try {
+        const data = await k8sFetch<K8sListResponse<T>>(`${path}${sep}${params.toString()}`)
+        items.push(...(data.items ?? []))
+        pages++
+
+        continueToken = data.metadata?.continue
+        if (!continueToken) break
+        if (pages >= maxPages) {
+          // More pages exist (continue is set) but we hit the hard cap — the list is incomplete.
+          truncated = true
+        }
+      } catch (err) {
+        if (err instanceof K8sHttpError && err.status === 410) {
+          // Signal the caller to restart; distinguish "expired mid-pagination"
+          // (items + pages collected so far) from other failures, which just propagate.
+          throw new ListBoundedGoneError<T>(items, pages)
+        }
+        throw err
+      }
     }
+
+    return { items, truncated, pages }
   }
 
-  return { items, truncated, pages }
+  try {
+    return await fetchPages()
+  } catch (err) {
+    if (!(err instanceof ListBoundedGoneError)) throw err
+    try {
+      return await fetchPages()
+    } catch (retryErr) {
+      if (!(retryErr instanceof ListBoundedGoneError)) throw retryErr
+      // Expired again on the restart — report what we have (including pages
+      // actually collected during the restart) rather than fail the caller.
+      const gone = retryErr as ListBoundedGoneError<T>
+      return { items: gone.items, truncated: true, pages: gone.pages }
+    }
+  }
+}
+
+/** Internal signal from fetchPages: the continue token expired (410) mid-page. */
+class ListBoundedGoneError<T> extends Error {
+  constructor(public readonly items: T[], public readonly pages: number) {
+    super("continue token expired (410 Gone)")
+  }
 }
 
 /** Runs `fn` over `items` with at most `concurrency` in flight at once. */

@@ -26,6 +26,9 @@ export interface CostTrendResponse {
   pricing: ReturnType<typeof getCostPricing>["metadata"]
   points: Awaited<ReturnType<typeof getCostTrend>>["points"]
   notice?: string
+  // portal#64 AC4: explicit telemetry state distinguishes a genuinely empty
+  // trend (no visible namespaces / no data) from a Prometheus failure.
+  telemetry: Awaited<ReturnType<typeof getCostTrend>>["telemetry"]
 }
 
 export async function GET(req: NextRequest) {
@@ -87,7 +90,7 @@ export async function GET(req: NextRequest) {
     }
 
     const pricing = getCostPricing()
-    const { points, notice } = await getCostTrend(
+    const { points, notice, telemetry } = await getCostTrend(
       scope as "cluster" | "namespace" | "service",
       id,
       days,
@@ -102,6 +105,7 @@ export async function GET(req: NextRequest) {
       generatedAt: new Date().toISOString(),
       pricing: pricing.metadata,
       points,
+      telemetry,
     }
     if (notice) body.notice = notice
 

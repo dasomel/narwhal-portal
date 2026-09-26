@@ -181,11 +181,11 @@ export default async function NodeDetailPage({
                 </CardHeader>
                 <CardContent className="space-y-4 pt-6 text-sm px-5 pb-6">
                    {[
-                    [t("nodes.info.ip"), detail.internalIP, <Globe className="h-4 w-4 text-muted-foreground" />],
-                    [t("nodes.info.os"), detail.osImage, <Globe className="h-4 w-4 text-muted-foreground" />],
-                    [t("nodes.info.kernel"), detail.kernelVersion, <Activity className="h-4 w-4 text-muted-foreground" />],
-                    [t("nodes.info.arch"), detail.architecture, <Cpu className="h-4 w-4 text-muted-foreground" />],
-                    [t("nodes.info.createdAt"), formatDate(detail.createdAt, locale), <Clock className="h-4 w-4 text-muted-foreground" />]
+                    [t("nodes.info.ip"), detail.internalIP, <Globe key="ip" className="h-4 w-4 text-muted-foreground" />],
+                    [t("nodes.info.os"), detail.osImage, <Globe key="os" className="h-4 w-4 text-muted-foreground" />],
+                    [t("nodes.info.kernel"), detail.kernelVersion, <Activity key="kernel" className="h-4 w-4 text-muted-foreground" />],
+                    [t("nodes.info.arch"), detail.architecture, <Cpu key="arch" className="h-4 w-4 text-muted-foreground" />],
+                    [t("nodes.info.createdAt"), formatDate(detail.createdAt, locale), <Clock key="createdAt" className="h-4 w-4 text-muted-foreground" />]
                    ].map(([l, v, icon]) => (
                       <div key={l as string} className="flex flex-col gap-1.5 border-b border-border/50 pb-3.5 last:border-0 hover:bg-muted/50/40 transition-colors rounded px-4 -mx-4 -mt-2 pt-2">
                          <div className="flex items-center gap-2.5 text-xs text-muted-foreground font-black uppercase tracking-widest leading-none">{icon}{l as string}</div>
