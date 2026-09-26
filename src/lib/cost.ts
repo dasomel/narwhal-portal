@@ -13,6 +13,10 @@ import { getDependencyUrl, isProduction } from "./config"
 // and 208c21d (scorecard unavailable-vs-fail) already established, instead of
 // inventing a parallel one for cost responses.
 import type { TelemetryStatus, EvidenceSource } from "./prometheus"
+// portal#47 proof point: expose CostTelemetry through the unified dependency-health
+// contract additively (see costTelemetryToDependencyStatus below) without changing
+// CostResult/CostTrendResult's own shape.
+import { fromTelemetryStatus, type DependencyStatus } from "./dependency-health"
 
 function prometheusUrl(): string {
   return getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")
@@ -337,6 +341,22 @@ export interface CostTelemetry {
   queriedAt: string
   state: TelemetryStatus
   reason?: string
+}
+
+// portal#47: additive adapter onto the unified dependency-health contract. `state` already
+// reuses prometheus.ts's TelemetryStatus verbatim (D1 above), so this is a pure vocabulary
+// translation via fromTelemetryStatus — no new business logic. `dependency` is hardcoded to
+// "prometheus" rather than read from `telemetry.source`: combineTelemetry() (below) only ever
+// emits source "prometheus" or "none" (cost.ts has no K8s fallback), and "none" still means
+// "the prometheus query(ies) behind this telemetry came back unavailable", not a different
+// dependency.
+export function costTelemetryToDependencyStatus(telemetry: CostTelemetry): DependencyStatus {
+  return {
+    dependency: "prometheus",
+    state: fromTelemetryStatus(telemetry.state),
+    observedAt: telemetry.queriedAt,
+    ...(telemetry.reason ? { reason: telemetry.reason } : {}),
+  }
 }
 
 export interface UnlabeledWorkloadsExclusion {
