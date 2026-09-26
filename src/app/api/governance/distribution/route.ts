@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { getNodeMetrics } from "@/lib/prometheus"
 import {
   getAllNodesForDistribution,
@@ -63,7 +64,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const cacheKey = "governance:distribution:v2"
+  const cacheKey = cacheKeys.governanceDistributionV2()
   try {
     const cached = await cacheGet<DistributionResponse>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -292,7 +293,7 @@ export async function GET() {
     }
 
     try {
-      await cacheSet(cacheKey, response, 15)
+      await cacheSet(cacheKey, response, cacheTtl("governanceDistributionV2"))
     } catch (err) {
       console.warn("[governance/distribution] Cache write failed (non-fatal):", err)
     }

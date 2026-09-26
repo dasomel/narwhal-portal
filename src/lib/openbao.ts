@@ -1,5 +1,6 @@
 import { readFileSync } from "fs"
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getDependencyUrl, isProduction } from "./config"
 
 /**
@@ -204,7 +205,7 @@ async function baoFetch(path: string, init?: RequestInit): Promise<Response> {
 }
 
 export async function listSecrets(): Promise<SecretEntry[]> {
-  const cacheKey = "openbao:secrets"
+  const cacheKey = cacheKeys.openbaoSecrets()
   const cached = await cacheGet<SecretEntry[]>(cacheKey)
   if (cached) return cached
 
@@ -216,7 +217,7 @@ export async function listSecrets(): Promise<SecretEntry[]> {
   if (listRes.status === 404) {
     // KV v2 404s a list on a prefix with nothing under it — a genuine empty
     // inventory, distinct from a read failure, so this caches and returns clean.
-    await cacheSet(cacheKey, [], 30)
+    await cacheSet(cacheKey, [], cacheTtl("openbaoSecrets"))
     return []
   }
   if (!listRes.ok) {
@@ -250,6 +251,6 @@ export async function listSecrets(): Promise<SecretEntry[]> {
     })
   )
 
-  await cacheSet(cacheKey, entries, 30)
+  await cacheSet(cacheKey, entries, cacheTtl("openbaoSecrets"))
   return entries
 }

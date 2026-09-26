@@ -2,6 +2,7 @@ import "server-only"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import type { SecuritySummary, WorkloadVulnRow, ImageVulnReport, Vulnerability, Severity, VulnDbFreshness } from "@/types/security"
 
 // --- K8s API helpers (local, avoids circular dep with k8s-client.ts) ---
@@ -160,7 +161,7 @@ const emptySummary: SecuritySummary = {
 // --- Exported functions (signatures unchanged) ---
 
 export async function getSecuritySummary(): Promise<SecuritySummary> {
-  const cacheKey = "security:summary"
+  const cacheKey = cacheKeys.trivySummary()
   const cached = await cacheGet<SecuritySummary>(cacheKey)
   if (cached) return cached
 
@@ -200,7 +201,7 @@ export async function getSecuritySummary(): Promise<SecuritySummary> {
       vulnDb: computeVulnDbFreshness(latestTs),
     }
 
-    await cacheSet(cacheKey, result, 60)
+    await cacheSet(cacheKey, result, cacheTtl("trivySummary"))
     return result
   } catch (err) {
     console.warn("[trivy] getSecuritySummary failed:", err instanceof Error ? err.message : err)
@@ -209,7 +210,7 @@ export async function getSecuritySummary(): Promise<SecuritySummary> {
 }
 
 export async function getWorkloadVulnerabilities(): Promise<WorkloadVulnRow[]> {
-  const cacheKey = "security:workloads"
+  const cacheKey = cacheKeys.trivyWorkloads()
   const cached = await cacheGet<WorkloadVulnRow[]>(cacheKey)
   if (cached) return cached
 
@@ -219,7 +220,7 @@ export async function getWorkloadVulnerabilities(): Promise<WorkloadVulnRow[]> {
     )
     const rows = (list.items ?? []).map(reportToWorkloadRow)
 
-    await cacheSet(cacheKey, rows, 60)
+    await cacheSet(cacheKey, rows, cacheTtl("trivyWorkloads"))
     return rows
   } catch (err) {
     console.warn("[trivy] getWorkloadVulnerabilities failed:", err instanceof Error ? err.message : err)
@@ -228,7 +229,7 @@ export async function getWorkloadVulnerabilities(): Promise<WorkloadVulnRow[]> {
 }
 
 export async function getImageVulnReport(image: string): Promise<ImageVulnReport | null> {
-  const cacheKey = `security:image:${image}`
+  const cacheKey = cacheKeys.trivyImage(image)
   const cached = await cacheGet<ImageVulnReport>(cacheKey)
   if (cached) return cached
 
@@ -250,7 +251,7 @@ export async function getImageVulnReport(image: string): Promise<ImageVulnReport
       vulnerabilities: reportToVulnerabilities(item),
     }
 
-    await cacheSet(cacheKey, report, 60)
+    await cacheSet(cacheKey, report, cacheTtl("trivyImage"))
     return report
   } catch (err) {
     console.warn("[trivy] getImageVulnReport failed:", err instanceof Error ? err.message : err)
@@ -259,7 +260,7 @@ export async function getImageVulnReport(image: string): Promise<ImageVulnReport
 }
 
 export async function getTopVulnerableImages(limit = 5): Promise<WorkloadVulnRow[]> {
-  const cacheKey = `security:top-vulnerable:${limit}`
+  const cacheKey = cacheKeys.trivyTopVulnerable(limit)
   const cached = await cacheGet<WorkloadVulnRow[]>(cacheKey)
   if (cached) return cached
 
@@ -268,7 +269,7 @@ export async function getTopVulnerableImages(limit = 5): Promise<WorkloadVulnRow
     const sorted = [...rows].sort((a, b) => scoreRow(b) - scoreRow(a))
     const result = sorted.slice(0, limit)
 
-    await cacheSet(cacheKey, result, 60)
+    await cacheSet(cacheKey, result, cacheTtl("trivyTopVulnerable"))
     return result
   } catch (err) {
     console.warn("[trivy] getTopVulnerableImages failed:", err instanceof Error ? err.message : err)

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { getPodDetail, PodDetail } from "@/lib/k8s-client"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { ValidationError, toValidationErrorBody, assertK8sNamespace } from "@/lib/validation"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 
@@ -64,7 +65,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  const cacheKey = `k8s:resource:${namespace}:${name}`
+  const cacheKey = cacheKeys.k8sResource(namespace, name)
   try {
     const cached = await cacheGet<PodDetail>(cacheKey)
     if (cached) {
@@ -78,7 +79,7 @@ export async function GET(req: NextRequest) {
     const detail = await getPodDetail(namespace, name)
 
     try {
-      await cacheSet(cacheKey, detail, 10) // 10s cache
+      await cacheSet(cacheKey, detail, cacheTtl("k8sResource"))
     } catch (err) {
       console.warn("[k8s-resource-api] Cache save failed:", err)
     }

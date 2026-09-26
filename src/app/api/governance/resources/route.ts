@@ -4,6 +4,7 @@ import { queryVector, getClusterMetrics } from "@/lib/prometheus"
 import { getNamespaces, getAllPodsMinimal } from "@/lib/k8s-client"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 
 export const dynamic = "force-dynamic"
 
@@ -75,7 +76,7 @@ export async function GET() {
   // effective scope the same way scorecard/dora do. The cache key carries the scope
   // fingerprint so a scoped result never leaks to a different caller.
   const scope = await getEffectiveScope(session)
-  const cacheKey = `governance:resources:v3:${scope.fingerprint}`
+  const cacheKey = cacheKeys.governanceResourcesV3(scope.fingerprint)
   try {
     const cached = await cacheGet<ResourcesResponseV2>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -265,7 +266,7 @@ export async function GET() {
     }
 
     try {
-      await cacheSet(cacheKey, response, 30)
+      await cacheSet(cacheKey, response, cacheTtl("governanceResourcesV3"))
     } catch (err) {
       console.warn("[governance/resources] Cache write failed (non-fatal):", err)
     }

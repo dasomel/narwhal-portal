@@ -1,4 +1,5 @@
 import { cacheDel, cacheGet, cacheSet } from "./valkey"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getDependencyUrl, isProduction } from "./config"
 
 function apisixUrl(): string {
@@ -53,7 +54,7 @@ interface ApisixRoute {
 }
 
 export async function getRoutes(): Promise<ApisixRoute[]> {
-  const cached = await cacheGet<ApisixRoute[]>("apisix:routes")
+  const cached = await cacheGet<ApisixRoute[]>(cacheKeys.apisixRoutes())
   if (cached) return cached
 
   try {
@@ -67,7 +68,7 @@ export async function getRoutes(): Promise<ApisixRoute[]> {
     if (!res.ok) throw new Error(`APISIX routes ${res.status}`)
     const data = await res.json()
     const routes: ApisixRoute[] = (data.list ?? []).map((item: { value: ApisixRoute }) => item.value)
-    await cacheSet("apisix:routes", routes, 30)
+    await cacheSet(cacheKeys.apisixRoutes(), routes, cacheTtl("apisixRoutes"))
     return routes
   } catch (err) {
     // Portal #54: a credential-configuration error is not "provider unreachable" —
@@ -85,5 +86,5 @@ export async function toggleRoute(id: string, enable: boolean): Promise<void> {
     body: JSON.stringify({ status: enable ? 1 : 0 }),
   })
   if (!res.ok) throw new Error(`Toggle route failed: ${res.status}`)
-  await cacheDel("apisix:routes")
+  await cacheDel(cacheKeys.apisixRoutes())
 }

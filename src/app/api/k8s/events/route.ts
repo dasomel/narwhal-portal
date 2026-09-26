@@ -4,6 +4,7 @@ import { getResourceEvents, ResourceEvent } from "@/lib/k8s-client"
 import { cacheGet, cacheSet } from "@/lib/valkey"
 import { ValidationError, toValidationErrorBody, assertK8sNamespace } from "@/lib/validation"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 
 export const dynamic = "force-dynamic"
 
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  const cacheKey = `k8s:events:${namespace}:${name}`
+  const cacheKey = cacheKeys.k8sEvents(namespace, name)
   try {
     const cached = await cacheGet<ResourceEvent[]>(cacheKey)
     if (cached) {
@@ -61,7 +62,7 @@ export async function GET(req: NextRequest) {
     const events = await getResourceEvents(namespace, name)
 
     try {
-      await cacheSet(cacheKey, events, 10) // 10s cache
+      await cacheSet(cacheKey, events, cacheTtl("k8sEvents"))
     } catch (err) {
       console.warn("[k8s-events-api] Cache save failed:", err)
     }

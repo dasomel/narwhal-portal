@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoAppsOrThrow } from "@/lib/argocd"
 import { getAlerts } from "@/lib/alertmanager"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { appVisible, getEffectiveScope } from "@/lib/scope"
 import { findOwnershipMismatch, getTeamMappings, type OwnershipMismatch } from "@/lib/role-filter"
 
@@ -35,7 +36,7 @@ export async function GET() {
   // first requester's (or here, an entirely unfiltered) result to everyone after.
   // Scoping the key, not just the response, is what makes this safe to cache at all.
   const scope = await getEffectiveScope(session)
-  const cacheKey = `governance:scorecard:${scope.fingerprint}`
+  const cacheKey = cacheKeys.governanceScorecard(scope.fingerprint)
   const cached = await cacheGet<ScorecardItem[]>(cacheKey)
   if (cached) return NextResponse.json(cached)
 
@@ -98,7 +99,7 @@ export async function GET() {
     })
 
     scorecards.sort((a, b) => a.scores.overall - b.scores.overall)
-    await cacheSet(cacheKey, scorecards, 30)
+    await cacheSet(cacheKey, scorecards, cacheTtl("governanceScorecard"))
     return NextResponse.json(scorecards)
   } catch (err) {
     console.error("[governance/scorecard]", err)

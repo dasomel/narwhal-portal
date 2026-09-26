@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoApps } from "@/lib/argocd"
 import { getCommitTimestamp } from "@/lib/gitea"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { appVisible, getEffectiveScope } from "@/lib/scope"
 import { assertPromQLSafe } from "@/lib/validation"
 import { getDependencyUrl } from "@/lib/config"
@@ -135,7 +136,7 @@ export async function GET() {
   const scope = await getEffectiveScope(session)
   // v2 prefix: response shape changed (nullable changeFailureRate, outcome
   // evidence fields) — keep old cached v1 payloads from being served as-is.
-  const cacheKey = `governance:dora:v2:${scope.fingerprint}`
+  const cacheKey = cacheKeys.governanceDoraV2(scope.fingerprint)
   try {
     const cached = await cacheGet<DoraMetrics>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -340,7 +341,7 @@ export async function GET() {
     // ArgoCD가 일시적으로 빈 목록을 반환한 경우(0건)는 캐시에 박제하지 않는다
     if (deployments.length > 0) {
       try {
-        await cacheSet(cacheKey, result, 120) // Cached for 120s
+        await cacheSet(cacheKey, result, cacheTtl("governanceDoraV2"))
       } catch (err) {
         console.warn("[governance/dora] Cache save failed:", err)
       }

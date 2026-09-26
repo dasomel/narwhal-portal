@@ -10,10 +10,15 @@ import { RuntimeEventsFeed } from "@/components/security/runtime-events-feed"
 import type { SecuritySummary, WorkloadVulnRow } from "@/types/security"
 import type { ClusterInfra } from "@/app/api/cluster/route"
 import { cacheGet } from "@/lib/valkey"
+import { clusterCacheKey, DEFAULT_CLUSTER_ID } from "@/lib/cluster-registry"
 
 async function detectUbuntu2604(): Promise<boolean> {
   try {
-    const cached = await cacheGet<ClusterInfra>("cluster:infra")
+    // #53: this literally read "cluster:infra", a key /api/cluster/route.ts has never
+    // written since #21 added the cluster_id dimension (clusterCacheKey) — a permanent
+    // cache miss that silently made this check always fall through to `false`. Use the
+    // same builder, pinned to the default cluster this page is scoped to.
+    const cached = await cacheGet<ClusterInfra>(clusterCacheKey(DEFAULT_CLUSTER_ID, "infra"))
     if (cached) {
       return cached.nodes.some((n) => n.osImage.includes("26.04"))
     }

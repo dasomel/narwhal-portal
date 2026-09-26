@@ -5,6 +5,7 @@
  * Prometheus 미응답 시 빈 그래프 + notice를 반환 (graceful degradation).
  */
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getArgoApps } from "./argocd"
 import type { ScoreTier } from "./argocd"
 import { getDependencyUrl } from "./config"
@@ -369,7 +370,7 @@ export async function getServiceGraph(
   namespace?: string,
   minRate: number = MIN_RATE,
 ): Promise<ServiceGraphResult> {
-  const cacheKey = `graph:cluster:${window}:${namespace ?? "all"}`
+  const cacheKey = cacheKeys.serviceGraphCluster(window, namespace)
   const cached = await cacheGet<ServiceGraphResult>(cacheKey)
   if (cached) return cached
 
@@ -498,7 +499,7 @@ export async function getServiceDependencies(
   serviceId: string,
   window: GraphWindow,
 ): Promise<ServiceDependenciesResult> {
-  const cacheKey = `graph:svc:${serviceId}:${window}`
+  const cacheKey = cacheKeys.serviceGraphSvc(serviceId, window)
   const cached = await cacheGet<ServiceDependenciesResult>(cacheKey)
   if (cached) return cached
 
@@ -539,6 +540,6 @@ export async function getServiceDependencies(
   }
 
   // 1분 TTL (spec §4.5)
-  await cacheSet(cacheKey, result, 60)
+  await cacheSet(cacheKey, result, cacheTtl("serviceGraphSvc"))
   return result
 }

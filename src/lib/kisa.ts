@@ -1,5 +1,6 @@
 import "server-only"
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { KISA_CATALOG } from "./kisa-controls"
 import type { KisaControl, KisaResponse, KisaStatus } from "@/types/kisa"
 
@@ -325,7 +326,7 @@ async function checkRbac(id: "KISA-RBAC-01" | "KISA-RBAC-02"): Promise<{ status:
 // --- Main export ---
 
 export async function getKisaControls(): Promise<KisaResponse> {
-  const cacheKey = "compliance:kisa:list"
+  const cacheKey = cacheKeys.kisaComplianceList()
   const cached = await cacheGet<KisaResponse>(cacheKey)
   if (cached) return cached
 
@@ -407,6 +408,6 @@ export async function getKisaControls(): Promise<KisaResponse> {
   }
 
   const result: KisaResponse = { controls, summary }
-  await cacheSet(cacheKey, result, 60)
+  await cacheSet(cacheKey, result, cacheTtl("kisaComplianceList"))
   return result
 }

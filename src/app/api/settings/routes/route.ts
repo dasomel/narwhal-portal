@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getRoutes, toggleRoute } from "@/lib/apisix-client"
 import { requireAdmin } from "@/lib/auth"
 import { cacheGet, cacheSet, cacheDel } from "@/lib/valkey"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 
 export const dynamic = "force-dynamic"
 
@@ -12,11 +13,11 @@ export async function GET() {
     return NextResponse.json({ error: result.error === "unauthorized" ? "Unauthorized" : "Forbidden" }, { status })
   }
   try {
-    const cached = await cacheGet<any[]>("api:routes-list")
+    const cached = await cacheGet<any[]>(cacheKeys.routesList())
     if (cached) return NextResponse.json(cached)
 
     const routes = await getRoutes()
-    await cacheSet("api:routes-list", routes, 60)
+    await cacheSet(cacheKeys.routesList(), routes, cacheTtl("routesList"))
     return NextResponse.json(routes)
   }
   catch (err) {
@@ -37,7 +38,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Invalid input: id (string) and enable (boolean) required" }, { status: 400 })
     }
     await toggleRoute(id, enable)
-    await cacheDel("api:routes-list")
+    await cacheDel(cacheKeys.routesList())
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error("PATCH /api/settings/routes error:", err)

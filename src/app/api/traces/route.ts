@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { getDependencyUrl } from "@/lib/config"
 
 export const dynamic = "force-dynamic"
@@ -35,7 +36,7 @@ export async function GET(req: Request) {
     )
   }
 
-  const cacheKey = `traces:${service}`
+  const cacheKey = cacheKeys.traces(service)
   const cached = await cacheGet<TraceEntry[]>(cacheKey)
   if (cached) return NextResponse.json(cached)
 
@@ -57,7 +58,7 @@ export async function GET(req: Request) {
       spanCount: t.spanSets?.[0]?.spans?.length ?? 0,
     }))
 
-    await cacheSet(cacheKey, traces, 15)
+    await cacheSet(cacheKey, traces, cacheTtl("traces"))
     return NextResponse.json(traces)
   } catch {
     return NextResponse.json([])

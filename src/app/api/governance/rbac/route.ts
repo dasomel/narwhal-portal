@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { getRbacBindings, getClusterRoles, getRoles } from "@/lib/k8s-client"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 
 export const dynamic = "force-dynamic"
 
@@ -49,7 +50,7 @@ export async function GET() {
     )
   }
 
-  const cacheKey = "governance:rbac:v2"
+  const cacheKey = cacheKeys.governanceRbacV2()
   try {
     const cached = await cacheGet<RbacResponseV2>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -215,7 +216,7 @@ export async function GET() {
     const response: RbacResponseV2 = { bindings: bindingsV2, summary }
 
     try {
-      await cacheSet(cacheKey, response, 60)
+      await cacheSet(cacheKey, response, cacheTtl("governanceRbacV2"))
     } catch (err) {
       console.warn("[governance/rbac] Cache write failed (non-fatal):", err)
     }

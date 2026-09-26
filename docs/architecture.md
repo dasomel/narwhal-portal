@@ -52,6 +52,23 @@ sequenceDiagram
 - Runtime configuration is injected through deployment resources, not bundled into the UI.
 - Correlated data with uncertain relationships is labeled instead of presented as authoritative.
 
+## Caching contract
+
+Every Valkey cache key (`src/lib/valkey.ts`'s `cacheGet`/`cacheSet`/`cacheDel`) is built from
+explicit named dimensions in [`src/lib/cache-keys.ts`](../src/lib/cache-keys.ts) — namespace,
+schema version, `cluster_id` (via `clusterCacheKey`, `src/lib/cluster-registry.ts`), and
+authorization scope (via `EffectiveScope.fingerprint`, `src/lib/scope.ts`) — rather than a
+hand-written template string per route. `CACHE_NAMESPACES` in that module is the full documented
+contract (dimensions / TTL / invalidation trigger / whether a partial provider response is ever
+cached) for every namespace in the codebase, and
+[`cache-keys.contract.test.ts`](../src/lib/cache-keys.contract.test.ts) enforces it: every
+namespace whose cached value differs by caller identity, team, role, or cluster must carry a
+matching dimension, and no namespace caches a failed/partial provider fetch.
+
+`src/lib/argocd.ts`, `src/lib/gitea.ts`, `src/lib/http-client.ts`, and `src/lib/keycloak-client.ts`
+(`KEYCLOAK_CACHE_KEYS`, already centralized per #49) own their own key construction and are
+referenced in the registry for completeness rather than migrated into this module.
+
 ## Relationship to Narwhal
 
 This repository owns portal code and packaging. The [Narwhal repository](https://github.com/dasomel/narwhal) owns cluster provisioning, GitOps applications, gateways, identity and platform services. A new cluster capability therefore needs a portal contract here and deployment/configuration in Narwhal separately.
