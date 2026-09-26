@@ -13,7 +13,7 @@ export default defineConfig({
     // Agent worktrees are created under .claude/worktrees/ inside this repo; without
     // this, vitest also collects every test file in those checkouts and the suite
     // count doubles (observed 559 vs 283), so "all green" stops meaning this tree.
-    exclude: [...configDefaults.exclude, ".claude/**"],
+    exclude: [...configDefaults.exclude, ".claude/**", "e2e/**"],
   },
   resolve: {
     alias: {
