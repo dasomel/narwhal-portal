@@ -1,4 +1,5 @@
 import type { NextConfig } from "next"
+import packageJson from "./package.json"
 
 // 환경변수에서 origin 추출 유틸
 function extractOrigin(url: string | undefined): string | null {
@@ -44,6 +45,11 @@ const imageDomains: ImageDomain[] = [
   }, [])
 
 const nextConfig: NextConfig = {
+  // Public build metadata only; Next replaces these values in client bundles at build time.
+  env: {
+    APP_VERSION: packageJson.version,
+    APP_COMMIT: process.env.GIT_SHA || "dev",
+  },
   output: "standalone",
   poweredByHeader: false,
   reactStrictMode: true,

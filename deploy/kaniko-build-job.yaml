@@ -119,6 +119,8 @@ spec:
           args:
             - "--context=dir:///workspace"
             - "--dockerfile=/workspace/Dockerfile"
+            # Commit metadata is resolved by kaniko-build.sh from the pushed source.
+            - "--build-arg=GIT_SHA=__GIT_SHA__"
             # Destination is templated by kaniko-build.sh at apply-time.
             # The placeholder below must match the sed pattern in kaniko-build.sh.
             - "--destination=__HARBOR_DESTINATION__"

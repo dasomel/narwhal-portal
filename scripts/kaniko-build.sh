@@ -183,6 +183,7 @@ EOF
   git config user.name "Kaniko Build"
   git add -A
   git commit -m "build: narwhal-portal source for Kaniko in-cluster build"
+  BUILD_GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo dev)"
 
   # push (force: 이전 build 커밋 덮어쓰기)
   GIT_ASKPASS="${ASKPASS_SCRIPT}" GITEA_ADMIN_PASSWORD="${GITEA_ADMIN_PASSWORD}" \
@@ -190,6 +191,13 @@ EOF
   cd "${REPO_ROOT}"
 
   info "Gitea push 완료"
+fi
+
+if [[ -z "${BUILD_GIT_SHA:-}" ]]; then
+  BUILD_GIT_SHA="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo dev)"
+fi
+if [[ ! "${BUILD_GIT_SHA}" =~ ^[0-9a-f]{7,40}$ ]] && [[ "${BUILD_GIT_SHA}" != "dev" ]]; then
+  BUILD_GIT_SHA="dev"
 fi
 
 cleanup_pf
@@ -234,6 +242,7 @@ info "Kaniko Job 적용: destination=${HARBOR_DESTINATION}"
 sed \
   -e "s|__HARBOR_DESTINATION__|${HARBOR_DESTINATION}|g" \
   -e "s|__HARBOR_HOST__|${HARBOR_HOST}|g" \
+  -e "s|__GIT_SHA__|${BUILD_GIT_SHA}|g" \
   "${JOB_TEMPLATE}" | kubectl apply -f -
 
 # ---- 10. Job 완료 대기 -------------------------------------------------------
