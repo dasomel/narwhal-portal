@@ -24,14 +24,14 @@ vi.mock("./valkey", () => ({
 
 import { readFileSync } from "fs"
 import { cacheGet, cacheSet } from "./valkey"
-import { listSecrets, SecretMetadataError, getOpenBaoToken } from "./openbao"
+import { baoFetch, listSecrets, SecretMetadataError, getOpenBaoToken } from "./openbao"
 
 const mockedReadFileSync = vi.mocked(readFileSync)
 const mockedCacheGet = vi.mocked(cacheGet)
 const mockedCacheSet = vi.mocked(cacheSet)
 
 function jsonResponse(body: unknown, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response
+  return Response.json(body, { status })
 }
 
 function enoent(path: string): NodeJS.ErrnoException {
@@ -111,6 +111,24 @@ describe("listSecrets — metadata-only inventory", () => {
 })
 
 describe("listSecrets — explicit degraded failure", () => {
+  it("does not expose the OpenBao token in transport error messages", async () => {
+    process.env.OPENBAO_AUTH_METHOD = "token"
+    process.env.OPENBAO_TOKEN = "sensitive-openbao-token"
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("upstream transport failure")
+    }))
+
+    let message = ""
+    try {
+      await listSecrets()
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(message).toContain("Network error calling")
+    expect(message).not.toContain("sensitive-openbao-token")
+  })
+
   it("throws SecretMetadataError instead of silently returning [] when the list call is forbidden", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ errors: ["permission denied"] }, 403)))
 
@@ -167,10 +185,7 @@ describe("openbao Kubernetes auth token provider", () => {
   it("logs in via Kubernetes auth (auth/kubernetes/login) and returns the client token", async () => {
     process.env.OPENBAO_AUTH_METHOD = "kubernetes"
     mockedReadFileSync.mockReturnValueOnce("jwt-from-file")
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ auth: { client_token: "client-tok-1", lease_duration: 3600, renewable: true } }),
-    })
+    mockFetch.mockResolvedValueOnce(jsonResponse({ auth: { client_token: "client-tok-1", lease_duration: 3600, renewable: true } }))
 
     const token = await getOpenBaoToken()
 
@@ -184,13 +199,41 @@ describe("openbao Kubernetes auth token provider", () => {
     })
   })
 
+  it.each([503])("does not retry Kubernetes login after HTTP %s", async (status) => {
+    process.env.OPENBAO_AUTH_METHOD = "kubernetes"
+    mockedReadFileSync.mockReturnValueOnce("jwt-from-file")
+    mockFetch.mockResolvedValueOnce(jsonResponse({}, status))
+
+    await expect(getOpenBaoToken()).rejects.toThrow(`login failed: ${status}`)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([["GET", [503, 200], 2], ["POST", [503], 1]] as const)(
+    "applies retry policy to OpenBao %s requests (%j)",
+    async (method, statuses, expectedCalls) => {
+      vi.useRealTimers()
+      process.env.OPENBAO_AUTH_METHOD = "token"
+      process.env.OPENBAO_TOKEN = "test-token"
+      let responseIndex = 0
+      mockFetch.mockImplementation(async () => {
+        const status = statuses[responseIndex++]
+        return Response.json(status === 200 ? { data: { keys: [] } } : {}, {
+          status,
+          headers: status === 503 ? { "Retry-After": "0" } : undefined,
+        })
+      })
+
+      const response = await baoFetch("/v1/secret/metadata/narwhal-portal/?list=true", { method })
+
+      expect(response.status).toBe(method === "GET" ? 200 : 503)
+      expect(mockFetch).toHaveBeenCalledTimes(expectedCalls)
+    },
+  )
+
   it("reuses the cached client token without logging in again", async () => {
     process.env.OPENBAO_AUTH_METHOD = "kubernetes"
     mockedReadFileSync.mockReturnValue("jwt-from-file")
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ auth: { client_token: "client-tok-1", lease_duration: 3600, renewable: true } }),
-    })
+    mockFetch.mockResolvedValue(jsonResponse({ auth: { client_token: "client-tok-1", lease_duration: 3600, renewable: true } }))
 
     const first = await getOpenBaoToken()
     const second = await getOpenBaoToken()
@@ -203,10 +246,7 @@ describe("openbao Kubernetes auth token provider", () => {
   it("collapses concurrent cold-cache callers into a single login", async () => {
     process.env.OPENBAO_AUTH_METHOD = "kubernetes"
     mockedReadFileSync.mockReturnValue("jwt-from-file")
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ auth: { client_token: "tok-shared", lease_duration: 3600, renewable: true } }),
-    })
+    mockFetch.mockResolvedValue(jsonResponse({ auth: { client_token: "tok-shared", lease_duration: 3600, renewable: true } }))
 
     const tokens = await Promise.all([getOpenBaoToken(), getOpenBaoToken(), getOpenBaoToken()])
 
@@ -217,10 +257,7 @@ describe("openbao Kubernetes auth token provider", () => {
   it("treats lease_duration 0 as the default lease instead of expiring the cache immediately", async () => {
     process.env.OPENBAO_AUTH_METHOD = "kubernetes"
     mockedReadFileSync.mockReturnValue("jwt-from-file")
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ auth: { client_token: "tok-nolease", lease_duration: 0, renewable: false } }),
-    })
+    mockFetch.mockResolvedValue(jsonResponse({ auth: { client_token: "tok-nolease", lease_duration: 0, renewable: false } }))
 
     await getOpenBaoToken()
     vi.advanceTimersByTime(60_000)
@@ -233,10 +270,7 @@ describe("openbao Kubernetes auth token provider", () => {
   it("keeps serving a valid cached token when the JWT file is transiently unmounted and the method is unset", async () => {
     delete process.env.OPENBAO_AUTH_METHOD
     mockedReadFileSync.mockReturnValue("jwt-from-file")
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ auth: { client_token: "tok-cached", lease_duration: 3600, renewable: true } }),
-    })
+    mockFetch.mockResolvedValue(jsonResponse({ auth: { client_token: "tok-cached", lease_duration: 3600, renewable: true } }))
     await getOpenBaoToken()
 
     mockedReadFileSync.mockImplementation((path) => {
@@ -253,14 +287,8 @@ describe("openbao Kubernetes auth token provider", () => {
     process.env.OPENBAO_AUTH_METHOD = "kubernetes"
     mockedReadFileSync.mockReturnValue("jwt-from-file")
     mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ auth: { client_token: "tok-1", lease_duration: 10, renewable: true } }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ auth: { client_token: "tok-2", lease_duration: 10, renewable: true } }),
-      })
+      .mockResolvedValueOnce(jsonResponse({ auth: { client_token: "tok-1", lease_duration: 10, renewable: true } }))
+      .mockResolvedValueOnce(jsonResponse({ auth: { client_token: "tok-2", lease_duration: 10, renewable: true } }))
 
     const first = await getOpenBaoToken()
     expect(first).toBe("tok-1")
@@ -281,17 +309,12 @@ describe("openbao Kubernetes auth token provider", () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.endsWith("/v1/auth/kubernetes/login")) {
         loginCalls += 1
-        return {
-          ok: true,
-          json: async () => ({
-            auth: { client_token: `tok-${loginCalls}`, lease_duration: 3600, renewable: true },
-          }),
-        }
+        return jsonResponse({ auth: { client_token: `tok-${loginCalls}`, lease_duration: 3600, renewable: true } })
       }
       if (url.includes("/v1/secret/metadata/narwhal-portal/?list=true")) {
         // First attempt (with tok-1) is rejected; only the retry (post force-refresh, tok-2) succeeds.
-        if (loginCalls < 2) return { ok: false, status: 403 }
-        return { ok: true, json: async () => ({ data: { keys: [] } }) }
+        if (loginCalls < 2) return Response.json({ errors: ["permission denied"] }, { status: 403 })
+        return jsonResponse({ data: { keys: [] } })
       }
       throw new Error(`unexpected fetch to ${url}`)
     })

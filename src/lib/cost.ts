@@ -9,6 +9,8 @@ import { cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
 import { namespaceVisible, type EffectiveScope } from "./scope"
 import { getDependencyUrl, isProduction } from "./config"
+import { fetchWithPolicy, HttpClientError, readJsonWithPolicy } from "./http-client"
+import { PROM_POLICY } from "./prometheus"
 // portal#64 AC3/AC4: reuse the telemetry vocabulary #51 (ClusterMetricsProjection)
 // and 208c21d (scorecard unavailable-vs-fail) already established, instead of
 // inventing a parallel one for cost responses.
@@ -189,19 +191,15 @@ interface PromVectorResult {
 // ---------------------------------------------------------------------------
 
 const PROM_TIMEOUT_MS = 5000
+// Preserves the pre-migration timeout (#48 slice 3).
+const PROM_RANGE_TIMEOUT_MS = 5000
 
 async function queryVector(promql: string): Promise<PromVectorResult[]> {
   const url = `${prometheusUrl()}/api/v1/query?query=${encodeURIComponent(promql)}`
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), PROM_TIMEOUT_MS)
-  try {
-    const res = await fetch(url, { signal: controller.signal, next: { revalidate: 0 } })
-    if (!res.ok) throw new Error(`Prometheus query failed: ${res.status}`)
-    const data = await res.json()
-    return data?.data?.result ?? []
-  } finally {
-    clearTimeout(timer)
-  }
+  const res = await fetchWithPolicy(url, { next: { revalidate: 0 } }, { ...PROM_POLICY, timeoutMs: PROM_TIMEOUT_MS })
+  if (!res.ok) throw new Error(`Prometheus query failed: ${res.status}`)
+  const data = await readJsonWithPolicy<{ data?: { result?: PromVectorResult[] } }>(res)
+  return data?.data?.result ?? []
 }
 
 async function queryRangeVector(
@@ -211,16 +209,10 @@ async function queryRangeVector(
   step: number
 ): Promise<Array<{ metric: Record<string, string>; values: [number, string][] }>> {
   const url = `${prometheusUrl()}/api/v1/query_range?query=${encodeURIComponent(promql)}&start=${startTs}&end=${endTs}&step=${step}`
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), PROM_TIMEOUT_MS)
-  try {
-    const res = await fetch(url, { signal: controller.signal, next: { revalidate: 0 } })
-    if (!res.ok) throw new Error(`Prometheus range query failed: ${res.status}`)
-    const data = await res.json()
-    return data?.data?.result ?? []
-  } finally {
-    clearTimeout(timer)
-  }
+  const res = await fetchWithPolicy(url, { next: { revalidate: 0 } }, { ...PROM_POLICY, timeoutMs: PROM_RANGE_TIMEOUT_MS })
+  if (!res.ok) throw new Error(`Prometheus range query failed: ${res.status}`)
+  const data = await readJsonWithPolicy<{ data?: { result?: Array<{ metric: Record<string, string>; values: [number, string][] }> } }>(res)
+  return data?.data?.result ?? []
 }
 
 // ---------------------------------------------------------------------------
@@ -463,12 +455,15 @@ function combineTelemetry(statuses: QueryStatus[], queriedAt: string, reasons: s
 
 // 기존 AbortError 타임아웃 메시지를 그대로 보존한다 — Promise.allSettled로 바뀌면서
 // 개별 reject의 예외 인스턴스를 다시 catch하는 대신 reject 이유들을 훑어 판단한다.
-function timeoutNotice(settled: PromiseSettledResult<unknown>[]): string {
+function timeoutNotice(settled: PromiseSettledResult<unknown>[], timeoutMs = PROM_TIMEOUT_MS): string {
   const timedOut = settled.some(
-    (r) => r.status === "rejected" && r.reason instanceof Error && r.reason.name === "AbortError"
+    (r) => r.status === "rejected" && (
+      (r.reason instanceof Error && r.reason.name === "AbortError") ||
+      (r.reason instanceof HttpClientError && r.reason.kind === "timeout")
+    )
   )
   return timedOut
-    ? "Prometheus 응답 시간 초과(5s). 잠시 후 다시 시도하세요."
+    ? `Prometheus 응답 시간 초과(${timeoutMs / 1000}s). 잠시 후 다시 시도하세요.`
     : "Prometheus 쿼리 실패. 메트릭 수집 서버 상태를 확인하세요."
 }
 
@@ -906,7 +901,7 @@ export async function getCostTrend(
   ])
   const telemetry = combineTelemetry(settled.map(rangeStatus), queriedAt, rejectReasons(settled))
   if (telemetry.state === "unavailable") {
-    return { points: [], notice: timeoutNotice(settled), telemetry }
+    return { points: [], notice: timeoutNotice(settled, PROM_RANGE_TIMEOUT_MS), telemetry }
   }
   const [cpuSettled, memSettled] = settled
   const cpuRange = cpuSettled.status === "fulfilled" ? cpuSettled.value : []

@@ -3,12 +3,12 @@ import { cacheKeys, cacheTtl } from "./cache-keys"
 import { assertPromQLSafe, K8S_NODE_NAME_RE } from "./validation"
 import { getK8sApiServer, getDependencyUrl } from "./config"
 import { fetchWithPolicy, readJsonWithPolicy, HttpClientError } from "./http-client"
+import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 
 // No automatic retry: these queries back polled dashboards that re-query on
 // their own, and retrying 429/5xx would multiply load on a Prometheus that is
 // already overloaded. A failed attempt surfaces as "unavailable" telemetry.
-const PROM_POLICY = { retry: false } as const
-import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
+export const PROM_POLICY = { retry: false } as const
 
 // portal#48: queryScalarExplicit/queryVectorExplicit/queryRangeExplicit had NO
 // timeout at all before this migration — a stalled Prometheus connection could

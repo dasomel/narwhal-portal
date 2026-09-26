@@ -74,10 +74,7 @@ beforeEach(() => {
   vi.mocked(cacheGet).mockResolvedValue(null)
   vi.mocked(cacheSet).mockResolvedValue(undefined)
   vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
-  vi.stubGlobal("fetch", vi.fn(async () => ({
-    ok: true,
-    json: async () => ({ data: { result: [{ metric: {}, values: [[1, "2"]] }] } }),
-  })))
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: { result: [{ metric: {}, values: [[1, "2"]] }] } })))
 })
 
 afterEach(() => {

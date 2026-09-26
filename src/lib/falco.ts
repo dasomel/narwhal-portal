@@ -2,6 +2,7 @@ import "server-only"
 import { cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getDependencyUrl } from "./config"
+import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
 import { assertLogQLSafe } from "./validation"
 import type { FalcoEvent, FalcoEventPriority } from "@/types/security"
 
@@ -95,14 +96,12 @@ async function queryLoki(logql: string, sinceMinutes: number, limit: number): Pr
   })
 
   const url = `${getLokiUrl()}/loki/api/v1/query_range?${params.toString()}`
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 5000)
-  const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer))
+  const res = await fetchWithPolicy(url, {}, { timeoutMs: 5000 })
   if (!res.ok) {
     throw new Error(`Loki API ${res.status} ${res.statusText}`)
   }
 
-  const body = (await res.json()) as LokiQueryResponse
+  const body = await readJsonWithPolicy<LokiQueryResponse>(res)
   const events: FalcoEvent[] = []
 
   for (const stream of body.data?.result ?? []) {

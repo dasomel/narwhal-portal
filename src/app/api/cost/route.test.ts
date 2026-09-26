@@ -80,7 +80,7 @@ function fakeFetch(url: string) {
   return jsonResponse([])
 }
 function jsonResponse(result: unknown) {
-  return { ok: true, json: async () => ({ data: { result } }) } as Response
+  return Response.json({ data: { result } })
 }
 
 function requestUrl(scope?: string) {
