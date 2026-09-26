@@ -291,6 +291,7 @@ describe("fetchWithPolicy", () => {
     const data = await readJsonWithPolicy<{ ok: boolean }>(res)
 
     expect(data.ok).toBe(true)
+    expect(res.body?.locked).toBe(false)
   })
 
   it("falls back to a plain, unbounded read for a Response this client never produced", async () => {

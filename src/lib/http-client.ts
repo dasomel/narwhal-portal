@@ -303,6 +303,13 @@ async function collectBytesWithDeadline(response: Response, remainingMs: number,
     }
   } finally {
     clearTimeout(timer)
+    // Release on every exit path so the stream isn't left locked; releaseLock
+    // throws only if a read is still pending, which cancel() has already settled.
+    try {
+      reader.releaseLock()
+    } catch {
+      /* already released or pending read */
+    }
   }
   return concatBytes(chunks)
 }
