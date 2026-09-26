@@ -49,13 +49,10 @@ beforeEach(() => {
   vi.mocked(cacheGet).mockResolvedValue(null)
   vi.mocked(cacheSet).mockResolvedValue(undefined)
   vi.mocked(getNamespaces).mockResolvedValue(namespaces)
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
-    ok: true,
-    json: async () => ({ data: { result: url.includes("container_cpu_usage_seconds_total")
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => Response.json({ data: { result: url.includes("container_cpu_usage_seconds_total")
       ? [{ metric: { namespace: "platform-system", label_app_kubernetes_io_instance: "platform-app", pod: "platform-pod" }, value: [0, "2"] }]
       : [{ metric: { namespace: "platform-system", label_app_kubernetes_io_instance: "platform-app", pod: "platform-pod" }, value: [0, "4000000000"] }],
-    } }),
-  })))
+    } })))
 })
 
 afterEach(() => vi.unstubAllGlobals())

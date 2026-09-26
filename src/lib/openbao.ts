@@ -2,6 +2,7 @@ import { readFileSync } from "fs"
 import { cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getDependencyUrl, isProduction } from "./config"
+import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
 
 /**
  * 환경변수에서 시크릿 읽기. OpenBao Agent Injector 애노테이션이 클러스터 배포에
@@ -132,16 +133,16 @@ async function loginWithKubernetes(): Promise<CachedToken> {
   assertHttpsInProduction(addr)
   const mount = k8sAuthMount()
 
-  const res = await fetch(`${addr}/v1/auth/${mount}/login`, {
+  const res = await fetchWithPolicy(`${addr}/v1/auth/${mount}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ role: k8sRole(), jwt }),
-  })
+  }, { retry: false })
   if (!res.ok) {
     throw new Error(`[OpenBao] Kubernetes auth login failed: ${res.status}`)
   }
 
-  const data = await res.json()
+  const data = await readJsonWithPolicy<{ auth?: { client_token?: string; lease_duration?: number } }>(res)
   const clientToken: string | undefined = data?.auth?.client_token
   // lease_duration 0 means "no lease" in OpenBao; treat it (and garbage) as the
   // default rather than expiring the cache immediately and re-logging in per call.
@@ -183,25 +184,25 @@ export async function getOpenBaoToken(forceRefresh = false): Promise<string> {
   return cachedToken.token
 }
 
-async function baoFetch(path: string, init?: RequestInit): Promise<Response> {
+export async function baoFetch(path: string, init?: RequestInit): Promise<Response> {
   const addr = openbaoAddr()
   assertHttpsInProduction(addr)
 
   const token = await getOpenBaoToken()
-  const res = await fetch(`${addr}${path}`, {
+  const res = await fetchWithPolicy(`${addr}${path}`, {
     ...init,
     headers: { "X-Vault-Token": token, ...init?.headers },
-  })
+  }, { retry: init?.method && !["GET", "HEAD"].includes(init.method.toUpperCase()) ? false : undefined })
 
   if (res.status !== 403) return res
 
   // Client token may have been revoked/expired server-side before our cache
   // window elapsed (or a static OPENBAO_TOKEN was rotated) — re-login once.
   const retryToken = await getOpenBaoToken(true)
-  return fetch(`${addr}${path}`, {
+  return fetchWithPolicy(`${addr}${path}`, {
     ...init,
     headers: { "X-Vault-Token": retryToken, ...init?.headers },
-  })
+  }, { retry: false })
 }
 
 export async function listSecrets(): Promise<SecretEntry[]> {
@@ -224,7 +225,7 @@ export async function listSecrets(): Promise<SecretEntry[]> {
     throw new SecretMetadataError(`Failed to list secret metadata (HTTP ${listRes.status})`)
   }
 
-  const listData = await listRes.json()
+  const listData = await readJsonWithPolicy<{ data?: { keys?: string[] } }>(listRes)
   // Keys are returned relative to the listed prefix (e.g. "keycloak-token"),
   // so prefix them back for metadata lookups while displaying the leaf name.
   const keys: string[] = listData?.data?.keys ?? []
@@ -241,7 +242,7 @@ export async function listSecrets(): Promise<SecretEntry[]> {
       if (!metaRes.ok) {
         throw new SecretMetadataError(`Failed to read metadata for '${key}' (HTTP ${metaRes.status})`)
       }
-      const meta = await metaRes.json()
+      const meta = await readJsonWithPolicy<{ data?: { current_version?: number; created_time?: string; updated_time?: string } }>(metaRes)
       return {
         path: key,
         version: meta?.data?.current_version ?? 0,

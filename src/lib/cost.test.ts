@@ -26,7 +26,7 @@ const testNamespaces: NamespaceInfo[] = [
 ]
 
 function jsonResponse(result: unknown) {
-  return { ok: true, json: async () => ({ data: { result } }) } as Response
+  return Response.json({ data: { result } })
 }
 
 describe("cost cache multi-cluster and cross-scope isolation (Portal #64)", () => {
@@ -450,6 +450,33 @@ describe("cost exclusions and telemetry (Portal #64 AC3/AC4)", () => {
     expect(result.telemetry.state).toBe("unavailable")
     expect(result.telemetry.source).toBe("none")
     expect(result.notice).toBeTruthy()
+    expect(cacheSet).not.toHaveBeenCalled()
+  })
+
+  it.each([429, 503])("does not retry Prometheus %s responses for cost telemetry", async (status) => {
+    const fetchSpy = vi.fn(async () => Response.json({}, { status }))
+    vi.stubGlobal("fetch", fetchSpy)
+    const scope = await getEffectiveScope({ groups: ["developer"], teams: ["platform-team"] })
+
+    const result = await getCost("cluster", scope)
+
+    expect(result.telemetry.state).toBe("unavailable")
+    expect(fetchSpy).toHaveBeenCalledTimes(3)
+  })
+
+  it("maps a Prometheus timeout to unavailable telemetry and the existing timeout notice", async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal("fetch", vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+    })))
+    const scope = await getEffectiveScope({ groups: ["developer"], teams: ["platform-team"] })
+
+    const resultPromise = getCost("cluster", scope)
+    await vi.advanceTimersByTimeAsync(5000)
+    const result = await resultPromise
+
+    expect(result.telemetry.state).toBe("unavailable")
+    expect(result.notice).toContain("응답 시간 초과(5s)")
     expect(cacheSet).not.toHaveBeenCalled()
   })
 

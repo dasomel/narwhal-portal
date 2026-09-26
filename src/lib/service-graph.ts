@@ -9,6 +9,8 @@ import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getArgoApps } from "./argocd"
 import type { ScoreTier } from "./argocd"
 import { getDependencyUrl } from "./config"
+import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
+import { PROM_POLICY } from "./prometheus"
 
 function prometheusUrl(): string {
   return getDependencyUrl("PROMETHEUS_URL", "http://localhost:9090")
@@ -85,13 +87,11 @@ interface HistogramResult {
 // 7d/30d 윈도의 4중 병렬 쿼리가 5초를 넘기는 경우가 있어 10초로 상향 —
 // 타임아웃 시 rawEdges=null → namespaces 없는 빈 응답이 내려가 UI가 깨졌었다.
 async function queryPrometheus(promql: string, timeoutMs = 10000): Promise<VectorResult[] | null> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const url = `${prometheusUrl()}/api/v1/query?query=${encodeURIComponent(promql)}`
-    const res = await fetch(url, { signal: controller.signal, next: { revalidate: 0 } })
+    const res = await fetchWithPolicy(url, { next: { revalidate: 0 } }, { ...PROM_POLICY, timeoutMs })
     if (!res.ok) return null
-    const data = await res.json()
+    const data = await readJsonWithPolicy<{ status?: string; data?: { result?: Array<{ metric: Record<string, string>; value: [number, string] }> } }>(res)
     if (data?.status !== "success") return null
     return (data?.data?.result ?? []).map(
       (r: { metric: Record<string, string>; value: [number, string] }) => ({
@@ -101,8 +101,6 @@ async function queryPrometheus(promql: string, timeoutMs = 10000): Promise<Vecto
     )
   } catch {
     return null
-  } finally {
-    clearTimeout(timer)
   }
 }
 
