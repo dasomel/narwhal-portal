@@ -1,6 +1,7 @@
 import { cacheDel, cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getDependencyUrl, isProduction } from "./config"
+import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
 
 function apisixUrl(): string {
   return getDependencyUrl("APISIX_ADMIN_URL", "http://localhost:9180")
@@ -58,16 +59,14 @@ export async function getRoutes(): Promise<ApisixRoute[]> {
   if (cached) return cached
 
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5000)
-    const res = await fetch(`${apisixUrl()}/apisix/admin/routes`, {
-      headers: { "X-API-KEY": apisixReadonlyKey() },
-      signal: controller.signal,
-    })
-    clearTimeout(timeout)
+    const res = await fetchWithPolicy(
+      `${apisixUrl()}/apisix/admin/routes`,
+      { headers: { "X-API-KEY": apisixReadonlyKey() } },
+      { timeoutMs: 5000 }
+    )
     if (!res.ok) throw new Error(`APISIX routes ${res.status}`)
-    const data = await res.json()
-    const routes: ApisixRoute[] = (data.list ?? []).map((item: { value: ApisixRoute }) => item.value)
+    const data = await readJsonWithPolicy<{ list?: Array<{ value: ApisixRoute }> }>(res)
+    const routes: ApisixRoute[] = (data.list ?? []).map((item) => item.value)
     await cacheSet(cacheKeys.apisixRoutes(), routes, cacheTtl("apisixRoutes"))
     return routes
   } catch (err) {
@@ -80,11 +79,18 @@ export async function getRoutes(): Promise<ApisixRoute[]> {
 }
 
 export async function toggleRoute(id: string, enable: boolean): Promise<void> {
-  const res = await fetch(`${apisixUrl()}/apisix/admin/routes/${id}`, {
-    method: "PATCH",
-    headers: { "X-API-KEY": apisixAdminKey(), "Content-Type": "application/json" },
-    body: JSON.stringify({ status: enable ? 1 : 0 }),
-  })
+  // portal#48: PATCH is a mutation against the APISIX admin API — retry: false
+  // explicitly (no timeout before this migration; now gets the shared client's
+  // default 10s).
+  const res = await fetchWithPolicy(
+    `${apisixUrl()}/apisix/admin/routes/${id}`,
+    {
+      method: "PATCH",
+      headers: { "X-API-KEY": apisixAdminKey(), "Content-Type": "application/json" },
+      body: JSON.stringify({ status: enable ? 1 : 0 }),
+    },
+    { retry: false }
+  )
   if (!res.ok) throw new Error(`Toggle route failed: ${res.status}`)
   await cacheDel(cacheKeys.apisixRoutes())
 }

@@ -28,6 +28,20 @@ import {
   invalidateKeycloakCaches,
 } from "./keycloak-client"
 
+// portal#48: kcFetch/fetchAdminToken now read the response body via
+// fetchWithPolicy's readJsonWithPolicy, which reads response.body directly
+// (not response.json()/.text()) so a stalled body can be bound to a deadline.
+// A plain `{ ok, status, json: () => ... }` mock has no `.body` ReadableStream,
+// so it silently reads as empty instead of the intended payload — mocks whose
+// body actually gets read need to be a real Response.
+function jsonResponse(body: unknown, status = 200, statusText?: string, headers?: HeadersInit): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    statusText,
+    headers: { "content-type": "application/json", ...(headers as Record<string, string> | undefined) },
+  })
+}
+
 describe("keycloak-client pagination and methods", () => {
   const originalFetch = global.fetch
   const mockFetch = vi.fn()
@@ -41,10 +55,7 @@ describe("keycloak-client pagination and methods", () => {
     process.env.KEYCLOAK_ADMIN_CLIENT_ID = "narwhal-portal-admin"
     process.env.KEYCLOAK_ADMIN_CLIENT_SECRET = "test-admin-secret"
     global.fetch = mockFetch
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ access_token: "mock-admin-token", expires_in: 3600 }),
-    })
+    mockFetch.mockResolvedValueOnce(jsonResponse({ access_token: "mock-admin-token", expires_in: 3600 }))
     await getKeycloakAdminToken()
   })
 
@@ -86,18 +97,9 @@ describe("keycloak-client pagination and methods", () => {
     }))
 
     mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => page1,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => page2,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => page3,
-      })
+      .mockResolvedValueOnce(jsonResponse(page1))
+      .mockResolvedValueOnce(jsonResponse(page2))
+      .mockResolvedValueOnce(jsonResponse(page3))
 
     const users = await getUsers()
 
@@ -125,14 +127,8 @@ describe("keycloak-client pagination and methods", () => {
     const page2: Record<string, unknown>[] = []
 
     mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => page1,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => page2,
-      })
+      .mockResolvedValueOnce(jsonResponse(page1))
+      .mockResolvedValueOnce(jsonResponse(page2))
 
     const users = await getUsers()
 
@@ -180,14 +176,8 @@ describe("keycloak-client pagination and methods", () => {
     const page2 = [{ id: "g-100", name: "group-100" }]
 
     mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => page1,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => page2,
-      })
+      .mockResolvedValueOnce(jsonResponse(page1))
+      .mockResolvedValueOnce(jsonResponse(page2))
 
     const groups = await getGroups()
     expect(groups).toHaveLength(101)
@@ -206,14 +196,8 @@ describe("keycloak-client pagination and methods", () => {
     const page2 = [{ id: "m-100", username: "member-100", email: "m-100@example.com" }]
 
     mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => page1,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => page2,
-      })
+      .mockResolvedValueOnce(jsonResponse(page1))
+      .mockResolvedValueOnce(jsonResponse(page2))
 
     const members = await getGroupMembers("group-xyz")
     expect(members).toHaveLength(101)
@@ -229,16 +213,10 @@ describe("keycloak-client pagination and methods", () => {
       attributes: { role: [`role-${i}`] },
     }))
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => groupList,
-    })
+    mockFetch.mockResolvedValueOnce(jsonResponse(groupList))
 
     for (let i = 0; i < 12; i++) {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ id: `user-for-${i}` }],
-      })
+      mockFetch.mockResolvedValueOnce(jsonResponse([{ id: `user-for-${i}` }]))
     }
 
     const detailed = await getGroupsDetailed()
@@ -257,8 +235,8 @@ describe("keycloak-client pagination and methods", () => {
     ]
 
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => groupList })
-      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "user-ok" }] })
+      .mockResolvedValueOnce(jsonResponse(groupList))
+      .mockResolvedValueOnce(jsonResponse([{ id: "user-ok" }]))
       .mockResolvedValueOnce({ ok: false, status: 503 })
 
     const detailed = await getGroupsDetailed()
@@ -280,17 +258,14 @@ describe("keycloak-client pagination and methods", () => {
         ok: true,
         headers: new Headers({ Location: "http://localhost/admin/realms/narwhal/users/new-user-123" }),
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: "new-user-123",
-          username: "newuser",
-          email: "new@example.com",
-          firstName: "New",
-          lastName: "User",
-          enabled: true,
-        }),
-      })
+      .mockResolvedValueOnce(jsonResponse({
+        id: "new-user-123",
+        username: "newuser",
+        email: "new@example.com",
+        firstName: "New",
+        lastName: "User",
+        enabled: true,
+      }))
 
     const user = await createUser({
       username: "newuser",
@@ -356,14 +331,11 @@ describe("keycloak-client pagination and methods", () => {
 
   it("updateGroupAttributes invalidates keycloak:groups, keycloak:groups-detailed, and api:groups-enriched caches", async () => {
     mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          id: "group-123",
-          name: "Engineers",
-          attributes: { env: ["dev"] },
-        }),
-      })
+      .mockResolvedValueOnce(jsonResponse({
+        id: "group-123",
+        name: "Engineers",
+        attributes: { env: ["dev"] },
+      }))
       .mockResolvedValueOnce({
         ok: true,
       })
@@ -426,10 +398,7 @@ describe("getKeycloakAdminToken — token provider", () => {
   })
 
   it("fetches a token via client_credentials against the admin realm", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ access_token: "tok-1", expires_in: 3600 }),
-    })
+    mockFetch.mockResolvedValueOnce(jsonResponse({ access_token: "tok-1", expires_in: 3600 }))
 
     const token = await getKeycloakAdminToken()
 
@@ -444,10 +413,7 @@ describe("getKeycloakAdminToken — token provider", () => {
   })
 
   it("reuses the cached token without re-fetching", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ access_token: "tok-1", expires_in: 3600 }),
-    })
+    mockFetch.mockResolvedValue(jsonResponse({ access_token: "tok-1", expires_in: 3600 }))
 
     const first = await getKeycloakAdminToken()
     const second = await getKeycloakAdminToken()
@@ -459,8 +425,8 @@ describe("getKeycloakAdminToken — token provider", () => {
 
   it("re-fetches once the cached token passes 80% of expires_in", async () => {
     mockFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "tok-1", expires_in: 10 }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "tok-2", expires_in: 10 }) })
+      .mockResolvedValueOnce(jsonResponse({ access_token: "tok-1", expires_in: 10 }))
+      .mockResolvedValueOnce(jsonResponse({ access_token: "tok-2", expires_in: 10 }))
 
     const first = await getKeycloakAdminToken()
     expect(first).toBe("tok-1")
@@ -474,10 +440,7 @@ describe("getKeycloakAdminToken — token provider", () => {
   })
 
   it("collapses concurrent cold-cache callers into a single fetch", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ access_token: "tok-shared", expires_in: 3600 }),
-    })
+    mockFetch.mockResolvedValue(jsonResponse({ access_token: "tok-shared", expires_in: 3600 }))
 
     const tokens = await Promise.all([
       getKeycloakAdminToken(),
@@ -494,12 +457,12 @@ describe("getKeycloakAdminToken — token provider", () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes("/protocol/openid-connect/token")) {
         tokenCalls += 1
-        return { ok: true, json: async () => ({ access_token: `tok-${tokenCalls}`, expires_in: 3600 }) }
+        return jsonResponse({ access_token: `tok-${tokenCalls}`, expires_in: 3600 })
       }
       if (url.includes("/admin/realms/narwhal/users")) {
         // First attempt (tok-1) is rejected; only the retry (tok-2, post force-refresh) succeeds.
         if (tokenCalls < 2) return { ok: false, status: 401 }
-        return { ok: true, json: async () => [] }
+        return jsonResponse([])
       }
       throw new Error(`unexpected fetch to ${url}`)
     })
@@ -562,7 +525,7 @@ describe("getKeycloakAdminToken — token provider", () => {
       expect((err as Error).message).not.toContain(SECRET)
     }
 
-    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "leaked-token-value", expires_in: 3600 }) })
+    mockFetch.mockResolvedValueOnce(jsonResponse({ access_token: "leaked-token-value", expires_in: 3600 }))
     mockFetch.mockResolvedValueOnce({ ok: false, status: 500 })
     await getKeycloakAdminToken()
     await expect(getUsers()).rejects.not.toThrow(/leaked-token-value/)

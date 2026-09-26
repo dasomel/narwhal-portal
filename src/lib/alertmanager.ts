@@ -1,6 +1,7 @@
 import { cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getDependencyUrl } from "./config"
+import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
 
 function alertmanagerUrl(): string {
   return getDependencyUrl("ALERTMANAGER_URL", "http://localhost:9093")
@@ -32,19 +33,25 @@ export async function createSilence(
   try {
     const now = new Date()
     const end = new Date(now.getTime() + durationMinutes * 60000)
-    const res = await fetch(`${alertmanagerUrl()}/api/v2/silences`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        matchers,
-        startsAt: now.toISOString(),
-        endsAt: end.toISOString(),
-        createdBy,
-        comment,
-      }),
-    })
+    // POST is a mutation (creates a real silence) — never auto-retried (no
+    // timeout before this migration; now gets the shared client's default 10s).
+    const res = await fetchWithPolicy(
+      `${alertmanagerUrl()}/api/v2/silences`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchers,
+          startsAt: now.toISOString(),
+          endsAt: end.toISOString(),
+          createdBy,
+          comment,
+        }),
+      },
+      { retry: false }
+    )
     if (!res.ok) return null
-    const data = await res.json()
+    const data = await readJsonWithPolicy<{ silenceID?: string }>(res)
     return data.silenceID ?? null
   } catch {
     return null
@@ -53,9 +60,10 @@ export async function createSilence(
 
 export async function getSilence(silenceId: string): Promise<AlertmanagerSilence | null> {
   try {
-    const res = await fetch(`${alertmanagerUrl()}/api/v2/silence/${encodeURIComponent(silenceId)}`)
+    // GET, no timeout before this migration — now gets the shared client's default 10s.
+    const res = await fetchWithPolicy(`${alertmanagerUrl()}/api/v2/silence/${encodeURIComponent(silenceId)}`)
     if (!res.ok) return null
-    return (await res.json()) as AlertmanagerSilence
+    return await readJsonWithPolicy<AlertmanagerSilence>(res)
   } catch {
     return null
   }
@@ -63,9 +71,14 @@ export async function getSilence(silenceId: string): Promise<AlertmanagerSilence
 
 export async function deleteSilence(silenceId: string): Promise<boolean> {
   try {
-    const res = await fetch(`${alertmanagerUrl()}/api/v2/silence/${encodeURIComponent(silenceId)}`, {
-      method: "DELETE",
-    })
+    // DELETE mutates alertmanager's silence state — retry: false explicitly,
+    // same as the other providers' mutation calls (no timeout before this
+    // migration; now gets the shared client's default 10s).
+    const res = await fetchWithPolicy(
+      `${alertmanagerUrl()}/api/v2/silence/${encodeURIComponent(silenceId)}`,
+      { method: "DELETE" },
+      { retry: false }
+    )
     return res.ok
   } catch {
     return false
@@ -77,14 +90,13 @@ export async function getAlerts(): Promise<Alert[]> {
   if (cached) return cached
 
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5000)
-    const res = await fetch(`${alertmanagerUrl()}/api/v2/alerts?active=true&silenced=false`, {
-      signal: controller.signal,
-    })
-    clearTimeout(timeout)
+    const res = await fetchWithPolicy(
+      `${alertmanagerUrl()}/api/v2/alerts?active=true&silenced=false`,
+      {},
+      { timeoutMs: 5000 }
+    )
     if (!res.ok) throw new Error(`Alertmanager failed: ${res.status}`)
-    const alerts: Alert[] = await res.json()
+    const alerts: Alert[] = await readJsonWithPolicy<Alert[]>(res)
     await cacheSet(cacheKeys.alertmanagerActive(), alerts, cacheTtl("alertmanagerActive"))
     return alerts
   } catch (err) {
