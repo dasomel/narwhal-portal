@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { getEvents } from "@/lib/k8s-client"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 
 export const dynamic = "force-dynamic"
 
@@ -41,7 +42,7 @@ export async function GET() {
 
   // New key: entries cached under the old "governance:audit" key carry the removed `actor`
   // field and lack evidenceKind/reportingComponent, so they must not be served after deploy.
-  const cacheKey = "governance:operational-events:v2"
+  const cacheKey = cacheKeys.governanceOperationalEventsV2()
   const cached = await cacheGet<OperationalEventEntry[]>(cacheKey)
   if (cached) return NextResponse.json(cached)
 
@@ -69,7 +70,7 @@ export async function GET() {
         source: [e.source?.component, e.source?.host].filter(Boolean).join(" / "),
       }))
 
-    await cacheSet(cacheKey, entries, 15)
+    await cacheSet(cacheKey, entries, cacheTtl("governanceOperationalEventsV2"))
     return NextResponse.json(entries)
   } catch (err) {
     console.error("[governance/audit]", err)

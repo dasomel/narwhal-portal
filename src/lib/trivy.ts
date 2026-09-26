@@ -2,6 +2,7 @@ import "server-only"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import type { SecuritySummary, WorkloadVulnRow, ImageVulnReport, Vulnerability, Severity, VulnDbFreshness } from "@/types/security"
 
 // --- K8s API helpers (local, avoids circular dep with k8s-client.ts) ---
@@ -160,7 +161,7 @@ const emptySummary: SecuritySummary = {
 // --- Exported functions (signatures unchanged) ---
 
 export async function getSecuritySummary(): Promise<SecuritySummary> {
-  const cacheKey = "security:summary"
+  const cacheKey = cacheKeys.trivySummary()
   const cached = await cacheGet<SecuritySummary>(cacheKey)
   if (cached) return cached
 
@@ -209,7 +210,7 @@ export async function getSecuritySummary(): Promise<SecuritySummary> {
 }
 
 export async function getWorkloadVulnerabilities(): Promise<WorkloadVulnRow[]> {
-  const cacheKey = "security:workloads"
+  const cacheKey = cacheKeys.trivyWorkloads()
   const cached = await cacheGet<WorkloadVulnRow[]>(cacheKey)
   if (cached) return cached
 
@@ -228,7 +229,7 @@ export async function getWorkloadVulnerabilities(): Promise<WorkloadVulnRow[]> {
 }
 
 export async function getImageVulnReport(image: string): Promise<ImageVulnReport | null> {
-  const cacheKey = `security:image:${image}`
+  const cacheKey = cacheKeys.trivyImage(image)
   const cached = await cacheGet<ImageVulnReport>(cacheKey)
   if (cached) return cached
 
@@ -259,7 +260,7 @@ export async function getImageVulnReport(image: string): Promise<ImageVulnReport
 }
 
 export async function getTopVulnerableImages(limit = 5): Promise<WorkloadVulnRow[]> {
-  const cacheKey = `security:top-vulnerable:${limit}`
+  const cacheKey = cacheKeys.trivyTopVulnerable(limit)
   const cached = await cacheGet<WorkloadVulnRow[]>(cacheKey)
   if (cached) return cached
 

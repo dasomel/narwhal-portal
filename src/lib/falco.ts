@@ -1,5 +1,6 @@
 import "server-only"
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import { getDependencyUrl } from "./config"
 import { assertLogQLSafe } from "./validation"
 import type { FalcoEvent, FalcoEventPriority } from "@/types/security"
@@ -122,7 +123,7 @@ interface GetRuntimeEventsOpts {
 
 export async function getRuntimeEvents(opts: GetRuntimeEventsOpts = {}): Promise<FalcoEvent[]> {
   const { priority, sinceMinutes = 60, limit = 100 } = opts
-  const cacheKey = `falco:events:${priority ?? "all"}:${sinceMinutes}:${limit}`
+  const cacheKey = cacheKeys.falcoEvents(priority, sinceMinutes, limit)
   const cached = await cacheGet<FalcoEvent[]>(cacheKey)
   if (cached) return cached
 
@@ -144,7 +145,7 @@ export async function getRuntimeEvents(opts: GetRuntimeEventsOpts = {}): Promise
 }
 
 export async function getCriticalRuntimeAlerts(): Promise<FalcoEvent[]> {
-  const cacheKey = "falco:critical"
+  const cacheKey = cacheKeys.falcoCritical()
   const cached = await cacheGet<FalcoEvent[]>(cacheKey)
   if (cached) return cached
 

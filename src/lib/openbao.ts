@@ -1,5 +1,6 @@
 import { readFileSync } from "fs"
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import { getDependencyUrl, isProduction } from "./config"
 
 /**
@@ -204,7 +205,7 @@ async function baoFetch(path: string, init?: RequestInit): Promise<Response> {
 }
 
 export async function listSecrets(): Promise<SecretEntry[]> {
-  const cacheKey = "openbao:secrets"
+  const cacheKey = cacheKeys.openbaoSecrets()
   const cached = await cacheGet<SecretEntry[]>(cacheKey)
   if (cached) return cached
 

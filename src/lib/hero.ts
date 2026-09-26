@@ -1,4 +1,5 @@
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import { getAlerts } from "./alertmanager"
 import { getArgoApps } from "./argocd"
 import { getClusterMetrics } from "./prometheus"
@@ -363,13 +364,13 @@ export async function buildHeroResponse(): Promise<HeroResponse> {
 }
 
 export async function getHeroResponse(): Promise<HeroResponse> {
-  const cached = await cacheGet<HeroResponse>("hero:summary")
+  const cached = await cacheGet<HeroResponse>(cacheKeys.heroSummary())
   if (cached) return cached
 
   const hero = await buildHeroResponse()
 
   // Cache failure is non-fatal — cacheSet swallows errors internally
-  await cacheSet("hero:summary", hero, 10)
+  await cacheSet(cacheKeys.heroSummary(), hero, 10)
 
   return hero
 }

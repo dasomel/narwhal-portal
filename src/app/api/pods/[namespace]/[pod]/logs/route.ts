@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { getK8sApiServer } from "@/lib/config"
 import { getK8sBearerToken } from "@/lib/k8s-token"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys } from "@/lib/cache-keys"
 import {
   assertK8sName,
   assertK8sNamespace,
@@ -67,7 +68,7 @@ export async function GET(
   const tailLines = Math.min(Number(searchParams.get("tailLines") ?? "200"), 1000)
   const previous = searchParams.get("previous") === "true"
 
-  const cacheKey = `pods:logs:${namespace}:${pod}:${container}:${tailLines}:${previous}`
+  const cacheKey = cacheKeys.podsLogs(namespace, pod, container, tailLines, previous)
   const cached = await cacheGet<PodLogsResponse>(cacheKey)
   if (cached) return NextResponse.json(cached)
 

@@ -2,6 +2,7 @@ import yaml from "js-yaml"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import { getArgoApps, getArgoApp } from "./argocd"
 
 const SCORECARD_CM_NAME = process.env.SCORECARD_CONFIGMAP_NAME ?? "narwhal-scorecard-rules"
@@ -84,7 +85,7 @@ const FALLBACK_RULES: ScorecardRulesDoc = {
 }
 
 export async function loadRules(): Promise<ScorecardRulesDoc> {
-  const cacheKey = "scorecard:rules"
+  const cacheKey = cacheKeys.scorecardRules()
   const cached = await cacheGet<ScorecardRulesDoc>(cacheKey)
   if (cached) return cached
 
@@ -323,7 +324,7 @@ export async function evaluateService(serviceId: string): Promise<ScorecardEvalu
   // busts this key instead of serving an evaluation computed under stale rules —
   // loadRules() is itself cached (300s), so this is cheap.
   const rules = await loadRules()
-  const cacheKey = `scorecard:detail:${rules.version}:${serviceId}`
+  const cacheKey = cacheKeys.scorecardDetail(rules.version, serviceId)
   const cached = await cacheGet<ScorecardEvaluation>(cacheKey)
   if (cached) return cached
 
@@ -408,7 +409,7 @@ export async function evaluateAll(
   // See evaluateService: load rules first so rules.version can bust this key
   // when the ConfigMap changes, instead of relying on this cache's own 60s TTL.
   const rules = await loadRules()
-  const cacheKey = `scorecard:all:${rules.version}:${tierFilter ?? ""}`
+  const cacheKey = cacheKeys.scorecardAll(rules.version, tierFilter)
   const cached = await cacheGet<ScorecardEvaluation[]>(cacheKey)
   if (cached) return cached
 

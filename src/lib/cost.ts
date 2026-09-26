@@ -6,6 +6,7 @@
  */
 
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import { namespaceVisible, type EffectiveScope } from "./scope"
 import { getDependencyUrl, isProduction } from "./config"
 // portal#64 AC3/AC4: reuse the telemetry vocabulary #51 (ClusterMetricsProjection)
@@ -500,7 +501,7 @@ export async function getCost(
   const { unitPrices } = pricing
   // v2: 캐시에 telemetry/exclusions가 없던 이전 배포분의 항목을 그대로 반환하지
   // 않도록 키 네임스페이스를 분리한다 (크리틱 리뷰 #7).
-  const cacheKey = `cost:v2:${scope}:${effScope.fingerprint}:${pricingCacheKey(pricing)}`
+  const cacheKey = cacheKeys.costV2(scope, effScope.fingerprint, pricingCacheKey(pricing))
   const cached = await cacheGet<CostResult>(cacheKey)
   if (cached !== null) return cached
 
@@ -755,7 +756,7 @@ export async function getCostByService(
   const pricing = getCostPricing()
   const { unitPrices } = pricing
   // v2: see getCost's cache key comment (크리틱 리뷰 #7).
-  const cacheKey = `cost:service:v2:${effScope.fingerprint}:${serviceNamespace}:${serviceId}:${pricingCacheKey(pricing)}`
+  const cacheKey = cacheKeys.costServiceV2(effScope.fingerprint, serviceNamespace, serviceId, pricingCacheKey(pricing))
   const cached = await cacheGet<CostDetailResult | CostUnavailableResult>(cacheKey)
   if (cached !== null) return cached
 
@@ -853,7 +854,7 @@ export async function getCostTrend(
   // 갈린다. pricingCacheKey는 모든 scope에 필요 — 단가 설정이 바뀌면 과거 응답을
   // 재사용하면 안 된다.
   // v2: see getCost's cache key comment (크리틱 리뷰 #7).
-  const cacheKey = `cost:trend:v2:${scope}:${effScope.fingerprint}:${serviceNamespace ?? ""}:${id}:${safeDays}:${pricingCacheKey(pricing)}`
+  const cacheKey = cacheKeys.costTrendV2(scope, effScope.fingerprint, serviceNamespace, id, safeDays, pricingCacheKey(pricing))
   const cached = await cacheGet<CostTrendResult>(cacheKey)
   if (cached !== null) return cached
 

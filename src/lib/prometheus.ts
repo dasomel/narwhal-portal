@@ -1,4 +1,5 @@
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import { assertPromQLSafe, K8S_NODE_NAME_RE } from "./validation"
 import { getK8sApiServer, getDependencyUrl } from "./config"
 import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
@@ -188,7 +189,7 @@ export async function queryScalarExplicit(
 ): Promise<PromQueryResult<number>> {
   assertPromQLSafe(promql)
   const clusterId = options?.clusterId ?? DEFAULT_CLUSTER_ID
-  const cacheKey = `prom:${clusterId}:${promql}`
+  const cacheKey = cacheKeys.promQuery(clusterId, promql)
   const cached = await cacheGet<PromQueryResult<number>>(cacheKey)
   if (cached !== null) return cached
 
@@ -317,7 +318,7 @@ export async function queryVectorExplicit(
 ): Promise<PromVectorResult> {
   assertPromQLSafe(promql)
   const clusterId = options?.clusterId ?? DEFAULT_CLUSTER_ID
-  const cacheKey = `promv:${clusterId}:${promql}`
+  const cacheKey = cacheKeys.promVector(clusterId, promql)
   const cached = await cacheGet<PromVectorResult>(cacheKey)
   if (cached !== null) return cached
 
@@ -395,7 +396,7 @@ export async function queryRangeExplicit(
 ): Promise<PromRangeResult> {
   assertPromQLSafe(promql)
   const clusterId = options?.clusterId ?? DEFAULT_CLUSTER_ID
-  const cacheKey = `promr:${clusterId}:${promql}:${durationMinutes}`
+  const cacheKey = cacheKeys.promRange(clusterId, promql, durationMinutes)
   const cached = await cacheGet<PromRangeResult>(cacheKey)
   if (cached !== null) return cached
 
@@ -522,7 +523,7 @@ export async function getNodePodCount(nodeName: string, clusterId: string = DEFA
  * Missing or failed queries preserve null rather than collapsing into 0.
  */
 export async function getNodeMetrics(clusterId: string = DEFAULT_CLUSTER_ID): Promise<NodeMetric[]> {
-  const cacheKey = `promnodemetrics:${clusterId}`
+  const cacheKey = cacheKeys.promNodeMetrics(clusterId)
   const cached = await cacheGet<NodeMetric[]>(cacheKey)
   if (cached !== null) return cached
 
@@ -651,7 +652,7 @@ async function k8sCountsFallback(): Promise<{
 export async function getClusterMetrics(
   clusterId: string = DEFAULT_CLUSTER_ID
 ): Promise<ClusterMetricsProjection> {
-  const cacheKey = `promcluster:${clusterId}`
+  const cacheKey = cacheKeys.promCluster(clusterId)
   const cached = await cacheGet<ClusterMetricsProjection>(cacheKey)
   if (cached !== null) return cached
 

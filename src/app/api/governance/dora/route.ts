@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoApps } from "@/lib/argocd"
 import { getCommitTimestamp } from "@/lib/gitea"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys } from "@/lib/cache-keys"
 import { appVisible, getEffectiveScope } from "@/lib/scope"
 import { assertPromQLSafe } from "@/lib/validation"
 import { getDependencyUrl } from "@/lib/config"
@@ -135,7 +136,7 @@ export async function GET() {
   const scope = await getEffectiveScope(session)
   // v2 prefix: response shape changed (nullable changeFailureRate, outcome
   // evidence fields) — keep old cached v1 payloads from being served as-is.
-  const cacheKey = `governance:dora:v2:${scope.fingerprint}`
+  const cacheKey = cacheKeys.governanceDoraV2(scope.fingerprint)
   try {
     const cached = await cacheGet<DoraMetrics>(cacheKey)
     if (cached) return NextResponse.json(cached)

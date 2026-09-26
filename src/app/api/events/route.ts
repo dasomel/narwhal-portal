@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { getArgoApps } from "@/lib/argocd"
 import { getAlerts } from "@/lib/alertmanager"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys } from "@/lib/cache-keys"
 import { alertVisible, appVisible, getEffectiveScope } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
   // "events:timeline" holding a fully-rendered result, so once filtering exists,
   // whoever warmed the cache would be serving their view to everyone behind them —
   // a narrower defect than no filtering at all, and a much harder one to notice.
-  const cacheKey = `events:timeline:${scope.fingerprint}`
+  const cacheKey = cacheKeys.eventsTimeline(scope.fingerprint)
   if (!sinceDate) {
     const cached = await cacheGet<TimelineEvent[]>(cacheKey)
     if (cached) return NextResponse.json(cached)

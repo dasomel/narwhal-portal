@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys } from "@/lib/cache-keys"
 import { getArgoApps } from "@/lib/argocd"
 
 export const dynamic = "force-dynamic"
@@ -118,7 +119,7 @@ export async function GET() {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const cacheKey = "architecture:topology"
+  const cacheKey = cacheKeys.architectureTopology()
   const cached = await cacheGet<ArchitectureData>(cacheKey)
   if (cached) return NextResponse.json(cached)
 

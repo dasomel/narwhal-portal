@@ -2,6 +2,7 @@ import "server-only"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import type {
   Severity,
   CheckSummary,
@@ -228,7 +229,7 @@ function resolveRbacRoleName(item: RawAuditReport): string {
 // --- getConfigAuditList ---
 
 export async function getConfigAuditList(): Promise<ConfigAuditRow[]> {
-  const cacheKey = "compliance:config-audit:list"
+  const cacheKey = cacheKeys.complianceConfigAuditList()
   const cached = await cacheGet<ConfigAuditRow[]>(cacheKey)
   if (cached) return cached
 
@@ -263,7 +264,7 @@ export async function getConfigAuditDetail(
   namespace: string,
   name: string,
 ): Promise<ConfigAuditDetail | null> {
-  const cacheKey = `compliance:config-audit:${namespace}:${name}`
+  const cacheKey = cacheKeys.complianceConfigAuditDetail(namespace, name)
   const cached = await cacheGet<ConfigAuditDetail>(cacheKey)
   if (cached) return cached
 
@@ -302,7 +303,7 @@ export async function getConfigAuditDetail(
 // --- getRbacAuditList ---
 
 export async function getRbacAuditList(): Promise<RbacAuditRow[]> {
-  const cacheKey = "compliance:rbac-audit:list"
+  const cacheKey = cacheKeys.complianceRbacAuditList()
   const cached = await cacheGet<RbacAuditRow[]>(cacheKey)
   if (cached) return cached
 
@@ -343,7 +344,7 @@ export async function getRbacAuditDetail(
   namespace: string,
   name: string,
 ): Promise<RbacAuditDetail | null> {
-  const cacheKey = `compliance:rbac-audit:${namespace}:${name}`
+  const cacheKey = cacheKeys.complianceRbacAuditDetail(namespace, name)
   const cached = await cacheGet<RbacAuditDetail>(cacheKey)
   if (cached) return cached
 
@@ -388,7 +389,7 @@ export async function getRbacAuditDetail(
 // --- getInfraAuditList ---
 
 export async function getInfraAuditList(): Promise<InfraAuditRow[]> {
-  const cacheKey = "compliance:infra-audit:list"
+  const cacheKey = cacheKeys.complianceInfraAuditList()
   const cached = await cacheGet<InfraAuditRow[]>(cacheKey)
   if (cached) return cached
 
@@ -422,7 +423,7 @@ export async function getInfraAuditList(): Promise<InfraAuditRow[]> {
 // --- getInfraAuditDetail ---
 
 export async function getInfraAuditDetail(node: string): Promise<InfraAuditDetail | null> {
-  const cacheKey = `compliance:infra-audit:${node}`
+  const cacheKey = cacheKeys.complianceInfraAuditDetail(node)
   const cached = await cacheGet<InfraAuditDetail>(cacheKey)
   if (cached) return cached
 
@@ -463,7 +464,7 @@ export async function getInfraAuditDetail(node: string): Promise<InfraAuditDetai
 // --- getComplianceFrameworks ---
 
 export async function getComplianceFrameworks(): Promise<ComplianceFramework[]> {
-  const cacheKey = "compliance:frameworks:list"
+  const cacheKey = cacheKeys.complianceFrameworksList()
   const cached = await cacheGet<ComplianceFramework[]>(cacheKey)
   if (cached) return cached
 
@@ -500,7 +501,7 @@ export async function getComplianceFrameworks(): Promise<ComplianceFramework[]> 
 export async function getComplianceFrameworkDetail(
   id: string,
 ): Promise<ComplianceFrameworkDetail | null> {
-  const cacheKey = `compliance:frameworks:${id}`
+  const cacheKey = cacheKeys.complianceFrameworksDetail(id)
   const cached = await cacheGet<ComplianceFrameworkDetail>(cacheKey)
   if (cached) return cached
 
@@ -569,7 +570,7 @@ export async function getComplianceFrameworkDetail(
 // --- getComplianceSummary ---
 
 export async function getComplianceSummary(): Promise<ComplianceSummary> {
-  const cacheKey = "compliance:summary"
+  const cacheKey = cacheKeys.complianceSummary()
   const cached = await cacheGet<ComplianceSummary>(cacheKey)
   if (cached) return cached
 

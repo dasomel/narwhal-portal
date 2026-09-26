@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getToolsForRole } from "@/lib/tools"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys } from "@/lib/cache-keys"
 import { auth } from "@/lib/auth"
 import type { UserRole } from "@/lib/auth"
 
@@ -23,7 +24,7 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const role = session.user.role
-  const cacheKey = `tools:health:${role}`
+  const cacheKey = cacheKeys.toolsHealth(role)
 
   const cached = await cacheGet<Record<string, string>>(cacheKey)
   if (cached) return NextResponse.json(cached)

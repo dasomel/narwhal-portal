@@ -1,4 +1,5 @@
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import { getDependencyUrl } from "./config"
 
 function alertmanagerUrl(): string {
@@ -72,7 +73,7 @@ export async function deleteSilence(silenceId: string): Promise<boolean> {
 }
 
 export async function getAlerts(): Promise<Alert[]> {
-  const cached = await cacheGet<Alert[]>("alerts:active")
+  const cached = await cacheGet<Alert[]>(cacheKeys.alertmanagerActive())
   if (cached) return cached
 
   try {
@@ -84,7 +85,7 @@ export async function getAlerts(): Promise<Alert[]> {
     clearTimeout(timeout)
     if (!res.ok) throw new Error(`Alertmanager failed: ${res.status}`)
     const alerts: Alert[] = await res.json()
-    await cacheSet("alerts:active", alerts, 15)
+    await cacheSet(cacheKeys.alertmanagerActive(), alerts, 15)
     return alerts
   } catch (err) {
     console.warn("[alertmanager] Connection failed, returning empty:", (err as Error).message)

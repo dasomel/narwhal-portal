@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { getK8sApiServer } from "@/lib/config"
 import { getK8sBearerToken } from "@/lib/k8s-token"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys } from "@/lib/cache-keys"
 import { ValidationError, toValidationErrorBody, assertK8sNamespace } from "@/lib/validation"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 
@@ -36,7 +37,7 @@ const LABEL_VALUE_RE = /^[a-zA-Z0-9]([a-zA-Z0-9._-]{0,61}[a-zA-Z0-9])?$/
 
 async function fetchPodsByNamespace(namespace: string, instance?: string): Promise<PodSummary[]> {
   const useInstance = instance && LABEL_VALUE_RE.test(instance) ? instance : undefined
-  const cacheKey = `pods:list:${namespace}:${useInstance ?? "all"}`
+  const cacheKey = cacheKeys.podsList(namespace, useInstance)
   const cached = await cacheGet<PodSummary[]>(cacheKey)
   if (cached) return cached
 

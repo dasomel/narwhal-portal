@@ -1,4 +1,5 @@
 import { cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import { getArgoApps } from "./argocd"
 import { getAlerts } from "./alertmanager"
 import { getNodeReadiness, getControlPlaneHealth, type ControlPlanePodHealth } from "./k8s-client"
@@ -124,7 +125,7 @@ function buildSummary(overall: ComponentStatus, components: StatusComponent[], i
 // ---------------------------------------------------------------------------
 
 export async function getPlatformStatus(): Promise<PlatformStatus> {
-  const cached = await cacheGet<PlatformStatus>("status:platform")
+  const cached = await cacheGet<PlatformStatus>(cacheKeys.platformStatus())
   if (cached) return cached
 
   const [nodesResult, controlPlaneResult, argoResult, alertsResult] = await Promise.allSettled([
@@ -191,6 +192,6 @@ export async function getPlatformStatus(): Promise<PlatformStatus> {
     generatedAt: new Date().toISOString(),
   }
 
-  await cacheSet("status:platform", result, 15)
+  await cacheSet(cacheKeys.platformStatus(), result, 15)
   return result
 }

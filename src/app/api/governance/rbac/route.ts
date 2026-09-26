@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { getRbacBindings, getClusterRoles, getRoles } from "@/lib/k8s-client"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheKeys } from "@/lib/cache-keys"
 
 export const dynamic = "force-dynamic"
 
@@ -49,7 +50,7 @@ export async function GET() {
     )
   }
 
-  const cacheKey = "governance:rbac:v2"
+  const cacheKey = cacheKeys.governanceRbacV2()
   try {
     const cached = await cacheGet<RbacResponseV2>(cacheKey)
     if (cached) return NextResponse.json(cached)
