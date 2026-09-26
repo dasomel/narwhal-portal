@@ -1,6 +1,6 @@
 "use client" // Error boundaries must be Client Components
 
-import { useEffect, useState } from "react"
+import { useEffect, useSyncExternalStore } from "react"
 
 import "./globals.css"
 import { RouteErrorFallback } from "@/components/ui/route-error-fallback"
@@ -14,6 +14,8 @@ function readLocaleCookie(): string | undefined {
     ?.split("=")[1]
 }
 
+const noopSubscribe = () => () => {}
+
 // Root-level error boundary: catches errors the root layout itself throws, which no nested
 // error.tsx can (issue #62). This replaces the root layout entirely, so it defines its own
 // html/body and re-imports globals.css, and cannot use LocaleProvider/useT (no Providers tree
@@ -26,7 +28,14 @@ export default function GlobalError({
   error: Error & { digest?: string }
   retry: () => void
 }) {
-  const [locale] = useState(() => getLocaleFromCookie(readLocaleCookie()))
+  // Server snapshot is the default locale and the client snapshot reads the cookie, so the
+  // first client render matches the server HTML and React re-renders with the cookie locale
+  // afterwards instead of reporting a hydration mismatch.
+  const locale = useSyncExternalStore(
+    noopSubscribe,
+    () => getLocaleFromCookie(readLocaleCookie()),
+    () => getLocaleFromCookie(undefined),
+  )
 
   useEffect(() => {
     console.error(error)
