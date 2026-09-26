@@ -2,7 +2,7 @@ export type Locale = "ko" | "en"
 export const defaultLocale: Locale = "ko"
 export const locales: Locale[] = ["ko", "en"]
 
-const ko = {
+export const ko = {
   // nav
   "nav.home": "홈",
   "nav.myApps": "내 앱",
@@ -880,6 +880,10 @@ const ko = {
   "cost.noTrendData": "추이 데이터 없음 — Prometheus 메트릭 수집 상태를 확인하세요.",
   "cost.cost": "비용",
   "cost.top5Pods": "Top 5 Pod 비용",
+  "cost.topPods.pod": "파드",
+  "cost.topPods.cpuCores": "CPU 코어",
+  "cost.topPods.memoryGb": "메모리 GB",
+  "cost.topPods.hourly": "$/h",
   "cost.noPodData": "Pod 데이터 없음",
   "cost.cpuCostHourly": "CPU 비용/h",
   "cost.memoryCostHourly": "Memory 비용/h",
@@ -1160,7 +1164,7 @@ const ko = {
   "status.generatedAt": "마지막 업데이트: {time}",
 } as const
 
-const en: Record<keyof typeof ko, string> = {
+export const en: Record<keyof typeof ko, string> = {
   // nav
   "nav.home": "Home",
   "nav.myApps": "My Apps",
@@ -2038,6 +2042,10 @@ const en: Record<keyof typeof ko, string> = {
   "cost.noTrendData": "No trend data — Check Prometheus metric collection status.",
   "cost.cost": "Cost",
   "cost.top5Pods": "Top 5 Pod Cost",
+  "cost.topPods.pod": "Pod",
+  "cost.topPods.cpuCores": "CPU cores",
+  "cost.topPods.memoryGb": "Mem GB",
+  "cost.topPods.hourly": "$/h",
   "cost.noPodData": "No Pod data",
   "cost.cpuCostHourly": "CPU Cost/h",
   "cost.memoryCostHourly": "Memory Cost/h",

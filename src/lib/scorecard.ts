@@ -1,4 +1,3 @@
-// TODO(wrap-up): i18n keys for ko/en — see spec §5.7
 import yaml from "js-yaml"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"

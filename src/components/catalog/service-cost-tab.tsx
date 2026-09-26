@@ -3,7 +3,6 @@
 /**
  * ServiceCostTab — spec §5.6 /catalog/[name]?tab=cost
  * 서비스 비용 + Top 5 Pod 표 + 7일 추이
- * TODO(wrap-up): i18n
  */
 
 import { useQuery } from "@tanstack/react-query"
@@ -290,10 +289,10 @@ export function ServiceCostTab({ serviceId }: Props) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Pod</TableHead>
-                  <TableHead className="text-right">CPU cores</TableHead>
-                  <TableHead className="text-right">Mem GB</TableHead>
-                  <TableHead className="text-right">$/h</TableHead>
+                  <TableHead>{t("cost.topPods.pod")}</TableHead>
+                  <TableHead className="text-right">{t("cost.topPods.cpuCores")}</TableHead>
+                  <TableHead className="text-right">{t("cost.topPods.memoryGb")}</TableHead>
+                  <TableHead className="text-right">{t("cost.topPods.hourly")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

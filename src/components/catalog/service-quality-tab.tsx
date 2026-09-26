@@ -1,5 +1,4 @@
 "use client"
-// TODO(wrap-up): i18n keys for ko/en — see spec §5.7
 
 import { useQuery } from "@tanstack/react-query"
 import { useT, useLocale } from "@/lib/i18n-client"
@@ -145,7 +144,7 @@ export function ServiceQualityTab({ serviceName }: ServiceQualityTabProps) {
               </div>
               <p className="text-xs text-muted-foreground mt-1">
                 {t("scorecard.evaluatedAt", { date: new Date(data.evaluatedAt).toLocaleString(locale === "ko" ? "ko-KR" : "en-US") })}
-                {data.service.owner && ` · Owner: ${data.service.owner}`}
+                {data.service.owner && ` · ${t("scorecard.owner")}: ${data.service.owner}`}
               </p>
             </div>
           </div>

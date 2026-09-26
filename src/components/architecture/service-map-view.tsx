@@ -1,7 +1,5 @@
 "use client"
 
-// TODO(wrap-up): i18n — 현재 한국어 하드코딩, i18n.ts에 키 추가 필요
-
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { ServiceGraphResponse } from "@/app/api/service-graph/route"

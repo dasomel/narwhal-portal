@@ -1,4 +1,3 @@
-// TODO(wrap-up): i18n keys for ko/en — see spec §5.7
 import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { loadRules, getRulesRaw } from "@/lib/scorecard"

@@ -1,4 +1,3 @@
-// TODO(wrap-up): i18n keys for ko/en — see spec §5.7
 import { auth } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { ScorecardsTable } from "@/components/governance/scorecards-table"
