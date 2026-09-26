@@ -114,6 +114,63 @@ describe("listBounded (portal#52)", () => {
     expect(mockFetch).toHaveBeenCalledTimes(DEFAULT_LIST_MAX_PAGES)
     expect(result.truncated).toBe(true)
   })
+
+  it("restarts the list once on a 410 (expired continue token) and returns the full result", async () => {
+    // Page 1 succeeds and hands back a continue token; page 2 (following that
+    // token) has expired server-side (410). listBounded should restart the
+    // whole list from page 1 rather than fail the caller.
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
+      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["b"]) })
+
+    const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 10 })
+
+    expect(mockFetch).toHaveBeenCalledTimes(4)
+    expect(result.items.map((i) => i.metadata.name)).toEqual(["a", "b"])
+    expect(result.truncated).toBe(false)
+  })
+
+  it("reports a partial (truncated) result when the restart also hits a 410", async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
+      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
+      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
+
+    const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 10 })
+
+    expect(mockFetch).toHaveBeenCalledTimes(4)
+    // Partial: only the items (and page count) collected during the
+    // (also-failed) restart attempt — not 0, and not the discarded first attempt.
+    expect(result.items.map((i) => i.metadata.name)).toEqual(["a"])
+    expect(result.pages).toBe(1)
+    expect(result.truncated).toBe(true)
+  })
+
+  it("reports items:[] and pages:0 when the restart 410s on its very first page", async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
+      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
+
+    const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 10 })
+
+    expect(mockFetch).toHaveBeenCalledTimes(3)
+    expect(result.items).toEqual([])
+    expect(result.pages).toBe(0)
+    expect(result.truncated).toBe(true)
+  })
+
+  it("does not restart on a non-410 failure — it propagates", async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+
+    await expect(listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 10 })).rejects.toThrow(/K8s API 500/)
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe("getNamespacesForScope (portal#52)", () => {
