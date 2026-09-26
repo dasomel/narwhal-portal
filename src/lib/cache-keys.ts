@@ -9,7 +9,7 @@
  * key is assembled from explicit named dimensions plus a schema version, and
  * `CACHE_NAMESPACES` is the documented contract (dimensions / TTL /
  * invalidation trigger / partial-caching) that `cache-keys.contract.test.ts`
- * enforces for every security-sensitive namespace.
+ * enforces for every namespace.
  *
  * Two primitives are NOT reinvented here — they already own a dimension each
  * and are reused as-is:
@@ -27,6 +27,18 @@
  * change that must bump a namespace's shape does so by adding a version
  * segment to that one builder — deliberately, and noted in
  * `CACHE_NAMESPACES` — never by editing the join order silently.
+ *
+ * Registry granularity: every `cacheKeys` builder has its OWN `CACHE_NAMESPACES`
+ * entry — even builders that share a common key prefix (e.g. the twelve
+ * `k8s:*` cluster-state caches) get separate entries, because
+ * `cache-keys.contract.test.ts` asserts each builder's dimensions
+ * (`BUILDER_CHECKS[name].dimensionArgIndex`) are EXACTLY the dimension set its
+ * registry entry declares. A shared aggregate entry can't satisfy that for
+ * builders with different dimension counts (a still-namespaced `promCluster`
+ * builder that only takes a `cluster_id` can't equal a `promQuery` entry that
+ * also takes a `query`), so one entry per builder is the only shape where
+ * "the registry says X dimensions" and "the builder actually varies by X
+ * dimensions" can be mechanically the same claim.
  *
  * Out of scope for this module (left as-is, not duplicated):
  * - `KEYCLOAK_CACHE_KEYS` / `invalidateKeycloakCaches` (src/lib/keycloak-client.ts)
@@ -47,6 +59,39 @@ export type CacheDimension =
   | "query" // caller-supplied query/filter parameters (PromQL, service id, pagination, ...)
   | "version" // explicit schema version segment
 
+const SCOPE_LIKE_DIMENSIONS: readonly CacheDimension[] = ["scope", "user", "role", "cluster"]
+
+export function isScopeLikeDimension(d: CacheDimension): boolean {
+  return SCOPE_LIKE_DIMENSIONS.includes(d)
+}
+
+/**
+ * Why a namespace with no scope-like dimension is still safe — a closed set
+ * instead of free text so a reviewer (and the type checker) can tell a real
+ * reason from a plausible-sounding excuse. Derived from the reasons actually
+ * used below; add a case here (not a new free-text string) if a future
+ * namespace needs a genuinely new justification.
+ */
+export type UnscopedReasonCode =
+  /** namespaceVisible()/equivalent is checked on every request before the cache lookup — the cached value itself never varies by caller, only whether they may read it does. */
+  | "gate-then-serve"
+  /** The route that reads/writes this key requires an admin-only role (requireRole('cluster-admin') / requireAdmin()); every caller who can reach it sees the same value. Verified cheaply where `ownerPath` is set. */
+  | "admin-only-route"
+  /** Cluster/platform-wide state with no per-caller variance at all — same value for every authenticated caller regardless of identity, team, or role. */
+  | "cluster-wide-state"
+  /** This cache holds the unfiltered upstream response; per-caller filtering happens downstream, after the cache read, in a route/module that carries its own scope dimension. */
+  | "downstream-filtered"
+  /** Keyed by an immutable content hash/identifier (e.g. a commit SHA) — content-addressed, so there is no caller identity to leak across. */
+  | "content-addressed"
+  /** Key/invalidation already centralized in another module, or the file is excluded from this migration slice — documented here for completeness only. */
+  | "owned-elsewhere"
+
+export interface UnscopedReason {
+  code: UnscopedReasonCode
+  /** Optional namespace-specific detail beyond what the code already says. */
+  detail?: string
+}
+
 export interface CacheNamespaceSpec {
   /** Example or literal key for this namespace, as it appears on the wire. */
   example: string
@@ -55,6 +100,15 @@ export interface CacheNamespaceSpec {
   ttlSeconds: number | "varies"
   /** Owning module (not necessarily migrated to a builder below — see file header). */
   owner: string
+  /**
+   * Single canonical file path for `ownerPath`-verifiable codes
+   * (`admin-only-route`, `gate-then-serve`) — `cache-keys.contract.test.ts`
+   * greps this file for the expected guard so the claim is checked, not just
+   * asserted. Omitted where the check isn't cheap (multi-file owners,
+   * non-migrated namespaces) — see `UnscopedReasonCode`'s doc for why that's
+   * an accepted gap, not a silent one.
+   */
+  ownerPath?: string
   /** What mutation/event invalidates or expires this entry. */
   invalidation: string
   /** Whether a failed or partial provider response is ever cached under this namespace. */
@@ -71,11 +125,11 @@ export interface CacheNamespaceSpec {
    * Required when `dimensions` has no scope-like dimension (`scope`/`user`/
    * `role`/`cluster`): why that's safe. Checked unconditionally by
    * `cache-keys.contract.test.ts` for every entry, independent of
-   * `securitySensitive` — a hand-set flag alone made the old test
-   * tautological (it only ever checked entries someone remembered to flag).
-   * Entries that DO have a scope-like dimension don't need this.
+   * `securitySensitive` — a hand-set flag alone made an earlier version of
+   * this test tautological (it only ever checked entries someone remembered
+   * to flag). Entries that DO have a scope-like dimension don't need this.
    */
-  unscopedReason?: string
+  unscopedReason?: UnscopedReason
   note?: string
 }
 
@@ -201,8 +255,8 @@ export const cacheKeys = {
 /**
  * The documented contract: every cache namespace in the codebase, whether or
  * not it was migrated to a `cacheKeys` builder above. `cache-keys.contract.test.ts`
- * asserts every `securitySensitive: true` entry declares a `scope`, `user`,
- * `role`, or `cluster` dimension.
+ * asserts, for every entry with a matching `BUILDER_CHECKS` builder, that
+ * `dimensions` here EQUALS that builder's declared dimension set exactly.
  */
 export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
   "my-apps": {
@@ -220,10 +274,11 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: [],
     ttlSeconds: 60,
     owner: "src/app/api/settings/routes/route.ts",
+    ownerPath: "src/app/api/settings/routes/route.ts",
     invalidation: "cacheDel on POST (route create/update)",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "requireAdmin()-gated; identical route list for every admin.",
+    unscopedReason: { code: "admin-only-route", detail: "requireAdmin()-gated; identical route list for every admin." },
   },
   traces: {
     example: "traces:{service}",
@@ -233,7 +288,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Tempo trace search results, not per-caller; `service` is a query filter, not an identity.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Tempo trace search results, not per-caller; `service` is a query filter, not an identity." },
   },
   "tools:health": {
     example: "tools:health:{role}",
@@ -253,70 +308,82 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide topology, same for every authenticated caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide topology, same for every authenticated caller." },
   },
   "k8s:pods": {
     example: "k8s:pods:{namespace}:{app|all}",
     dimensions: ["namespace"],
     ttlSeconds: 10,
     owner: "src/app/api/k8s/pods/route.ts",
+    ownerPath: "src/app/api/k8s/pods/route.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Gate-then-serve: namespaceVisible() is checked on every request before the cache lookup, so the pod list itself never varies by caller — only whether they may read it does.",
+    unscopedReason: {
+      code: "gate-then-serve",
+      detail: "namespaceVisible() is checked on every request before the cache lookup, so the pod list itself never varies by caller — only whether they may read it does.",
+    },
   },
   "k8s:events (per-resource)": {
     example: "k8s:events:{namespace}:{name}",
     dimensions: ["namespace", "query"],
     ttlSeconds: 10,
     owner: "src/app/api/k8s/events/route.ts",
+    ownerPath: "src/app/api/k8s/events/route.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
     // #145 fixed the gap this entry used to describe: namespaceVisible() is
     // now checked before the cache lookup, same as /api/k8s/pods and
     // /api/k8s/resource — so this is gate-then-serve like its siblings now.
-    unscopedReason: "Gate-then-serve (portal#145): namespaceVisible() is checked on every request before the cache lookup, same as /api/k8s/pods and /api/k8s/resource.",
+    unscopedReason: {
+      code: "gate-then-serve",
+      detail: "namespaceVisible() is checked on every request before the cache lookup (portal#145), same as /api/k8s/pods and /api/k8s/resource.",
+    },
   },
   "k8s:resource": {
     example: "k8s:resource:{namespace}:{name}",
     dimensions: ["namespace"],
     ttlSeconds: 10,
     owner: "src/app/api/k8s/resource/route.ts",
+    ownerPath: "src/app/api/k8s/resource/route.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Gate-then-serve, same as k8s:pods.",
+    unscopedReason: { code: "gate-then-serve", detail: "Gate-then-serve, same as k8s:pods." },
   },
   "pods:list": {
     example: "pods:list:{namespace}:{instance|all}",
     dimensions: ["namespace"],
     ttlSeconds: 15,
     owner: "src/app/api/pods/route.ts",
+    ownerPath: "src/app/api/pods/route.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Gate-then-serve (portal#33): namespaceVisible() checked before every cache lookup.",
+    unscopedReason: { code: "gate-then-serve", detail: "Gate-then-serve (portal#33): namespaceVisible() checked before every cache lookup." },
   },
   "pods:logs": {
     example: "pods:logs:{namespace}:{pod}:{container}:{tailLines}:{previous}",
     dimensions: ["namespace", "query"],
     ttlSeconds: 5,
     owner: "src/app/api/pods/[namespace]/[pod]/logs/route.ts",
+    ownerPath: "src/app/api/pods/[namespace]/[pod]/logs/route.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Gate-then-serve, same as pods:list.",
+    unscopedReason: { code: "gate-then-serve", detail: "Gate-then-serve, same as pods:list." },
   },
   "governance:rbac:v2": {
     example: "governance:rbac:v2",
-    dimensions: ["version"],
+    dimensions: [],
     ttlSeconds: 60,
     owner: "src/app/api/governance/rbac/route.ts",
+    ownerPath: "src/app/api/governance/rbac/route.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "requireRole('cluster-admin') gate; identical value for every cluster-admin.",
+    unscopedReason: { code: "admin-only-route", detail: "requireRole('cluster-admin') gate; identical value for every cluster-admin." },
   },
   "governance:resources:v3": {
     example: "governance:resources:v3:{scopeFingerprint}",
@@ -330,23 +397,24 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
   },
   "governance:distribution:v2": {
     example: "governance:distribution:v2",
-    dimensions: ["version"],
+    dimensions: [],
     ttlSeconds: 15,
     owner: "src/app/api/governance/distribution/route.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "auth()-gated global cluster resource view, identical for every authenticated caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "auth()-gated (not admin-specific) global cluster resource view, identical for every authenticated caller." },
   },
   "governance:operational-events:v2": {
     example: "governance:operational-events:v2",
     dimensions: [],
     ttlSeconds: 15,
     owner: "src/app/api/governance/audit/route.ts",
+    ownerPath: "src/app/api/governance/audit/route.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "requireRole('cluster-admin') gate; identical value for every cluster-admin.",
+    unscopedReason: { code: "admin-only-route", detail: "requireRole('cluster-admin') gate; identical value for every cluster-admin." },
     note: "#144 (portal#16): renamed from governance:audit — this is an operational-events feed, not an audit trail.",
   },
   "governance:dora:v2": {
@@ -405,7 +473,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide runtime security events, not per-caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide runtime security events, not per-caller." },
   },
   "falco:critical": {
     example: "falco:critical",
@@ -415,7 +483,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide runtime security events, not per-caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide runtime security events, not per-caller." },
   },
   "compliance:kisa:list": {
     example: "compliance:kisa:list",
@@ -425,7 +493,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide KISA control status, not per-caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide KISA control status, not per-caller." },
   },
   "hero:summary": {
     example: "hero:summary",
@@ -435,7 +503,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide dashboard summary, not per-caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide dashboard summary, not per-caller." },
   },
   "cost:v2": {
     example: "cost:v2:{scope}:{scopeFingerprint}:{pricingKey}",
@@ -472,9 +540,12 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "cacheDel on route mutation",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "requireAdmin()-gated; identical route list for every admin.",
+    unscopedReason: {
+      code: "cluster-wide-state",
+      detail: "getRoutes() itself has no auth gate — its only current caller (settings/routes/route.ts) is requireAdmin()-gated, but that guarantee lives in the caller, not here, so this is documented as cluster-wide rather than admin-only-route.",
+    },
   },
-  "prom (query/vector/range/node/cluster)": {
+  "prom:query": {
     example: "prom:{clusterId}:{promql}",
     dimensions: ["cluster", "query"],
     ttlSeconds: 15,
@@ -482,7 +553,43 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only; provider fetch failures ('unavailable') are not cached, only genuine zero-series ('empty') results are",
     cachesPartial: false,
     securitySensitive: false,
-    note: "PromQL itself already encodes any caller-scope filtering (see cost.ts's scopeNamespaceMatcher usage) at the query-string level, which is why `query` — not `scope` — is the operative dimension here.",
+    note: "PromQL itself already encodes any caller-scope filtering (see cost.ts's scopeNamespaceMatcher usage) at the query-string level, which is why `query` — not `scope` — is the second dimension here; `cluster` covers multi-cluster isolation.",
+  },
+  "prom:vector": {
+    example: "promv:{clusterId}:{promql}",
+    dimensions: ["cluster", "query"],
+    ttlSeconds: 15,
+    owner: "src/lib/prometheus.ts",
+    invalidation: "TTL only; provider fetch failures ('unavailable') are not cached, only genuine zero-series ('empty') results are",
+    cachesPartial: false,
+    securitySensitive: false,
+  },
+  "prom:range": {
+    example: "promr:{clusterId}:{promql}:{durationMinutes}",
+    dimensions: ["cluster", "query"],
+    ttlSeconds: 30,
+    owner: "src/lib/prometheus.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+  },
+  "prom:node-metrics": {
+    example: "promnodemetrics:{clusterId}",
+    dimensions: ["cluster"],
+    ttlSeconds: 15,
+    owner: "src/lib/prometheus.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+  },
+  "prom:cluster": {
+    example: "promcluster:{clusterId}",
+    dimensions: ["cluster"],
+    ttlSeconds: 15,
+    owner: "src/lib/prometheus.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
   },
   "status:platform": {
     example: "status:platform",
@@ -492,27 +599,83 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide platform status, not per-caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide platform status, not per-caller." },
   },
-  "security:*": {
-    example: "security:summary | security:workloads | security:image:{image} | security:top-vulnerable:{limit}",
+  "security:summary": {
+    example: "security:summary",
+    dimensions: [],
+    ttlSeconds: 60,
+    owner: "src/lib/trivy.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide vulnerability data, not per-caller." },
+  },
+  "security:workloads": {
+    example: "security:workloads",
+    dimensions: [],
+    ttlSeconds: 60,
+    owner: "src/lib/trivy.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide vulnerability data, not per-caller." },
+  },
+  "security:image": {
+    example: "security:image:{image}",
     dimensions: ["query"],
     ttlSeconds: 60,
     owner: "src/lib/trivy.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide vulnerability data, not per-caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide vulnerability data, not per-caller." },
   },
-  "scorecard:*": {
-    example: "scorecard:rules | scorecard:detail:{rulesVersion}:{serviceId} | scorecard:all:{rulesVersion}:{tierFilter}",
+  "security:top-vulnerable": {
+    example: "security:top-vulnerable:{limit}",
+    dimensions: ["query"],
+    ttlSeconds: 60,
+    owner: "src/lib/trivy.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide vulnerability data, not per-caller." },
+  },
+  "scorecard:rules": {
+    example: "scorecard:rules",
+    dimensions: [],
+    ttlSeconds: 300,
+    owner: "src/lib/scorecard.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Rules ConfigMap projection, not per-caller." },
+  },
+  "scorecard:detail": {
+    example: "scorecard:detail:{rulesVersion}:{serviceId}",
     dimensions: ["version", "query"],
-    ttlSeconds: "varies",
+    ttlSeconds: 300,
     owner: "src/lib/scorecard.ts",
     invalidation: "TTL only; keyed by the rules ConfigMap version so a rules change is a cache-key change, not an invalidation",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Rules/evaluation results are per-rules-version, not per-caller — every caller who can reach the route sees the same evaluation for the same service+rules version.",
+    unscopedReason: {
+      code: "cluster-wide-state",
+      detail: "Evaluation result is per-rules-version + per-service, not per-caller — every caller who can reach the route sees the same evaluation.",
+    },
+  },
+  "scorecard:all": {
+    example: "scorecard:all:{rulesVersion}:{tierFilter}",
+    dimensions: ["version", "query"],
+    ttlSeconds: 60,
+    owner: "src/lib/scorecard.ts",
+    invalidation: "TTL only; keyed by the rules ConfigMap version so a rules change is a cache-key change, not an invalidation",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: {
+      code: "cluster-wide-state",
+      detail: "Evaluation results are per-rules-version + per-tier-filter, not per-caller.",
+    },
   },
   "openbao:secrets": {
     example: "openbao:secrets",
@@ -522,7 +685,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Secret metadata only (paths/keys), never secret values, and not per-caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Secret metadata only (paths/keys), never secret values, and not per-caller." },
   },
   "alerts:active": {
     example: "alerts:active",
@@ -532,38 +695,242 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide Alertmanager feed, not per-caller (per-caller filtering happens downstream in my-apps/events, which carry their own scope dimension).",
+    unscopedReason: {
+      code: "downstream-filtered",
+      detail: "Cluster-wide Alertmanager feed; per-caller filtering happens downstream in my-apps/events, which carry their own scope dimension.",
+    },
   },
-  "compliance:*": {
-    example: "compliance:config-audit:list | compliance:config-audit:{namespace}:{name} | compliance:rbac-audit:* | compliance:infra-audit:* | compliance:frameworks:* | compliance:summary",
+  "compliance:config-audit:list": {
+    example: "compliance:config-audit:list",
+    dimensions: [],
+    ttlSeconds: 60,
+    owner: "src/lib/compliance.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide compliance audit data, not per-caller." },
+  },
+  "compliance:config-audit:detail": {
+    example: "compliance:config-audit:{namespace}:{name}",
     dimensions: ["query"],
     ttlSeconds: 60,
     owner: "src/lib/compliance.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide compliance audit data, not per-caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide compliance audit data, not per-caller." },
   },
-  "graph:*": {
-    example: "graph:cluster:{window}:{namespace|all} | graph:svc:{serviceId}:{window}",
+  "compliance:rbac-audit:list": {
+    example: "compliance:rbac-audit:list",
+    dimensions: [],
+    ttlSeconds: 60,
+    owner: "src/lib/compliance.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide compliance audit data, not per-caller." },
+  },
+  "compliance:rbac-audit:detail": {
+    example: "compliance:rbac-audit:{namespace}:{name}",
     dimensions: ["query"],
-    ttlSeconds: "varies",
+    ttlSeconds: 60,
+    owner: "src/lib/compliance.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide compliance audit data, not per-caller." },
+  },
+  "compliance:infra-audit:list": {
+    example: "compliance:infra-audit:list",
+    dimensions: [],
+    ttlSeconds: 60,
+    owner: "src/lib/compliance.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide compliance audit data, not per-caller." },
+  },
+  "compliance:infra-audit:detail": {
+    example: "compliance:infra-audit:{node}",
+    dimensions: ["query"],
+    ttlSeconds: 60,
+    owner: "src/lib/compliance.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide compliance audit data, not per-caller." },
+  },
+  "compliance:frameworks:list": {
+    example: "compliance:frameworks:list",
+    dimensions: [],
+    ttlSeconds: 60,
+    owner: "src/lib/compliance.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide compliance audit data, not per-caller." },
+  },
+  "compliance:frameworks:detail": {
+    example: "compliance:frameworks:{id}",
+    dimensions: ["query"],
+    ttlSeconds: 60,
+    owner: "src/lib/compliance.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide compliance audit data, not per-caller." },
+  },
+  "compliance:summary": {
+    example: "compliance:summary",
+    dimensions: [],
+    ttlSeconds: 60,
+    owner: "src/lib/compliance.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide compliance audit data, not per-caller." },
+  },
+  "graph:cluster": {
+    example: "graph:cluster:{window}:{namespace|all}",
+    dimensions: ["query"],
+    ttlSeconds: 60,
     owner: "src/lib/service-graph.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide service dependency graph, not per-caller.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide service dependency graph, not per-caller." },
+    note: "Real TTL at the call site is a ternary (5s for the \"1m\" window, 60s otherwise), not this fixed number — see BUILDER_CHECKS.serviceGraphCluster and the call site comment in src/lib/service-graph.ts.",
   },
-  "k8s:* (cluster-state)": {
-    example: "k8s:cni-plugin | k8s:kubelet-config:{node} | k8s:namespaces | k8s:rbac | k8s:certs | k8s:kyverno | k8s:apiserver-pods | k8s:node-readiness | k8s:control-plane-health | k8s:netpol | k8s:node:{name} | k8s:events:{namespace|all}",
+  "graph:svc": {
+    example: "graph:svc:{serviceId}:{window}",
     dimensions: ["query"],
-    ttlSeconds: "varies",
+    ttlSeconds: 60,
+    owner: "src/lib/service-graph.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide service dependency graph, not per-caller." },
+  },
+  "k8s:cni-plugin": {
+    example: "k8s:cni-plugin",
+    dimensions: [],
+    ttlSeconds: 60,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
+  },
+  "k8s:kubelet-config": {
+    example: "k8s:kubelet-config:{node}",
+    dimensions: ["query"],
+    ttlSeconds: 60,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
+  },
+  "k8s:namespaces": {
+    example: "k8s:namespaces",
+    dimensions: [],
+    ttlSeconds: 30,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller; namespace visibility filtering happens downstream in role-filter.ts/scope.ts." },
+  },
+  "k8s:rbac": {
+    example: "k8s:rbac",
+    dimensions: [],
+    ttlSeconds: 30,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state; this is a cluster-admin surface gated at the route level, not in this cache." },
+  },
+  "k8s:events (namespace-list)": {
+    example: "k8s:events:{namespace|all}",
+    dimensions: ["query"],
+    ttlSeconds: 15,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
+    note: "Distinct from \"k8s:events (per-resource)\" above (built by /api/k8s/events, not this k8s-client.ts helper) — they share the `k8s:events` prefix, a pre-existing shape kept as-is per the migration rule.",
+  },
+  "k8s:certs": {
+    example: "k8s:certs",
+    dimensions: [],
+    ttlSeconds: 60,
     owner: "src/lib/k8s-client.ts",
     invalidation: "cacheDel(k8s:certs) on cert rotation; TTL only otherwise",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster infrastructure state, not per-caller; RBAC/certs/namespaces lists are cluster-admin surfaces gated at the route level.",
-    note: "Cluster infrastructure state, not per-caller; RBAC/certs/namespaces lists are cluster-admin surfaces gated at the route level.",
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
+  },
+  "k8s:kyverno": {
+    example: "k8s:kyverno",
+    dimensions: [],
+    ttlSeconds: 30,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
+  },
+  "k8s:apiserver-pods": {
+    example: "k8s:apiserver-pods",
+    dimensions: [],
+    ttlSeconds: 60,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
+  },
+  "k8s:node-readiness": {
+    example: "k8s:node-readiness",
+    dimensions: [],
+    ttlSeconds: 30,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
+  },
+  "k8s:control-plane-health": {
+    example: "k8s:control-plane-health",
+    dimensions: [],
+    ttlSeconds: 30,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
+  },
+  "k8s:netpol": {
+    example: "k8s:netpol",
+    dimensions: [],
+    ttlSeconds: 30,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
+  },
+  "k8s:node": {
+    example: "k8s:node:{name}",
+    dimensions: ["query"],
+    ttlSeconds: 30,
+    owner: "src/lib/k8s-client.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
   },
   "keycloak:* / api:groups-enriched": {
     example: "keycloak:users | keycloak:groups | keycloak:groups-detailed | api:groups-enriched",
@@ -573,7 +940,7 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "invalidateKeycloakCaches() on every membership/attribute mutation",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Admin-facing user/group directory projections, not per-caller.",
+    unscopedReason: { code: "owned-elsewhere", detail: "Admin-facing user/group directory projections, not per-caller; key/invalidation already centralized in keycloak-client.ts." },
     note: "Not migrated to cacheKeys here — already owns its own centralized key/invalidation module; documented for completeness only.",
   },
   "argocd:apps / argocd:app:{name}": {
@@ -584,7 +951,10 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "cacheDel on sync",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Cluster-wide ArgoCD application state; per-caller filtering (appVisible) happens downstream at the route level, not in this cache.",
+    unscopedReason: {
+      code: "downstream-filtered",
+      detail: "Cluster-wide ArgoCD application state; per-caller filtering (appVisible) happens downstream at the route level, not in this cache.",
+    },
     note: "Out of scope for #53 per task instructions (src/lib/argocd.ts and its route caller are excluded — open PR #143 dependency).",
   },
   "dora:commit:{sha}": {
@@ -595,18 +965,15 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     invalidation: "TTL only (commit SHAs are immutable)",
     cachesPartial: false,
     securitySensitive: false,
-    unscopedReason: "Keyed by immutable commit SHA — content-addressed, so there is no caller identity to leak across.",
+    unscopedReason: { code: "content-addressed", detail: "Keyed by immutable commit SHA — there is no caller identity to leak across." },
     note: "Out of scope for #53 per task instructions.",
   },
 }
 
 /**
- * Per-builder validation entry: which `CACHE_NAMESPACES` family a `cacheKeys`
- * builder belongs to, its real TTL (the single source of truth call sites
- * read via `cacheTtl` below — several `CACHE_NAMESPACES` entries above are
- * documented as `"varies"` because they group multiple builders with
- * different TTLs; this table carries the exact per-builder number instead),
- * and which argument index feeds which dimension.
+ * Per-builder validation entry: which `CACHE_NAMESPACES` entry a `cacheKeys`
+ * builder writes, its real TTL (the single source of truth call sites read
+ * via `cacheTtl` below), and which argument index feeds which dimension.
  *
  * `dimensionArgIndex` only maps dimensions that correspond 1:1 to a single
  * argument — some builders take extra non-dimension qualifiers (e.g.
@@ -615,10 +982,13 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
  *
  * `cache-keys.contract.test.ts` uses this to mechanically verify, for every
  * exported builder: (1) it's declared here at all — a new builder that
- * skips this table fails a coverage test; (2) every sentinel value at a
- * declared dimension's argument index actually appears in the produced key;
- * (3) varying a scope-like dimension (`scope`/`user`/`role`/`cluster`)
- * produces a different key.
+ * skips this table fails a coverage test; (2) its `registryKey` resolves to
+ * a real `CACHE_NAMESPACES` entry whose `dimensions` EQUAL this builder's
+ * `dimensionArgIndex` key set exactly (not a subset/superset — this is why
+ * the registry above is one entry per builder, see the file header); (3)
+ * every sentinel value at a declared dimension's argument index actually
+ * appears in the produced key; (4) varying a scope-like dimension
+ * (`scope`/`user`/`role`/`cluster`) produces a different key.
  */
 export interface BuilderCheck {
   registryKey: keyof typeof CACHE_NAMESPACES
@@ -677,66 +1047,76 @@ export const BUILDER_CHECKS: Record<keyof typeof cacheKeys, BuilderCheck> = {
 
   apisixRoutes: { registryKey: "apisix:routes", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
 
-  promQuery: { registryKey: "prom (query/vector/range/node/cluster)", ttlSeconds: 15, args: ["primary", "up"], dimensionArgIndex: { cluster: 0, query: 1 } },
-  promVector: {
-    registryKey: "prom (query/vector/range/node/cluster)",
-    ttlSeconds: 15,
-    args: ["primary", "up"],
-    dimensionArgIndex: { cluster: 0, query: 1 },
-  },
-  promRange: {
-    registryKey: "prom (query/vector/range/node/cluster)",
-    ttlSeconds: 30,
-    args: ["primary", "up", 15],
-    dimensionArgIndex: { cluster: 0, query: 1 },
-  },
-  promNodeMetrics: { registryKey: "prom (query/vector/range/node/cluster)", ttlSeconds: 15, args: ["primary"], dimensionArgIndex: { cluster: 0 } },
-  promCluster: { registryKey: "prom (query/vector/range/node/cluster)", ttlSeconds: 15, args: ["primary"], dimensionArgIndex: { cluster: 0 } },
+  promQuery: { registryKey: "prom:query", ttlSeconds: 15, args: ["primary", "up"], dimensionArgIndex: { cluster: 0, query: 1 } },
+  promVector: { registryKey: "prom:vector", ttlSeconds: 15, args: ["primary", "up"], dimensionArgIndex: { cluster: 0, query: 1 } },
+  promRange: { registryKey: "prom:range", ttlSeconds: 30, args: ["primary", "up", 15], dimensionArgIndex: { cluster: 0, query: 1 } },
+  promNodeMetrics: { registryKey: "prom:node-metrics", ttlSeconds: 15, args: ["primary"], dimensionArgIndex: { cluster: 0 } },
+  promCluster: { registryKey: "prom:cluster", ttlSeconds: 15, args: ["primary"], dimensionArgIndex: { cluster: 0 } },
 
   platformStatus: { registryKey: "status:platform", ttlSeconds: 15, args: [], dimensionArgIndex: {} },
 
-  trivySummary: { registryKey: "security:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
-  trivyWorkloads: { registryKey: "security:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
-  trivyImage: { registryKey: "security:*", ttlSeconds: 60, args: ["img-1"], dimensionArgIndex: { query: 0 } },
-  trivyTopVulnerable: { registryKey: "security:*", ttlSeconds: 60, args: [10], dimensionArgIndex: { query: 0 } },
+  trivySummary: { registryKey: "security:summary", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  trivyWorkloads: { registryKey: "security:workloads", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  trivyImage: { registryKey: "security:image", ttlSeconds: 60, args: ["img-1"], dimensionArgIndex: { query: 0 } },
+  trivyTopVulnerable: { registryKey: "security:top-vulnerable", ttlSeconds: 60, args: [10], dimensionArgIndex: { query: 0 } },
 
-  scorecardRules: { registryKey: "scorecard:*", ttlSeconds: 300, args: [], dimensionArgIndex: {} },
-  scorecardDetail: { registryKey: "scorecard:*", ttlSeconds: 300, args: [3, "svc-1"], dimensionArgIndex: { version: 0, query: 1 } },
-  scorecardAll: { registryKey: "scorecard:*", ttlSeconds: 60, args: [3, "tier-1"], dimensionArgIndex: { version: 0, query: 1 } },
+  scorecardRules: { registryKey: "scorecard:rules", ttlSeconds: 300, args: [], dimensionArgIndex: {} },
+  scorecardDetail: { registryKey: "scorecard:detail", ttlSeconds: 300, args: [3, "svc-1"], dimensionArgIndex: { version: 0, query: 1 } },
+  scorecardAll: { registryKey: "scorecard:all", ttlSeconds: 60, args: [3, "tier-1"], dimensionArgIndex: { version: 0, query: 1 } },
 
   openbaoSecrets: { registryKey: "openbao:secrets", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
 
   alertmanagerActive: { registryKey: "alerts:active", ttlSeconds: 15, args: [], dimensionArgIndex: {} },
 
-  complianceConfigAuditList: { registryKey: "compliance:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
-  complianceConfigAuditDetail: { registryKey: "compliance:*", ttlSeconds: 60, args: ["ns-1", "name-1"], dimensionArgIndex: { query: 0 } },
-  complianceRbacAuditList: { registryKey: "compliance:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
-  complianceRbacAuditDetail: { registryKey: "compliance:*", ttlSeconds: 60, args: ["ns-1", "name-1"], dimensionArgIndex: { query: 0 } },
-  complianceInfraAuditList: { registryKey: "compliance:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
-  complianceInfraAuditDetail: { registryKey: "compliance:*", ttlSeconds: 60, args: ["node-1"], dimensionArgIndex: { query: 0 } },
-  complianceFrameworksList: { registryKey: "compliance:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
-  complianceFrameworksDetail: { registryKey: "compliance:*", ttlSeconds: 60, args: ["id-1"], dimensionArgIndex: { query: 0 } },
-  complianceSummary: { registryKey: "compliance:*", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  complianceConfigAuditList: { registryKey: "compliance:config-audit:list", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  complianceConfigAuditDetail: {
+    registryKey: "compliance:config-audit:detail",
+    ttlSeconds: 60,
+    args: ["ns-1", "name-1"],
+    dimensionArgIndex: { query: 0 },
+  },
+  complianceRbacAuditList: { registryKey: "compliance:rbac-audit:list", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  complianceRbacAuditDetail: {
+    registryKey: "compliance:rbac-audit:detail",
+    ttlSeconds: 60,
+    args: ["ns-1", "name-1"],
+    dimensionArgIndex: { query: 0 },
+  },
+  complianceInfraAuditList: { registryKey: "compliance:infra-audit:list", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  complianceInfraAuditDetail: {
+    registryKey: "compliance:infra-audit:detail",
+    ttlSeconds: 60,
+    args: ["node-1"],
+    dimensionArgIndex: { query: 0 },
+  },
+  complianceFrameworksList: { registryKey: "compliance:frameworks:list", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  complianceFrameworksDetail: {
+    registryKey: "compliance:frameworks:detail",
+    ttlSeconds: 60,
+    args: ["id-1"],
+    dimensionArgIndex: { query: 0 },
+  },
+  complianceSummary: { registryKey: "compliance:summary", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
 
   // serviceGraphCluster's real TTL is computed at the call site (5s for the "1m"
   // window, 60s otherwise) — not a fixed per-namespace constant, so it's the one
   // migrated builder `cacheTtl()` deliberately does NOT cover; see the call site
   // in src/lib/service-graph.ts for the inline ternary this intentionally leaves alone.
-  serviceGraphCluster: { registryKey: "graph:*", ttlSeconds: 60, args: ["1m", "ns-1"], dimensionArgIndex: { query: 0 } },
-  serviceGraphSvc: { registryKey: "graph:*", ttlSeconds: 60, args: ["svc-1", "1m"], dimensionArgIndex: { query: 0 } },
+  serviceGraphCluster: { registryKey: "graph:cluster", ttlSeconds: 60, args: ["1m", "ns-1"], dimensionArgIndex: { query: 0 } },
+  serviceGraphSvc: { registryKey: "graph:svc", ttlSeconds: 60, args: ["svc-1", "1m"], dimensionArgIndex: { query: 0 } },
 
-  k8sCniPlugin: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
-  k8sKubeletConfig: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 60, args: ["node-1"], dimensionArgIndex: { query: 0 } },
-  k8sNamespaces: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
-  k8sRbac: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
-  k8sEventsAll: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 15, args: ["ns-1"], dimensionArgIndex: { query: 0 } },
-  k8sCerts: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
-  k8sKyverno: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
-  k8sApiserverPods: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
-  k8sNodeReadiness: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
-  k8sControlPlaneHealth: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
-  k8sNetpol: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
-  k8sNode: { registryKey: "k8s:* (cluster-state)", ttlSeconds: 30, args: ["node-1"], dimensionArgIndex: { query: 0 } },
+  k8sCniPlugin: { registryKey: "k8s:cni-plugin", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  k8sKubeletConfig: { registryKey: "k8s:kubelet-config", ttlSeconds: 60, args: ["node-1"], dimensionArgIndex: { query: 0 } },
+  k8sNamespaces: { registryKey: "k8s:namespaces", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sRbac: { registryKey: "k8s:rbac", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sEventsAll: { registryKey: "k8s:events (namespace-list)", ttlSeconds: 15, args: ["ns-1"], dimensionArgIndex: { query: 0 } },
+  k8sCerts: { registryKey: "k8s:certs", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  k8sKyverno: { registryKey: "k8s:kyverno", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sApiserverPods: { registryKey: "k8s:apiserver-pods", ttlSeconds: 60, args: [], dimensionArgIndex: {} },
+  k8sNodeReadiness: { registryKey: "k8s:node-readiness", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sControlPlaneHealth: { registryKey: "k8s:control-plane-health", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sNetpol: { registryKey: "k8s:netpol", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
+  k8sNode: { registryKey: "k8s:node", ttlSeconds: 30, args: ["node-1"], dimensionArgIndex: { query: 0 } },
 }
 
 /**

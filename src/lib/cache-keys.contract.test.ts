@@ -1,8 +1,17 @@
+import fs from "node:fs"
+import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { BUILDER_CHECKS, CACHE_NAMESPACES, cacheKeys, cacheTtl, type CacheDimension } from "./cache-keys"
 import { clusterCacheKey } from "./cluster-registry"
 
 const SCOPE_LIKE_DIMENSIONS: CacheDimension[] = ["scope", "user", "role", "cluster"]
+
+// Repo root — this file lives at src/lib/, so ownerPath (repo-relative) resolves two levels up.
+const REPO_ROOT = path.resolve(__dirname, "../..")
+
+function readOwnerFile(ownerPath: string): string {
+  return fs.readFileSync(path.join(REPO_ROOT, ownerPath), "utf8")
+}
 
 /** Invoke a `cacheKeys` builder with arbitrary sentinel args (heterogeneous arities/types across builders — `any` is the point here, not an oversight). */
 function invoke(name: keyof typeof cacheKeys, args: readonly unknown[]): string {
@@ -41,10 +50,52 @@ describe("cache-keys contract (#53)", () => {
     const offenders: string[] = []
     for (const [name, spec] of Object.entries(CACHE_NAMESPACES)) {
       const hasScopeDimension = spec.dimensions.some((d) => SCOPE_LIKE_DIMENSIONS.includes(d))
-      const hasReason = typeof spec.unscopedReason === "string" && spec.unscopedReason.length > 0
+      // `unscopedReason.code` is a closed union (UnscopedReasonCode) — the type
+      // checker already rejects an arbitrary string here, so this is a runtime
+      // belt-and-suspenders check against a cast/`as any` bypassing that.
+      const hasReason = typeof spec.unscopedReason?.code === "string" && spec.unscopedReason.code.length > 0
       if (!hasScopeDimension && !hasReason) offenders.push(name)
     }
     expect(offenders, `namespaces with no scope-like dimension and no unscopedReason: ${offenders.join(", ")}`).toEqual([])
+  })
+
+  // Cheap, mechanical spot-check on two of the six UnscopedReasonCode values:
+  // "admin-only-route" and "gate-then-serve" both make a falsifiable claim
+  // about the owning route's source — that it calls a specific guard function
+  // — so we grep for it instead of trusting the label. The other four codes
+  // (cluster-wide-state / downstream-filtered / content-addressed /
+  // owned-elsewhere) don't reduce to a single grep-able guard, so they're not
+  // cheaply checkable here and are intentionally left to code review.
+  it("admin-only-route namespaces' owner file actually calls an admin/role guard", () => {
+    const offenders: string[] = []
+    for (const [name, spec] of Object.entries(CACHE_NAMESPACES)) {
+      if (spec.unscopedReason?.code !== "admin-only-route") continue
+      if (!spec.ownerPath) {
+        offenders.push(`${name}: admin-only-route but no ownerPath set for verification`)
+        continue
+      }
+      const src = readOwnerFile(spec.ownerPath)
+      if (!/requireAdmin\(|requireRole\(/.test(src)) {
+        offenders.push(`${name}: ownerPath ${spec.ownerPath} has no requireAdmin(/requireRole( call`)
+      }
+    }
+    expect(offenders, offenders.join("\n")).toEqual([])
+  })
+
+  it("gate-then-serve namespaces' owner file actually calls namespaceVisible", () => {
+    const offenders: string[] = []
+    for (const [name, spec] of Object.entries(CACHE_NAMESPACES)) {
+      if (spec.unscopedReason?.code !== "gate-then-serve") continue
+      if (!spec.ownerPath) {
+        offenders.push(`${name}: gate-then-serve but no ownerPath set for verification`)
+        continue
+      }
+      const src = readOwnerFile(spec.ownerPath)
+      if (!src.includes("namespaceVisible(")) {
+        offenders.push(`${name}: ownerPath ${spec.ownerPath} has no namespaceVisible( call`)
+      }
+    }
+    expect(offenders, offenders.join("\n")).toEqual([])
   })
 
   // Same AC, from the builder side: `securitySensitive: true` is still a useful
@@ -73,6 +124,35 @@ describe("cache-keys contract (#53)", () => {
       .filter(([, check]) => !(check.registryKey in CACHE_NAMESPACES))
       .map(([name, check]) => `${name} -> ${check.registryKey}`)
     expect(danglingRegistryRefs, `BUILDER_CHECKS entries pointing at a nonexistent registry key: ${danglingRegistryRefs.join(", ")}`).toEqual([])
+  })
+
+  // AC (tightened after review): a builder's declared dimensions and its
+  // registry entry's declared dimensions are two independent, hand-written
+  // lists — nothing before this test compared them, so both could say the
+  // wrong (but matching-looking) thing at once, e.g. BUILDER_CHECKS missing a
+  // dimension the registry documents, or vice versa. This asserts SET
+  // EQUALITY between `BUILDER_CHECKS[name].dimensionArgIndex`'s keys and
+  // `CACHE_NAMESPACES[registryKey].dimensions` for every builder — not a
+  // subset either direction. This is also why the registry is one entry per
+  // builder (see the file header): a shared aggregate entry's dimension list
+  // is the union across builders with different arities, which can never
+  // equal any single builder's own set.
+  it("every builder's dimensionArgIndex keys equal its registry entry's dimensions exactly", () => {
+    const offenders: string[] = []
+    for (const [name, check] of Object.entries(BUILDER_CHECKS) as Array<[keyof typeof cacheKeys, (typeof BUILDER_CHECKS)[keyof typeof cacheKeys]]>) {
+      const builderDims = new Set(Object.keys(check.dimensionArgIndex))
+      const registryDims = new Set(CACHE_NAMESPACES[check.registryKey].dimensions)
+      const missingFromRegistry = [...builderDims].filter((d) => !registryDims.has(d as CacheDimension))
+      const missingFromBuilder = [...registryDims].filter((d) => !builderDims.has(d))
+      if (missingFromRegistry.length > 0 || missingFromBuilder.length > 0) {
+        offenders.push(
+          `${name} (-> ${check.registryKey}): builder has [${[...builderDims].join(",")}], registry has [${[...registryDims].join(",")}]` +
+            (missingFromRegistry.length ? ` — builder-only: ${missingFromRegistry.join(",")}` : "") +
+            (missingFromBuilder.length ? ` — registry-only: ${missingFromBuilder.join(",")}` : "")
+        )
+      }
+    }
+    expect(offenders, offenders.join("\n")).toEqual([])
   })
 
   // AC: "call the builder with sentinel values per declared dimension and assert
