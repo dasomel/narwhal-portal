@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { queryVector, getClusterMetrics } from "@/lib/prometheus"
 import { getNamespaces, getAllPodsMinimal } from "@/lib/k8s-client"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 
 export const dynamic = "force-dynamic"
 
@@ -45,7 +46,13 @@ export async function GET() {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const cacheKey = "governance:resources:v3"
+  // Non-admins reach this tab too (nav gates /governance to
+  // cluster-admin/developer/viewer, not admin-only — contrast /api/governance/audit's
+  // requireRole("cluster-admin")), so the response must be filtered to the caller's
+  // effective scope the same way scorecard/dora do. The cache key carries the scope
+  // fingerprint so a scoped result never leaks to a different caller.
+  const scope = await getEffectiveScope(session)
+  const cacheKey = `governance:resources:v3:${scope.fingerprint}`
   try {
     const cached = await cacheGet<ResourcesResponseV2>(cacheKey)
     if (cached) return NextResponse.json(cached)
@@ -55,7 +62,9 @@ export async function GET() {
 
   try {
     const namespaces = await getNamespaces()
-    const userNs = namespaces.filter((n) => !n.name.startsWith("kube-") && n.name !== "default")
+    const userNs = namespaces.filter(
+      (n) => !n.name.startsWith("kube-") && n.name !== "default" && namespaceVisible(n.name, scope)
+    )
 
     const [
       podData,
@@ -98,9 +107,10 @@ export async function GET() {
 
     for (const pod of allK8sPods) {
       const ns = pod.metadata.namespace || ""
+      if (!namespaceVisible(ns, scope)) continue
       const podName = pod.metadata.name || ""
       const containers = pod.spec?.containers || []
-      
+
       const missingContainers: string[] = []
       for (const c of containers) {
         const req = c.resources?.requests
@@ -152,7 +162,7 @@ export async function GET() {
     for (const r of cpuPodData) {
       const ns = r.metric.namespace
       const pod = r.metric.pod
-      if (!ns || !pod) continue
+      if (!ns || !pod || !namespaceVisible(ns, scope)) continue
       const key = `${ns}/${pod}`
       podMetricsMap.set(key, { cpu: r.value, mem: 0 })
     }
@@ -160,7 +170,7 @@ export async function GET() {
     for (const r of memPodData) {
       const ns = r.metric.namespace
       const pod = r.metric.pod
-      if (!ns || !pod) continue
+      if (!ns || !pod || !namespaceVisible(ns, scope)) continue
       const key = `${ns}/${pod}`
       const existing = podMetricsMap.get(key)
       if (existing) {
@@ -189,16 +199,40 @@ export async function GET() {
       .sort((a, b) => b.memBytes - a.memBytes)
       .slice(0, 10)
 
+    // clusterMetrics is a genuinely cluster-wide summary (getClusterMetrics), which is
+    // correct only when the caller may see the whole cluster. A scoped caller instead
+    // gets totals summed over their own visible namespaces — computed from the same
+    // per-namespace maps as resultNamespaces, not the (possibly truncated) slice, so
+    // the aggregate stays accurate even with >30 visible namespaces.
+    const clusterAggregate = scope.all
+      ? {
+          cpuPercent: clusterMetrics.cpu ?? 0,
+          memPercent: clusterMetrics.memory ?? 0,
+          totalPods: clusterMetrics.pods?.total ?? 0,
+          noRequestPods: clusterNoRequestPods,
+        }
+      : (() => {
+          let cpuUsed = 0, cpuReq = 0, memUsed = 0, memReq = 0, podCount = 0
+          for (const ns of userNs) {
+            cpuUsed += cpuUsedByNs[ns.name] ?? 0
+            cpuReq += cpuReqByNs[ns.name] ?? 0
+            memUsed += memUsedByNs[ns.name] ?? 0
+            memReq += memReqByNs[ns.name] ?? 0
+            podCount += podByNs[ns.name] ?? 0
+          }
+          return {
+            cpuPercent: cpuReq > 0 ? Math.round((cpuUsed / cpuReq) * 100) : 0,
+            memPercent: memReq > 0 ? Math.round((memUsed / memReq) * 100) : 0,
+            totalPods: Math.round(podCount),
+            noRequestPods: clusterNoRequestPods,
+          }
+        })()
+
     const response: ResourcesResponseV2 = {
       namespaces: resultNamespaces,
       topCpuPods,
       topMemPods,
-      cluster: {
-        cpuPercent: clusterMetrics.cpu ?? 0,
-        memPercent: clusterMetrics.memory ?? 0,
-        totalPods: clusterMetrics.pods?.total ?? 0,
-        noRequestPods: clusterNoRequestPods,
-      },
+      cluster: clusterAggregate,
       noRequestPodsList: noRequestPodsList.slice(0, 300),
       truncated: allPodsResult.truncated,
     }
