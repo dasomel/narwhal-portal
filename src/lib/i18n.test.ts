@@ -10,12 +10,6 @@ import { ko, en } from "./i18n"
 
 const SRC_ROOT = path.resolve(__dirname, "..")
 
-// Cost surfaces (src/lib/cost.ts, src/components/catalog/service-cost-tab.tsx)
-// are owned by a separate in-flight PR per this task's scope — not fixed here.
-// Listed explicitly (not silently skipped) so a `pnpm test` pass doesn't hide
-// that the file still carries real, unresolved i18n work.
-const KNOWN_OUT_OF_SCOPE_TODOS = new Set(["components/catalog/service-cost-tab.tsx"])
-
 function walk(dir: string): string[] {
   const entries = fs.readdirSync(dir, {
     withFileTypes: true,
@@ -151,12 +145,11 @@ describe("i18n dictionary completeness", () => {
     expect(dynamicMatches).toBe(BASELINE_DYNAMIC_SKIPPED)
   })
 
-  it("has no leftover TODO-backed i18n work outside the documented out-of-scope list", () => {
+  it("has no leftover TODO-backed i18n work", () => {
     const offenders: string[] = []
 
     for (const file of SOURCE_FILES) {
       const rel = path.relative(SRC_ROOT, file)
-      if (KNOWN_OUT_OF_SCOPE_TODOS.has(rel)) continue
       const content = fs.readFileSync(file, "utf8")
       for (const lineNo of findI18nTodoLines(content)) {
         offenders.push(`${rel}:${lineNo}`)
