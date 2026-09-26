@@ -5,6 +5,15 @@ const mockGetK8sBearerToken = vi.fn(() => "test-token")
 const mockInvalidateK8sBearerToken = vi.fn()
 const mockPing = vi.fn()
 
+// In-memory stand-in for Valkey's cache, so getDependencyHealthSnapshot's cache read/write can
+// be asserted deterministically without a real Redis connection.
+const fakeCacheStore = new Map<string, unknown>()
+const mockCacheGet = vi.fn(async (key: string) => (fakeCacheStore.has(key) ? fakeCacheStore.get(key) : null))
+const mockCacheSet = vi.fn(async (key: string, value: unknown, ttlSeconds: number) => {
+  void ttlSeconds // signature parity with the real cacheSet(key, value, ttlSeconds); TTL isn't asserted here
+  fakeCacheStore.set(key, value)
+})
+
 vi.mock("./config", () => ({
   getK8sApiServer: () => mockGetK8sApiServer(),
 }))
@@ -16,6 +25,8 @@ vi.mock("./k8s-token", () => ({
 
 vi.mock("./valkey", () => ({
   getValkey: () => ({ ping: () => mockPing() }),
+  cacheGet: (key: string) => mockCacheGet(key),
+  cacheSet: (key: string, value: unknown, ttl: number) => mockCacheSet(key, value, ttl),
 }))
 
 import {
@@ -26,6 +37,7 @@ import {
   probeHttpDependency,
   probeK8sDependency,
   probeValkeyDependency,
+  getDependencyHealthSnapshot,
 } from "./dependency-health"
 
 describe("dependency-health vocabulary mapping (portal#47)", () => {
@@ -139,18 +151,30 @@ describe("probeK8sDependency", () => {
 
     const result = await probeK8sDependency()
 
-    expect(result).toMatchObject({ dependency: "kubernetes", state: "unavailable", reason: "timeout_or_network" })
+    expect(result).toMatchObject({ dependency: "kubernetes", state: "unavailable", reason: "network" })
   })
 
-  it("reports unavailable when the probe exceeds its timeout", async () => {
+  it("aborts the in-flight fetch (not just races a timer) when the probe exceeds its timeout", async () => {
+    // Mimics real fetch's abort contract: the request only settles when its signal fires,
+    // proving probeK8sDependency's AbortController is actually wired to the fetch call — a
+    // fetch mock that ignores `init.signal` (the previous Promise.race-only version's test)
+    // would hang here instead of resolving.
+    let abortListenerAttached = false
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation(() => new Promise(() => {})) // never resolves
+      vi.fn().mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            abortListenerAttached = true
+            init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
+          })
+      )
     )
 
     const result = await probeK8sDependency({ timeoutMs: 20 })
 
-    expect(result).toMatchObject({ dependency: "kubernetes", state: "unavailable", reason: "timeout_or_network" })
+    expect(abortListenerAttached).toBe(true)
+    expect(result).toMatchObject({ dependency: "kubernetes", state: "unavailable", reason: "timeout" })
   })
 })
 
@@ -191,5 +215,90 @@ describe("probeValkeyDependency", () => {
     const result = await probeValkeyDependency()
 
     expect(result).toMatchObject({ dependency: "valkey", state: "unavailable", reason: "timeout_or_network" })
+  })
+})
+
+describe("getDependencyHealthSnapshot: coalescing + success-only caching", () => {
+  const originalEnv = { ...process.env }
+
+  beforeEach(() => {
+    process.env = {
+      ...originalEnv,
+      PROMETHEUS_URL: "https://prometheus.narwhal.internal",
+      ARGOCD_URL: "https://argocd.narwhal.internal",
+      GITEA_URL: "https://gitea.narwhal.internal",
+      KEYCLOAK_ISSUER: "https://keycloak.narwhal.internal",
+      VALKEY_URL: "redis://valkey:6379",
+    }
+    fakeCacheStore.clear()
+    mockCacheGet.mockClear()
+    mockCacheSet.mockClear()
+    mockPing.mockReset()
+    mockPing.mockResolvedValue("PONG")
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+    vi.unstubAllGlobals()
+  })
+
+  it("coalesces 10 concurrent calls into exactly one probe run", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response))
+
+    const results = await Promise.all(Array.from({ length: 10 }, () => getDependencyHealthSnapshot()))
+
+    // 4 HTTP dependencies (prometheus/argocd/gitea/keycloak) + 1 kubernetes probe fetch = 5
+    // fetch calls total if (and only if) the 10 concurrent callers shared one run.
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(5)
+    expect(mockPing).toHaveBeenCalledTimes(1)
+    // every caller gets the same snapshot content
+    for (const r of results) expect(r).toEqual(results[0])
+  })
+
+  it("caches a fully-ok snapshot and serves the next call from cache without re-probing", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response))
+
+    await getDependencyHealthSnapshot()
+    expect(mockCacheSet).toHaveBeenCalledTimes(1)
+
+    await getDependencyHealthSnapshot()
+
+    // second call hit the cache — no additional fetch/ping calls beyond the first run's.
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(5)
+    expect(mockPing).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not cache a snapshot where any dependency is unavailable, and re-probes on the next call", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) =>
+        url.includes("argocd") ? Promise.reject(new Error("ECONNREFUSED")) : Promise.resolve({ ok: true, status: 200 } as Response)
+      )
+    )
+
+    const first = await getDependencyHealthSnapshot()
+    const argocdFirst = first.dependencies.find((d) => d.dependency === "argocd")
+    expect(argocdFirst?.state).toBe("unavailable")
+    expect(mockCacheSet).not.toHaveBeenCalled()
+
+    await getDependencyHealthSnapshot()
+
+    // second call re-probed instead of serving a cached (nonexistent) entry — 5 + 5 fetch calls.
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(10)
+  })
+
+  it("does not cache a snapshot where any dependency is unauthorized", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) =>
+        url.includes("keycloak")
+          ? Promise.resolve({ ok: false, status: 401 } as Response)
+          : Promise.resolve({ ok: true, status: 200 } as Response)
+      )
+    )
+
+    await getDependencyHealthSnapshot()
+
+    expect(mockCacheSet).not.toHaveBeenCalled()
   })
 })

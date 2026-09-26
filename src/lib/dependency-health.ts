@@ -26,7 +26,8 @@
 
 import { getK8sBearerToken, invalidateK8sBearerToken } from "./k8s-token"
 import { getK8sApiServer } from "./config"
-import { getValkey } from "./valkey"
+import { getValkey, cacheGet, cacheSet } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import { fetchWithPolicy, HttpClientError } from "./http-client"
 import type { TelemetryStatus } from "./prometheus"
 
@@ -58,9 +59,10 @@ export interface DependencyStatus {
   reason?: string
   /**
    * Redacted diagnostic detail (origin+pathname only, no query/userinfo — see
-   * http-client.ts's `redactUrl`). Still identifies the dependency's hostname, so callers
-   * MUST strip this field before returning a response to a non-admin caller; see
-   * /api/health/dependencies's route for the redaction boundary.
+   * http-client.ts's `redactUrl`). Still identifies the dependency's hostname — safe to return
+   * from /api/health/dependencies only because that route is cluster-admin-only (matching
+   * /api/health/status's precedent that hostnames are an admin-only diagnostics surface). A
+   * future consumer exposed to a broader audience must strip this field itself.
    */
   detail?: string
 }
@@ -156,23 +158,27 @@ export async function probeHttpDependency(
 }
 
 /**
- * Cheap reachability probe for the in-cluster Kubernetes API: a single-item, single-page
- * `listBounded` read against `/api/v1/namespaces`. Deliberately ignores the result's own
- * `truncated` flag — that signal is about list *completeness*, not API reachability, and a
- * healthy multi-namespace cluster will always report truncated=true at limit=1/maxPages=1.
- * Bounded by a race against `timeoutMs` the same way ready/route.ts's Valkey probe is, since
- * the underlying fetch has no AbortController wired through listBounded.
+ * Cheap reachability probe for the in-cluster Kubernetes API: a single-item, single-page read
+ * against `/api/v1/namespaces`. Deliberately ignores list *completeness* (whether a fuller read
+ * would paginate) — that's not an API-reachability signal, only whether the one bounded read
+ * that this probe issues succeeded. Genuinely cancellable: an `AbortController` tied to
+ * `timeoutMs` is passed as the fetch `signal`, so a timeout actually aborts the in-flight
+ * request instead of leaving it to run to completion in the background (the previous
+ * `Promise.race` version only raced a timer against the fetch promise — the fetch itself kept
+ * running, and its socket, past the logical timeout).
  */
 export async function probeK8sDependency(opts: { timeoutMs?: number } = {}): Promise<DependencyStatus> {
   const observedAt = nowIso()
   const timeoutMs = opts.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    await Promise.race([
-      k8sProbeFetch(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
-    ])
+    await k8sProbeFetch(controller.signal)
     return { dependency: "kubernetes", state: "ok", observedAt }
   } catch (err) {
+    if (controller.signal.aborted) {
+      return { dependency: "kubernetes", state: "unavailable", observedAt, reason: "timeout" }
+    }
     const status = (err as { status?: number } | undefined)?.status
     if (status === 401 || status === 403) {
       return { dependency: "kubernetes", state: "unauthorized", observedAt, reason: `http_${status}` }
@@ -181,8 +187,10 @@ export async function probeK8sDependency(opts: { timeoutMs?: number } = {}): Pro
       dependency: "kubernetes",
       state: "unavailable",
       observedAt,
-      reason: typeof status === "number" ? `http_${status}` : "timeout_or_network",
+      reason: typeof status === "number" ? `http_${status}` : "network",
     }
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -190,20 +198,22 @@ export async function probeK8sDependency(opts: { timeoutMs?: number } = {}): Pro
 // `listBounded` (which caches namespaces on success via getNamespaces() callers and has no
 // probe-timeout knob of its own); a health probe must never populate or extend a cache entry
 // on a stale/failed read (#47 AC: "cache responses ... must not silently extend validity after
-// upstream failure").
-async function k8sProbeFetch(): Promise<void> {
+// upstream failure"). `signal` is forwarded to both fetch calls so probeK8sDependency's abort
+// on timeout actually cancels whichever one is in flight.
+async function k8sProbeFetch(signal: AbortSignal): Promise<void> {
   const apiServer = getK8sApiServer()
   const headers: Record<string, string> = { Accept: "application/json" }
   if (apiServer.startsWith("https://")) {
     const token = getK8sBearerToken()
     if (token.length > 0) headers.Authorization = `Bearer ${token}`
   }
-  let res = await fetch(`${apiServer}/api/v1/namespaces?limit=1`, { headers })
+  let res = await fetch(`${apiServer}/api/v1/namespaces?limit=1`, { headers, signal })
   if (res.status === 401) {
     invalidateK8sBearerToken()
     const token = getK8sBearerToken()
     res = await fetch(`${apiServer}/api/v1/namespaces?limit=1`, {
       headers: token.length > 0 ? { ...headers, Authorization: `Bearer ${token}` } : headers,
+      signal,
     })
   }
   if (!res.ok) {
@@ -214,24 +224,87 @@ async function k8sProbeFetch(): Promise<void> {
 }
 
 /**
- * Cheap bounded-timeout reachability probe for Valkey, via the existing ping-based check
- * (mirrors /api/health/status's `probeValkey`). "unconfigured" state maps to "unavailable"
- * (same as `fromProbeState`) since callers are never expecting to distinguish the two here.
+ * Cheap reachability probe for Valkey, via the existing ping-based check (mirrors
+ * /api/health/status's `probeValkey`). No separate timeout race here: `getValkey()`'s client is
+ * constructed with `commandTimeout: 500` (see valkey.ts), which already bounds every command —
+ * including this `ping()` — to reject after 500ms regardless of what `opts.timeoutMs` says, so
+ * a second timer here would only ever fire after ioredis has already rejected and would be
+ * pure dead weight (an extra pending timeout with nothing left to race). "unconfigured" state
+ * maps to "unavailable" (same as `fromProbeState`) since callers are never expecting to
+ * distinguish the two here.
  */
-export async function probeValkeyDependency(opts: { timeoutMs?: number } = {}): Promise<DependencyStatus> {
+export async function probeValkeyDependency(): Promise<DependencyStatus> {
   const observedAt = nowIso()
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS
   if (!process.env.VALKEY_URL && !process.env.VALKEY_PASSWORD) {
     return { dependency: "valkey", state: "unavailable", observedAt, reason: "unconfigured" }
   }
   try {
-    const client = getValkey()
-    const pong = await Promise.race([
-      client.ping(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
-    ])
+    const pong = await getValkey().ping()
     return { dependency: "valkey", state: pong === "PONG" ? "ok" : "partial", observedAt }
   } catch {
     return { dependency: "valkey", state: "unavailable", observedAt, reason: "timeout_or_network" }
   }
+}
+
+export interface DependencyHealthSnapshot {
+  observedAt: string
+  dependencies: DependencyStatus[]
+}
+
+const SNAPSHOT_CACHE_TTL_SECONDS = 10
+
+// In-process request coalescing: while a snapshot run is in flight, every concurrent caller
+// awaits the SAME promise instead of triggering its own fan-out of 6 probes. Cleared as soon as
+// the run settles (success or failure) so the next call after that always re-probes rather than
+// reusing a stale in-memory reference — the cross-request freshness guarantee comes from the
+// Valkey cache below, not from this variable living longer than one run.
+let inFlightSnapshot: Promise<DependencyHealthSnapshot> | null = null
+
+async function runDependencyProbes(timeoutMs: number): Promise<DependencyHealthSnapshot> {
+  const dependencies = await Promise.all([
+    probeHttpDependency("prometheus", process.env.PROMETHEUS_URL, { timeoutMs }),
+    probeK8sDependency({ timeoutMs }),
+    probeHttpDependency("argocd", process.env.ARGOCD_URL, { timeoutMs }),
+    probeHttpDependency("gitea", process.env.GITEA_URL, { timeoutMs }),
+    probeHttpDependency("keycloak", process.env.KEYCLOAK_ISSUER, { timeoutMs }),
+    probeValkeyDependency(),
+  ])
+  return { observedAt: nowIso(), dependencies }
+}
+
+/**
+ * Entry point for /api/health/dependencies: returns a coalesced, short-TTL-cached snapshot of
+ * every core dependency instead of re-probing on every single request.
+ *
+ * - Coalescing: N concurrent callers while a run is in flight share that one run (see
+ *   `inFlightSnapshot` above) instead of each fanning out their own 6 probes — an authenticated
+ *   caller (or several) hitting this endpoint repeatedly can no longer multiply into an
+ *   amplification vector against every upstream dependency at once.
+ * - Caching: a snapshot is written to Valkey for {@link SNAPSHOT_CACHE_TTL_SECONDS} ONLY when
+ *   every dependency's state is "ok" — matching this repo's project-wide cache-keys.ts rule that
+ *   no namespace ever caches a partial/failed provider response (see
+ *   cache-keys.contract.test.ts's "no namespace caches a partial/failed provider response by
+ *   default"), and #47's AC that a degraded dependency must never be masked by a stale cached
+ *   snapshot. A run with ANY non-"ok" state (partial/stale/empty/unavailable/unauthorized) is
+ *   always re-probed on the next call, never served stale.
+ */
+export async function getDependencyHealthSnapshot(
+  opts: { timeoutMs?: number } = {}
+): Promise<DependencyHealthSnapshot> {
+  const cached = await cacheGet<DependencyHealthSnapshot>(cacheKeys.healthDependencies())
+  if (cached) return cached
+
+  if (inFlightSnapshot) return inFlightSnapshot
+
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS
+  const run = runDependencyProbes(timeoutMs).finally(() => {
+    inFlightSnapshot = null
+  })
+  inFlightSnapshot = run
+
+  const snapshot = await run
+  if (snapshot.dependencies.every((d) => d.state === "ok")) {
+    await cacheSet(cacheKeys.healthDependencies(), snapshot, SNAPSHOT_CACHE_TTL_SECONDS)
+  }
+  return snapshot
 }

@@ -250,6 +250,12 @@ export const cacheKeys = {
   k8sControlPlaneHealth: () => "k8s:control-plane-health",
   k8sNetpol: () => "k8s:netpol",
   k8sNode: (name: string) => join("k8s", "node", name),
+
+  // portal#47: aggregate dependency-health snapshot cache — see dependency-health.ts's
+  // getDependencyHealthSnapshot(). No dimension: /api/health/dependencies is
+  // cluster-admin-only (same value for every admin) and the snapshot covers every
+  // dependency in one key, not one per dependency.
+  healthDependencies: () => "health:dependencies",
 } as const
 
 /**
@@ -932,6 +938,25 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     securitySensitive: false,
     unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
   },
+  "health:dependencies": {
+    example: "health:dependencies",
+    dimensions: [],
+    ttlSeconds: 10,
+    owner: "src/lib/dependency-health.ts",
+    ownerPath: "src/app/api/health/dependencies/route.ts",
+    invalidation:
+      "TTL only. Written ONLY when every probe in the snapshot reports state 'ok' " +
+      "(getDependencyHealthSnapshot() in dependency-health.ts) — a mixed snapshot (any dependency partial/" +
+      "stale/empty/unavailable/unauthorized) is never cached, matching this registry's project-wide rule that " +
+      "no namespace caches a partial/failed provider response (see the contract test right below this one) and " +
+      "#47's AC that a degraded dependency must not be masked by a stale-but-clean cached snapshot.",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: {
+      code: "admin-only-route",
+      detail: "requireRole('cluster-admin')-gated; identical dependency topology snapshot for every cluster-admin.",
+    },
+  },
   "keycloak:* / api:groups-enriched": {
     example: "keycloak:users | keycloak:groups | keycloak:groups-detailed | api:groups-enriched",
     dimensions: [],
@@ -1117,6 +1142,8 @@ export const BUILDER_CHECKS: Record<keyof typeof cacheKeys, BuilderCheck> = {
   k8sControlPlaneHealth: { registryKey: "k8s:control-plane-health", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
   k8sNetpol: { registryKey: "k8s:netpol", ttlSeconds: 30, args: [], dimensionArgIndex: {} },
   k8sNode: { registryKey: "k8s:node", ttlSeconds: 30, args: ["node-1"], dimensionArgIndex: { query: 0 } },
+
+  healthDependencies: { registryKey: "health:dependencies", ttlSeconds: 10, args: [], dimensionArgIndex: {} },
 }
 
 /**
