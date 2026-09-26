@@ -1162,6 +1162,13 @@ export const ko = {
   "status.loading": "플랫폼 상태를 확인하는 중...",
   "status.error": "플랫폼 상태를 불러오지 못했습니다",
   "status.generatedAt": "마지막 업데이트: {time}",
+
+  // route-level error/loading fallbacks (issue #62)
+  "routeState.error.title": "문제가 발생했습니다",
+  "routeState.error.description": "이 페이지를 불러오는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+  "routeState.error.retry": "다시 시도",
+  "routeState.error.digestLabel": "오류 참조 코드",
+  "routeState.loading": "불러오는 중...",
 } as const
 
 export const en: Record<keyof typeof ko, string> = {
@@ -2324,6 +2331,13 @@ export const en: Record<keyof typeof ko, string> = {
   "status.loading": "Checking platform status...",
   "status.error": "Failed to load platform status",
   "status.generatedAt": "Last updated: {time}",
+
+  // route-level error/loading fallbacks (issue #62)
+  "routeState.error.title": "Something went wrong",
+  "routeState.error.description": "An error occurred while loading this page. Please try again in a moment.",
+  "routeState.error.retry": "Retry",
+  "routeState.error.digestLabel": "Error reference",
+  "routeState.loading": "Loading...",
 }
 
 export type TranslationKey = keyof typeof ko
