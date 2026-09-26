@@ -141,6 +141,11 @@ describe("i18n dictionary completeness", () => {
     // t(`prefix.${x}`), etc.) bumps this number — update the constant
     // deliberately when that's expected; don't raise it just to silence a
     // failure without checking what changed.
+    //
+    // resource-chart.tsx's utilization-basis fix (a2ff120/9d57c8e) deliberately does
+    // NOT bump this: `isScopedBasis()` only picks a boolean branch, and each branch
+    // calls t() with a literal key (t("resources.stat.cpuUsageScoped") etc.), not a
+    // variable — see that file's isScopedBasis comment for why.
     const BASELINE_DYNAMIC_SKIPPED = 46
     expect(dynamicMatches).toBe(BASELINE_DYNAMIC_SKIPPED)
   })

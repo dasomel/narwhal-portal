@@ -145,7 +145,16 @@ export interface ResourcesResponseV2 {
   namespaces: NamespaceUsageV2[]
   topCpuPods: TopPod[]        // top 10 by cpu usage, cluster-wide (exclude kube-*)
   topMemPods: TopPod[]        // top 10 by memory
-  cluster: { cpuPercent: number; memPercent: number; totalPods: number; noRequestPods: number }
+  cluster: {
+    cpuPercent: number
+    memPercent: number
+    totalPods: number
+    noRequestPods: number
+    // See src/app/api/governance/resources/route.ts's ResourcesResponseV2 for why this
+    // exists: cpuPercent/memPercent mean different things (cluster capacity vs. requests
+    // across visible namespaces) depending on the caller's scope.
+    basis: "cluster-capacity" | "visible-requests"
+  }
   noRequestPodsList: NoRequestPod[]
 }
 
