@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
-import { fetchWithPolicy, correlationIdFrom, HttpClientError } from "./http-client"
+import { fetchWithPolicy, correlationIdFrom, readJsonWithPolicy, HttpClientError } from "./http-client"
 
 describe("fetchWithPolicy", () => {
   const originalFetch = global.fetch
@@ -147,6 +147,180 @@ describe("fetchWithPolicy", () => {
     // Query strings are stripped too — a token passed as a query param (some
     // providers do this) must not survive into the error either.
     expect(thrown?.url).not.toContain("token")
+  })
+
+  it("still strips userinfo from the error when the URL is one new URL() rejects", async () => {
+    mockFetch.mockRejectedValue(new TypeError("fetch failed"))
+    // Unescaped space makes this reject the WHATWG URL parser, exercising the
+    // regex fallback branch of redactUrl rather than the `new URL()` happy path.
+    const malformed = "http://user:s3cr3t@host with space/path"
+
+    let thrown: HttpClientError | null = null
+    try {
+      await fetchWithPolicy(malformed, {}, { retry: false })
+    } catch (err) {
+      thrown = err as HttpClientError
+    }
+
+    expect(thrown).toBeInstanceOf(HttpClientError)
+    expect(thrown?.url).not.toContain("s3cr3t")
+    expect(thrown?.message).not.toContain("s3cr3t")
+    expect(thrown?.url).toBe("http://host with space/path")
+  })
+
+  it("honors a caller-supplied abort signal: classified 'aborted', never retried", async () => {
+    mockFetch.mockImplementation(
+      (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted")
+            err.name = "AbortError"
+            reject(err)
+          })
+        })
+    )
+    const caller = new AbortController()
+
+    const promise = fetchWithPolicy(
+      "http://x/api",
+      { method: "GET" },
+      { timeoutMs: 5000, signal: caller.signal, retry: { maxAttempts: 3 } }
+    )
+    const assertion = expect(promise).rejects.toMatchObject({
+      name: "HttpClientError",
+      kind: "aborted",
+    })
+    caller.abort()
+    await assertion
+
+    // GET + retry enabled would normally retry a failure — but a caller abort
+    // must never trigger one.
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("still classifies as 'timeout' (not 'aborted') when only the internal timer fires and no caller signal was ever aborted", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const err = new Error("aborted")
+          err.name = "AbortError"
+          reject(err)
+        })
+      })
+    })
+    const caller = new AbortController()
+
+    const promise = fetchWithPolicy(
+      "http://x/api",
+      {},
+      { timeoutMs: 1000, signal: caller.signal, retry: false }
+    )
+    const assertion = expect(promise).rejects.toMatchObject({ kind: "timeout" })
+    await vi.advanceTimersByTimeAsync(1000)
+    await assertion
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("drains a retried response's body so the connection is released", async () => {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("stale"))
+      },
+    })
+    const cancelSpy = vi.spyOn(stream, "cancel")
+    mockFetch
+      .mockResolvedValueOnce(new Response(stream, { status: 503 }))
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
+
+    const promise = fetchWithPolicy("http://x/api", { method: "GET" }, { retry: { maxAttempts: 2 } })
+    await vi.runAllTimersAsync()
+    const res = await promise
+
+    expect(res.status).toBe(200)
+    expect(cancelSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not attempt to cancel an already-consumed retried body", async () => {
+    const emptyRes = new Response(null, { status: 503 })
+    expect(emptyRes.body).toBeNull()
+    mockFetch
+      .mockResolvedValueOnce(emptyRes)
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
+
+    const promise = fetchWithPolicy("http://x/api", { method: "GET" }, { retry: { maxAttempts: 2 } })
+    await vi.runAllTimersAsync()
+    const res = await promise
+
+    expect(res.status).toBe(200)
+  })
+
+  it("bounds a body read by the remaining deadline and cancels a stalled body", async () => {
+    // Reading via readJsonWithPolicy acquires its own reader (see
+    // collectBytesWithDeadline), which locks the stream — a locked stream's
+    // own .cancel() method throws, so cancellation on timeout goes through
+    // that reader instead. Assert on the underlying cancel ALGORITHM (the
+    // `cancel` option below), which fires either way, rather than spying on
+    // the (here, unreachable-once-locked) public stream.cancel method.
+    const cancelUnderlying = vi.fn()
+    const stream = new ReadableStream({
+      start() {
+        /* never enqueue or close — simulates a stalled upstream body */
+      },
+      cancel(reason) {
+        cancelUnderlying(reason)
+      },
+    })
+    mockFetch.mockResolvedValueOnce(new Response(stream, { status: 200 }))
+
+    const res = await fetchWithPolicy("http://x/api", { method: "GET" }, { timeoutMs: 1000 })
+    const pending = readJsonWithPolicy(res)
+    const assertion = expect(pending).rejects.toMatchObject({
+      name: "HttpClientError",
+      kind: "timeout",
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+    await assertion
+    expect(cancelUnderlying).toHaveBeenCalledTimes(1)
+  })
+
+  it("reads a fast body normally within the deadline", async () => {
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+
+    const res = await fetchWithPolicy("http://x/api", { method: "GET" }, { timeoutMs: 1000 })
+    const data = await readJsonWithPolicy<{ ok: boolean }>(res)
+
+    expect(data.ok).toBe(true)
+  })
+
+  it("falls back to a plain, unbounded read for a Response this client never produced", async () => {
+    const handCrafted = new Response(JSON.stringify({ ok: true }))
+    const data = await readJsonWithPolicy<{ ok: boolean }>(handCrafted)
+    expect(data.ok).toBe(true)
+  })
+
+  it("clears its timer after a normal successful call (no leaked timer)", async () => {
+    mockFetch.mockResolvedValueOnce(new Response("ok", { status: 200 }))
+    const caller = new AbortController()
+
+    await fetchWithPolicy("http://x/api", {}, { signal: caller.signal })
+
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("clears its timer after exhausting retries on a network error (no leaked timer)", async () => {
+    mockFetch.mockRejectedValue(new TypeError("fetch failed"))
+
+    const promise = fetchWithPolicy(
+      "http://x/api",
+      { method: "GET" },
+      { retry: { maxAttempts: 2, baseDelayMs: 10, maxDelayMs: 50 } }
+    )
+    const assertion = expect(promise).rejects.toMatchObject({ kind: "network" })
+    await vi.runAllTimersAsync()
+    await assertion
+
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
 

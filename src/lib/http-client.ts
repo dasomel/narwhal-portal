@@ -6,18 +6,27 @@
  * copies scattered across src/lib.
  *
  * Scope of this slice (see #48's AC list for the full roadmap):
- *  - per-call timeout via AbortSignal
+ *  - per-call timeout via AbortSignal, combined with an optional caller signal
+ *    so cancelling the caller's own request (e.g. the inbound Next.js request
+ *    aborting) still cancels the outbound one
  *  - bounded retry+backoff, gated on BOTH an idempotent method AND a retryable
- *    failure (network error, 502/503/504, 429 honoring Retry-After)
+ *    failure (network error, 502/503/504, 429 honoring Retry-After), draining
+ *    a retried response's body first so the connection is actually released
+ *  - a deadline that survives past the headers: readJsonWithPolicy/
+ *    readTextWithPolicy bound the BODY read to whatever time is left of the
+ *    original timeoutMs, instead of the timer clearing the moment headers
+ *    arrive and leaving a stalled body free to hang forever
  *  - correlation/request-id propagation from an inbound Request/Headers when
  *    the caller has one
- *  - a typed error whose message/cause never includes header values, so a
- *    caller can log it directly without redacting Authorization by hand
+ *  - a typed error whose message/cause never includes header values or
+ *    userinfo, so a caller can log it directly without redacting
+ *    Authorization/Cookie by hand
  *
  * Left open, not attempted here: TLS-verification enforcement (already handled
- * per-URL by config.ts's assertHttpsInProduction), response/stream body-size
- * bounds, and per-provider circuit/health metrics — each is a separate #48 AC
- * that touches call sites this slice doesn't.
+ * per-URL by config.ts's assertHttpsInProduction), response/stream body-SIZE
+ * bounds (this slice bounds body-read TIME, not bytes), and per-provider
+ * circuit/health metrics — each is a separate #48 AC that touches call sites
+ * this slice doesn't.
  */
 
 export const IDEMPOTENT_METHODS: ReadonlySet<string> = new Set([
@@ -54,7 +63,7 @@ export interface RetryOptions {
 }
 
 export interface FetchWithPolicyOptions {
-  /** Abort the request after this many ms. Default {@link DEFAULT_TIMEOUT_MS}. */
+  /** Abort the request after this many ms (covers connect+headers; see readJsonWithPolicy/readTextWithPolicy for the body). Default {@link DEFAULT_TIMEOUT_MS}. */
   timeoutMs?: number
   /**
    * Bounded retry/backoff, applied only when the request method is idempotent
@@ -69,14 +78,21 @@ export interface FetchWithPolicyOptions {
    * added) when absent — this client never mints one on its own.
    */
   correlationId?: string | null
+  /**
+   * A caller-owned signal (e.g. the inbound Next.js Request's own AbortSignal)
+   * to honor alongside this call's own timeout. Aborting it fails the call
+   * immediately with `kind: "aborted"` and is never retried, regardless of
+   * method — the caller asked to stop, not "stop unless it's safe to try again."
+   */
+  signal?: AbortSignal
 }
 
-export type HttpClientErrorKind = "timeout" | "network"
+export type HttpClientErrorKind = "timeout" | "network" | "aborted"
 
 /**
- * Typed transport failure. `message` and `cause` are built from the request
- * method/kind and a query-stripped URL only — never from headers — so this is
- * always safe to log or include in a response body without hand-redacting
+ * Typed transport failure. `message` and `url` are built from the request
+ * kind and a query/userinfo-stripped URL only — never from headers — so this
+ * is always safe to log or include in a response body without hand-redacting
  * Authorization/Cookie values first.
  */
 export class HttpClientError extends Error {
@@ -88,7 +104,9 @@ export class HttpClientError extends Error {
     super(
       kind === "timeout"
         ? `Request timed out calling ${redacted}`
-        : `Network error calling ${redacted}`
+        : kind === "aborted"
+          ? `Request aborted by caller calling ${redacted}`
+          : `Network error calling ${redacted}`
     )
     this.name = "HttpClientError"
     this.kind = kind
@@ -97,13 +115,21 @@ export class HttpClientError extends Error {
   }
 }
 
+// Matches "scheme://user:pass@" so the fallback below can strip it the same
+// way u.origin does for a URL the WHATWG parser accepts.
+const USERINFO_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^@/]*@/
+
 /** Strips query string and any userinfo — only origin+pathname ever reaches an error/log line. */
 function redactUrl(url: string): string {
   try {
     const u = new URL(url)
     return `${u.origin}${u.pathname}`
   } catch {
-    return url.split("?")[0]
+    // new URL() can reject a string that still embeds real credentials (a
+    // missing host, an unescaped space, ...) — a redaction path that only
+    // works on well-formed URLs isn't a redaction guarantee, so strip
+    // "scheme://user:pass@" by regex here too.
+    return url.split("?")[0].replace(USERINFO_RE, "$1")
   }
 }
 
@@ -170,12 +196,156 @@ function buildHeaders(initHeaders: HeadersInit | undefined, correlationId: strin
   return plain
 }
 
+interface CombinedSignal {
+  signal: AbortSignal
+  /** Removes any listeners this combination added. Always call in a `finally`. */
+  cleanup: () => void
+}
+
+// Combines the per-attempt timeout controller with an optional caller signal.
+// AbortSignal.any (Node >=20.3; this repo's runtime image pins node:22) covers
+// the common case with no manual bookkeeping; a listener-based fallback covers
+// any environment where it's missing, with its own listeners removed on
+// cleanup so nothing outlives the attempt that created it.
+function combineSignals(signals: Array<AbortSignal | undefined>): CombinedSignal {
+  const active = signals.filter((s): s is AbortSignal => s !== undefined)
+  if (active.length <= 1) {
+    return { signal: active[0] ?? new AbortController().signal, cleanup: () => {} }
+  }
+  if (typeof AbortSignal.any === "function") {
+    return { signal: AbortSignal.any(active), cleanup: () => {} }
+  }
+
+  const controller = new AbortController()
+  const onAbort = (source: AbortSignal) => controller.abort(source.reason)
+  const bound = active.map((source) => {
+    const handler = () => onAbort(source)
+    source.addEventListener("abort", handler, { once: true })
+    return { source, handler }
+  })
+  return {
+    signal: controller.signal,
+    cleanup: () => bound.forEach(({ source, handler }) => source.removeEventListener("abort", handler)),
+  }
+}
+
+// Best-effort connection release: cancelling an unread body tells the
+// underlying connection it can be reused/closed instead of waiting for the
+// caller to ever read (or garbage-collect) it. Errors are swallowed — this
+// runs on a body we're about to discard either way (a retried response) or a
+// body a deadline just cut off, so failing to cancel cleanly is not itself an
+// error worth surfacing.
+async function cancelBody(response: Response): Promise<void> {
+  if (!response.body || response.bodyUsed) return
+  try {
+    await response.body.cancel()
+  } catch {
+    /* best-effort */
+  }
+}
+
+// Absolute deadline (ms epoch) for reading each policy response's body,
+// keyed by the Response identity fetchWithPolicy returned. A response this
+// client didn't produce (e.g. one built by hand in a test) simply has no
+// entry, and readJsonWithPolicy/readTextWithPolicy fall back to reading with
+// no bound in that case.
+const bodyDeadlines = new WeakMap<Response, { deadlineAt: number; url: string }>()
+
+function concatBytes(chunks: Uint8Array[]): Uint8Array {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+  const merged = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    merged.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return merged
+}
+
+// Reads the body ourselves via a reader we hold, instead of calling
+// response.json()/.text() and racing that against a timeout: once .json()/
+// .text() has locked the stream, response.body.cancel() throws ("stream is
+// locked") because it isn't the lock holder — only the reader that holds the
+// lock can cancel a stream mid-read. Acquiring the reader here means a
+// stalled body can actually be cancelled when the deadline hits, not just
+// abandoned to keep the connection open.
+async function collectBytesWithDeadline(response: Response, remainingMs: number, url: string): Promise<Uint8Array> {
+  if (!response.body) return new Uint8Array()
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  // Cancelling a reader resolves any of ITS OWN pending read() with a normal
+  // {done: true} — that's how a locked stream lets its lock holder cancel
+  // mid-read at all. Racing read() against the deadline promise is therefore
+  // not enough on its own: read() can "win" with a done result that isn't a
+  // real end-of-stream, it's the cancellation completing. This flag is
+  // checked after every race so that case is still reported as a timeout.
+  let timedOut = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true
+      reader
+        .cancel()
+        .catch(() => {
+          /* best-effort */
+        })
+        .finally(() => reject(new HttpClientError("timeout", url)))
+    }, remainingMs)
+  })
+
+  try {
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), deadline])
+      if (timedOut) throw new HttpClientError("timeout", url)
+      if (done) break
+      if (value) chunks.push(value)
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+  return concatBytes(chunks)
+}
+
+async function readBodyWithDeadline<T>(response: Response, parse: (text: string) => T): Promise<T> {
+  const entry = bodyDeadlines.get(response)
+  if (!entry) return parse(await response.text())
+
+  const remainingMs = entry.deadlineAt - Date.now()
+  if (remainingMs <= 0) {
+    await cancelBody(response)
+    throw new HttpClientError("timeout", entry.url)
+  }
+
+  const bytes = await collectBytesWithDeadline(response, remainingMs, entry.url)
+  return parse(new TextDecoder().decode(bytes))
+}
+
 /**
- * Policy-wrapped `fetch()`: timeout, bounded retry for idempotent+retryable
- * failures, and correlation propagation. Returns the `Response` on any
- * non-retried outcome (including a non-ok status) exactly like a bare `fetch`
- * call would — callers keep deciding what a given status means, this only
- * decides whether to try again first.
+ * Parses a {@link fetchWithPolicy} response as JSON, bounded by whatever time
+ * remains of that call's original `timeoutMs` — a stalled/slow body cannot
+ * hang past the same deadline the headers were already subject to. Falls back
+ * to a plain, unbounded `response.text()` + JSON.parse for a Response this
+ * client didn't produce.
+ */
+export function readJsonWithPolicy<T = unknown>(response: Response): Promise<T> {
+  return readBodyWithDeadline(response, (text) => JSON.parse(text) as T)
+}
+
+/** Text-body counterpart of {@link readJsonWithPolicy}, same deadline semantics. */
+export function readTextWithPolicy(response: Response): Promise<string> {
+  return readBodyWithDeadline(response, (text) => text)
+}
+
+/**
+ * Policy-wrapped `fetch()`: timeout (combined with an optional caller signal),
+ * bounded retry for idempotent+retryable failures, and correlation
+ * propagation. Returns the `Response` on any non-retried outcome (including a
+ * non-ok status) exactly like a bare `fetch` call would — callers keep
+ * deciding what a given status means, this only decides whether to try again
+ * first. Read the body via {@link readJsonWithPolicy}/{@link readTextWithPolicy}
+ * (not `response.json()`/`.text()` directly) to keep the original deadline in
+ * force for a slow body too.
  */
 export async function fetchWithPolicy(
   url: string,
@@ -202,18 +372,23 @@ export async function fetchWithPolicy(
   }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const controller = new AbortController()
+    const attemptStartedAt = Date.now()
+    const timeoutController = new AbortController()
     let timedOut = false
     const timer = setTimeout(() => {
       timedOut = true
-      controller.abort()
+      timeoutController.abort()
     }, timeoutMs)
+    const { signal, cleanup } = combineSignals([timeoutController.signal, options.signal])
 
     try {
-      const response = await fetch(url, { ...requestInit, signal: controller.signal })
-      clearTimeout(timer)
+      const response = await fetch(url, { ...requestInit, signal })
 
       if (canRetry && attempt < maxAttempts && RETRYABLE_STATUS.has(response.status)) {
+        // Draining the body before the next attempt releases the connection
+        // instead of leaking it — nothing downstream will ever read a
+        // response we're about to discard for a retry.
+        await cancelBody(response)
         const waitMs =
           response.status === 429
             ? (retryAfterMs(response, retryConfig.maxDelayMs) ??
@@ -222,20 +397,28 @@ export async function fetchWithPolicy(
         await delay(waitMs)
         continue
       }
+
+      // The timer above only covers connect-through-headers; record the
+      // deadline that still applies to reading THIS response's body so
+      // readJsonWithPolicy/readTextWithPolicy can bound it later, instead of
+      // a stalled body being free to hang forever once this function returns.
+      const remainingMs = Math.max(0, timeoutMs - (Date.now() - attemptStartedAt))
+      bodyDeadlines.set(response, { deadlineAt: Date.now() + remainingMs, url })
       return response
     } catch (err) {
-      clearTimeout(timer)
-      // Timeouts are a deliberate signal that the upstream is too slow right
-      // now — never retried here (a caller wanting timeout-triggered retry can
-      // still catch HttpClientError and decide that itself). Only a genuine
-      // network-level failure (DNS, TLS, connection reset, ...) is retried,
-      // and only for an idempotent method.
-      const kind: HttpClientErrorKind = timedOut ? "timeout" : "network"
+      // Caller abort takes priority in classification: if the caller's own
+      // signal is what fired, that's true regardless of whether our timeout
+      // also happened to elapse around the same time, and it is never
+      // retried — the caller asked to stop, full stop.
+      const kind: HttpClientErrorKind = options.signal?.aborted ? "aborted" : timedOut ? "timeout" : "network"
       if (canRetry && attempt < maxAttempts && kind === "network") {
         await delay(computeBackoffMs(attempt, retryConfig.baseDelayMs, retryConfig.maxDelayMs))
         continue
       }
       throw new HttpClientError(kind, url, err)
+    } finally {
+      clearTimeout(timer)
+      cleanup()
     }
   }
 

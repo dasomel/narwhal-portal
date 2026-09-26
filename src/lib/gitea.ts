@@ -1,6 +1,6 @@
 import { cacheGet, cacheSet } from "./valkey"
 import { assertHttpsInProduction, getDependencyUrl, isProduction } from "./config"
-import { fetchWithPolicy } from "./http-client"
+import { fetchWithPolicy, readJsonWithPolicy, readTextWithPolicy } from "./http-client"
 
 // Gitea client for the one thing the portal writes: a namespace request.
 //
@@ -100,7 +100,7 @@ async function api<T>(path: string, init: RequestInit): Promise<T> {
   if (!res.ok) {
     // Gitea answers with {"message": "..."}; keep it, since "namespace already
     // requested" and "token expired" are different problems for the caller.
-    const detail = await res.text().catch(() => "")
+    const detail = await readTextWithPolicy(res).catch(() => "")
     let message = detail
     try {
       message = (JSON.parse(detail) as { message?: string }).message ?? detail
@@ -109,7 +109,7 @@ async function api<T>(path: string, init: RequestInit): Promise<T> {
     }
     throw new GiteaError(message || res.statusText, res.status)
   }
-  return (await res.json()) as T
+  return await readJsonWithPolicy<T>(res)
 }
 
 /** resources/tenants/<team>/<namespace>.yaml — the layout the tenants Application recurses over. */
@@ -281,7 +281,7 @@ export async function getCommitTimestamp(sha: string): Promise<string | null> {
       return null
     }
 
-    const data = await res.json()
+    const data = await readJsonWithPolicy<{ commit?: { committer?: { date?: string }; author?: { date?: string } } }>(res)
     const commitDate = data?.commit?.committer?.date || data?.commit?.author?.date || null
     if (commitDate) {
       try {

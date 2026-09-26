@@ -2,7 +2,7 @@ import { cacheDel, cacheGet, cacheSet } from "./valkey"
 import { getUserScope, type OwnershipMismatch } from "./role-filter"
 import { getEffectiveScope, namespaceVisible } from "./scope"
 import { getDependencyUrl, isProduction } from "./config"
-import { fetchWithPolicy } from "./http-client"
+import { fetchWithPolicy, readJsonWithPolicy, readTextWithPolicy } from "./http-client"
 
 function argocdUrl(): string {
   return getDependencyUrl("ARGOCD_URL", "http://localhost:8080")
@@ -101,7 +101,7 @@ async function loadArgoApps(): Promise<ArgoApp[]> {
   if (cached) return cached
   const res = await argoFetch("/api/v1/applications")
   if (!res.ok) throw new Error(`ArgoCD API failed: ${res.status}`)
-  const data = await res.json()
+  const data = await readJsonWithPolicy<{ items?: ArgoApp[] }>(res)
   const apps: ArgoApp[] = (data.items ?? []).filter((a: ArgoApp) => !HIDDEN_APPS.includes(a.metadata.name))
   await cacheSet("argocd:apps", apps, 10)
   return apps
@@ -140,7 +140,7 @@ export async function getArgoApp(name: string): Promise<ArgoApp | null> {
   try {
     const res = await argoFetch(`/api/v1/applications/${encodeURIComponent(name)}`)
     if (!res.ok) return null
-    const app: ArgoApp = await res.json()
+    const app: ArgoApp = await readJsonWithPolicy<ArgoApp>(res)
     await cacheSet(cacheKey, app, 10)
     return app
   } catch (err) {
@@ -258,11 +258,11 @@ export async function syncArgoApp(name: string): Promise<SyncResult> {
   }
 
   if (!res.ok) {
-    const body = await res.text().catch(() => "")
+    const body = await readTextWithPolicy(res).catch(() => "")
     throw new Error(`ArgoCD sync failed: ${res.status} ${body}`.trim())
   }
 
-  const app: ArgoApp = await res.json()
+  const app: ArgoApp = await readJsonWithPolicy<ArgoApp>(res)
   return {
     name: app.metadata.name,
     syncStatus: app.status.sync.status,
