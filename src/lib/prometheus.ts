@@ -2,7 +2,39 @@ import { cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
 import { assertPromQLSafe, K8S_NODE_NAME_RE } from "./validation"
 import { getK8sApiServer, getDependencyUrl } from "./config"
+import { fetchWithPolicy, readJsonWithPolicy, HttpClientError } from "./http-client"
+
+// No automatic retry: these queries back polled dashboards that re-query on
+// their own, and retrying 429/5xx would multiply load on a Prometheus that is
+// already overloaded. A failed attempt surfaces as "unavailable" telemetry.
+const PROM_POLICY = { retry: false } as const
 import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
+
+// portal#48: queryScalarExplicit/queryVectorExplicit/queryRangeExplicit had NO
+// timeout at all before this migration — a stalled Prometheus connection could
+// hang the caller indefinitely. They now get the shared client's default 10s
+// via fetchWithPolicy. This unwraps HttpClientError back to the original
+// network-error message (e.g. "Connection refused to Prometheus") instead of
+// the client's generic "Network error calling <url>" wrapper, since callers
+// (and prometheus.test.ts) surface this string directly as telemetry evidence.
+function promErrorMessage(err: unknown): string {
+  if (err instanceof HttpClientError) {
+    return err.cause instanceof Error ? err.cause.message : err.message
+  }
+  return err instanceof Error ? err.message : String(err)
+}
+
+// Prometheus HTTP API's /api/v1/query(_range) response shape, typed loosely
+// (only the fields these query functions actually read) so readJsonWithPolicy
+// doesn't fall back to `unknown` the way res.json() used to fall back to `any`.
+interface PromApiResultItem {
+  metric: Record<string, string>
+  value: [number, string]
+  values?: [number, string][]
+}
+interface PromApiResponse {
+  data?: { result?: PromApiResultItem[] }
+}
 
 export type TelemetryStatus = "ok" | "empty" | "unavailable" | "partial" | "ambiguous" | "stale"
 export type EvidenceSource = "prometheus" | "kubernetes" | "mixed" | "none"
@@ -197,7 +229,7 @@ export async function queryScalarExplicit(
   const evaluatedAt = new Date().toISOString()
 
   try {
-    const res = await fetch(url, { next: { revalidate: 0 } })
+    const res = await fetchWithPolicy(url, { next: { revalidate: 0 } }, PROM_POLICY)
     if (!res.ok) {
       return {
         status: "unavailable",
@@ -210,7 +242,7 @@ export async function queryScalarExplicit(
       }
     }
 
-    const data = await res.json()
+    const data = await readJsonWithPolicy<PromApiResponse>(res)
     const results = data?.data?.result ?? []
     const seriesCount = results.length
 
@@ -292,7 +324,7 @@ export async function queryScalarExplicit(
       evaluatedAt,
       query: promql,
       source: "prometheus",
-      error: err instanceof Error ? err.message : String(err),
+      error: promErrorMessage(err),
     }
   }
 }
@@ -326,7 +358,7 @@ export async function queryVectorExplicit(
   const evaluatedAt = new Date().toISOString()
 
   try {
-    const res = await fetch(url, { next: { revalidate: 0 } })
+    const res = await fetchWithPolicy(url, { next: { revalidate: 0 } }, PROM_POLICY)
     if (!res.ok) {
       return {
         status: "unavailable",
@@ -339,7 +371,7 @@ export async function queryVectorExplicit(
       }
     }
 
-    const data = await res.json()
+    const data = await readJsonWithPolicy<PromApiResponse>(res)
     const rawResults = data?.data?.result ?? []
     const results: VectorMetricResult[] = rawResults.map(
       (r: { metric: Record<string, string>; value: [number, string] }) => ({
@@ -369,7 +401,7 @@ export async function queryVectorExplicit(
       evaluatedAt,
       query: promql,
       source: "prometheus",
-      error: err instanceof Error ? err.message : String(err),
+      error: promErrorMessage(err),
     }
   }
 }
@@ -406,7 +438,7 @@ export async function queryRangeExplicit(
   const evaluatedAt = new Date().toISOString()
 
   try {
-    const res = await fetch(url, { next: { revalidate: 0 } })
+    const res = await fetchWithPolicy(url, { next: { revalidate: 0 } }, PROM_POLICY)
     if (!res.ok) {
       return {
         status: "unavailable",
@@ -419,7 +451,7 @@ export async function queryRangeExplicit(
       }
     }
 
-    const data = await res.json()
+    const data = await readJsonWithPolicy<PromApiResponse>(res)
     const rawResults = data?.data?.result ?? []
     const seriesCount = rawResults.length
 
@@ -469,7 +501,7 @@ export async function queryRangeExplicit(
       evaluatedAt,
       query: promql,
       source: "prometheus",
-      error: err instanceof Error ? err.message : String(err),
+      error: promErrorMessage(err),
     }
   }
 }

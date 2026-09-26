@@ -1,5 +1,6 @@
 import { cacheGet, cacheSet, cacheDel } from "./valkey"
 import { getDependencyUrl, isProduction } from "./config"
+import { fetchWithPolicy, readJsonWithPolicy, readTextWithPolicy, HttpClientError } from "./http-client"
 
 // Read at call-time, not module top level (see 85ca55c / getDependencyUrl's contract
 // in config.ts) so a missing KEYCLOAK_INTERNAL_URL fails on first admin API call in
@@ -86,7 +87,10 @@ async function fetchAdminToken(): Promise<CachedAdminToken> {
 
   let res: Response
   try {
-    res = await fetch(
+    // POST is a mutation against Keycloak's token endpoint — never auto-retried
+    // (portal#48: mutations to Keycloak/APISIX admin pass retry: false explicitly).
+    // Previously had no timeout at all — now gets the shared client's default (10s).
+    res = await fetchWithPolicy(
       `${getKeycloakInternalUrl()}/realms/${keycloakAdminRealm()}/protocol/openid-connect/token`,
       {
         method: "POST",
@@ -96,10 +100,14 @@ async function fetchAdminToken(): Promise<CachedAdminToken> {
           client_id: clientId,
           client_secret: clientSecret,
         }),
-      }
+      },
+      { retry: false }
     )
   } catch (err) {
-    throw new KeycloakUnavailableError(`Keycloak admin token request failed: ${(err as Error).message}`)
+    // HttpClientError's message/url are already redacted (no header/body values),
+    // so it's always safe to fold into this error as-is.
+    const message = err instanceof HttpClientError ? err.message : (err as Error).message
+    throw new KeycloakUnavailableError(`Keycloak admin token request failed: ${message}`)
   }
 
   if (!res.ok) {
@@ -112,7 +120,7 @@ async function fetchAdminToken(): Promise<CachedAdminToken> {
     throw new KeycloakCredentialError(`Keycloak admin token request rejected (HTTP ${res.status})`)
   }
 
-  const data = await res.json()
+  const data = await readJsonWithPolicy<{ access_token?: string; expires_in?: number }>(res)
   const token: string | undefined = data.access_token
   if (!token) {
     throw new KeycloakCredentialError("Keycloak token response missing access_token")
@@ -154,18 +162,28 @@ export async function getKeycloakAdminToken(forceRefresh = false): Promise<strin
  * provider existed.
  */
 async function kcFetch(url: string, init?: RequestInit): Promise<Response> {
+  // portal#48: PUT/POST/DELETE against the Keycloak admin API pass retry: false
+  // explicitly — the shared client's default would otherwise auto-retry PUT/DELETE
+  // (both idempotent methods) on a 502/503/504/429, which is not safe to assume for
+  // an admin mutation. GET reads keep the shared client's default retry behavior.
+  const method = (init?.method ?? "GET").toUpperCase()
   const doFetch = async (token: string): Promise<Response> => {
     try {
-      return await fetch(url, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          ...(init?.headers as Record<string, string> | undefined),
+      return await fetchWithPolicy(
+        url,
+        {
+          ...init,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            ...(init?.headers as Record<string, string> | undefined),
+          },
         },
-      })
+        { retry: method === "GET" ? undefined : false }
+      )
     } catch (err) {
-      throw new KeycloakUnavailableError(`Keycloak request failed: ${(err as Error).message}`)
+      const message = err instanceof HttpClientError ? err.message : (err as Error).message
+      throw new KeycloakUnavailableError(`Keycloak request failed: ${message}`)
     }
   }
 
@@ -238,7 +256,7 @@ async function fetchAllPages<T>(
     const sep = baseUrl.includes("?") ? "&" : "?"
     const res = await kcFetch(`${baseUrl}${sep}first=${first}&max=${pageSize}`)
     if (!res.ok) throw new Error(`${errorPrefix} ${res.status}`)
-    const data: T[] = await res.json()
+    const data: T[] = await readJsonWithPolicy<T[]>(res)
     results.push(...data)
     if (data.length < pageSize) {
       return results
@@ -413,7 +431,7 @@ export async function createUser(payload: {
       }),
     }
   )
-  if (!res.ok) throw new Error(`Create user failed: ${await res.text()}`)
+  if (!res.ok) throw new Error(`Create user failed: ${await readTextWithPolicy(res)}`)
 
   const location = res.headers.get("Location") ?? ""
   const newId = location.split("/").pop()
@@ -424,7 +442,7 @@ export async function createUser(payload: {
   )
   if (!getRes.ok) throw new Error(`Get new user failed: ${getRes.status}`)
   await invalidateKeycloakCaches([KEYCLOAK_CACHE_KEYS.users])
-  return mapUser(await getRes.json())
+  return mapUser(await readJsonWithPolicy<Record<string, unknown>>(getRes))
 }
 
 export async function setUserActive(pk: string, isActive: boolean): Promise<void> {
@@ -482,7 +500,7 @@ export async function updateGroupAttributes(
     `${getKeycloakInternalUrl()}/admin/realms/${KEYCLOAK_REALM}/groups/${groupPk}`
   )
   if (!getRes.ok) throw new Error(`Get group failed: ${getRes.status}`)
-  const group = await getRes.json()
+  const group = await readJsonWithPolicy<Record<string, unknown> & { attributes?: Record<string, string[]> }>(getRes)
 
   // Keycloak stores attributes as Record<string, string[]>
   const kcAttributes: Record<string, string[]> = { ...(group.attributes ?? {}) }

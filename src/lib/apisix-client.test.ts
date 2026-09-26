@@ -9,6 +9,14 @@ vi.mock("./valkey", () => ({
 import { cacheGet, cacheSet, cacheDel } from "./valkey"
 import { getRoutes, toggleRoute, ApisixCredentialError } from "./apisix-client"
 
+// portal#48: getRoutes now reads its response via fetchWithPolicy's
+// readJsonWithPolicy, which reads response.body directly (not response.json())
+// so a stalled body can be bound to a deadline — a plain `{ ok, json: () => ... }`
+// mock has no `.body` ReadableStream and would silently read as empty.
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+}
+
 describe("apisix-client credential handling", () => {
   const originalEnv = { ...process.env }
   const originalFetch = global.fetch
@@ -31,7 +39,7 @@ describe("apisix-client credential handling", () => {
   it("uses APISIX_API_KEY_READONLY for reads when configured", async () => {
     process.env.APISIX_API_KEY = "admin-key"
     process.env.APISIX_API_KEY_READONLY = "readonly-key"
-    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ list: [] }) })
+    mockFetch.mockResolvedValueOnce(jsonResponse({ list: [] }))
 
     await getRoutes()
 
@@ -45,7 +53,7 @@ describe("apisix-client credential handling", () => {
     ;(process.env as Record<string, string | undefined>).NODE_ENV = "development"
     process.env.APISIX_API_KEY = "admin-key"
     delete process.env.APISIX_API_KEY_READONLY
-    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ list: [] }) })
+    mockFetch.mockResolvedValueOnce(jsonResponse({ list: [] }))
 
     await getRoutes()
 
@@ -105,5 +113,42 @@ describe("apisix-client credential handling", () => {
       })
     )
     expect(cacheDel).toHaveBeenCalledWith("apisix:routes")
+  })
+
+  // portal#48: getRoutes keeps its pre-existing 5s AbortController timeout,
+  // now expressed as fetchWithPolicy's timeoutMs:5000 instead of a hand-rolled
+  // AbortController + setTimeout pair.
+  it("getRoutes aborts once its 5s timeout elapses", async () => {
+    process.env.APISIX_API_KEY_READONLY = "readonly-key"
+    vi.useFakeTimers()
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const err = new Error("The operation was aborted")
+          err.name = "AbortError"
+          reject(err)
+        })
+      })
+    })
+
+    const pending = getRoutes()
+    await vi.advanceTimersByTimeAsync(5000)
+    const routes = await pending
+    vi.useRealTimers()
+
+    // getRoutes is a non-throwing read helper — a timeout degrades to [], same
+    // as any other connectivity failure (ApisixCredentialError is the only
+    // exception, asserted separately above).
+    expect(routes).toEqual([])
+  })
+
+  // portal#48: PATCH toggleRoute passes retry: false explicitly — a retryable
+  // 502 must not be retried, unlike the shared client's default for GET.
+  it("toggleRoute does not retry a retryable 502 (mutation retry: false)", async () => {
+    process.env.APISIX_API_KEY = "admin-key"
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 502 }))
+
+    await expect(toggleRoute("route-1", true)).rejects.toThrow("Toggle route failed: 502")
+    expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 })
