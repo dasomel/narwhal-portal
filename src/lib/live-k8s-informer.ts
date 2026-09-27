@@ -11,6 +11,8 @@ import { getK8sApiServer } from "./config"
 import { getK8sBearerToken, invalidateK8sBearerToken } from "./k8s-token"
 import { pushEvent } from "./live-stream"
 import { claimIdempotencyKey, getIdempotencyStore } from "./idempotency"
+import { getValkey } from "./valkey"
+import { cacheKeys } from "./cache-keys"
 import type { LiveEventIngest, LiveEventType, LiveSeverity } from "@/types/live"
 import type { EventResource } from "@/types/event-envelope"
 
@@ -30,6 +32,22 @@ function hasBearerToken(apiServer: string): boolean {
 
 let started = false
 let informerAbortController: AbortController | null = null
+const LEASE_TTL_MS = 15_000
+const LEASE_RENEW_MS = LEASE_TTL_MS / 3
+// Keep partial watch lines bounded; an oversized line is discarded whole.
+const WATCH_BUFFER_LIMIT = 1024 * 1024
+type InformerOwnerState = "owner" | "standby" | "local-fallback" | "stopped"
+const informerMetrics = { ownerState: "stopped" as InformerOwnerState, leaseAcquisitions: 0, leaseLosses: 0, reconnects: 0, resyncs410: 0, droppedByBackpressure: 0 }
+const RENEW_SCRIPT = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end"
+const RELEASE_SCRIPT = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
+
+export function getLiveK8sInformerStatus() {
+  return { ...informerMetrics }
+}
+
+function newOwnerToken(): string {
+  return `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`
+}
 
 export function stopLiveK8sInformerForTesting(): void {
   started = false
@@ -37,6 +55,7 @@ export function stopLiveK8sInformerForTesting(): void {
     informerAbortController.abort()
     informerAbortController = null
   }
+  Object.assign(informerMetrics, { ownerState: "stopped", leaseAcquisitions: 0, leaseLosses: 0, reconnects: 0, resyncs410: 0, droppedByBackpressure: 0 })
 }
 
 // Warning events are always surfaced. Normal events are mostly noise (probes,
@@ -141,6 +160,7 @@ async function watchOnce(apiServer: string, resourceVersion: string, signal?: Ab
   signal?.addEventListener("abort", onAbort, { once: true })
   const decoder = new TextDecoder()
   let buf = ""
+  let skippingOversizedLine = false
   let rv = resourceVersion
   try {
     for (;;) {
@@ -148,6 +168,15 @@ async function watchOnce(apiServer: string, resourceVersion: string, signal?: Ab
       const { value, done } = await reader.read()
       if (done || signal?.aborted) break
       buf += decoder.decode(value, { stream: true })
+      if (skippingOversizedLine) {
+        const newline = buf.indexOf("\n")
+        if (newline < 0) {
+          buf = ""
+          continue
+        }
+        buf = buf.slice(newline + 1)
+        skippingOversizedLine = false
+      }
       let nl: number
       while ((nl = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, nl).trim()
@@ -181,6 +210,13 @@ async function watchOnce(apiServer: string, resourceVersion: string, signal?: Ab
           // malformed line — skip
         }
       }
+      // Drain complete events before bounding the remaining partial tail. This
+      // preserves bursts whose total size exceeds the limit but whose lines do not.
+      if (buf.length > WATCH_BUFFER_LIMIT) {
+        buf = ""
+        skippingOversizedLine = true
+        informerMetrics.droppedByBackpressure++
+      }
     }
   } finally {
     signal?.removeEventListener("abort", onAbort)
@@ -205,23 +241,74 @@ export function startLiveK8sInformer(): void {
   const controller = new AbortController()
   informerAbortController = controller
   const { signal } = controller
-  console.log("[live-k8s-informer] starting core/v1 Events watch")
+  console.log("[live-k8s-informer] starting lease-coordinated core/v1 Events watch")
 
   void (async () => {
     let rv = "0"
     let backoff = 1000
+    let wasOwner = false
     for (;;) {
       if (signal.aborted) break
+      const token = newOwnerToken()
+      let valkey: ReturnType<typeof getValkey> | null = null
+      let leaseHeld = false
+      let leaseUnavailable = false
       try {
-        if (rv === "0") rv = await getLatestResourceVersion(apiServer, signal)
-        if (signal.aborted) break
-        rv = await watchOnce(apiServer, rv, signal)
+        valkey = getValkey()
+        leaseHeld = (await valkey.set(cacheKeys.liveK8sInformerLease(), token, "PX", LEASE_TTL_MS, "NX")) === "OK"
+      } catch {
+        leaseUnavailable = true
+        informerMetrics.ownerState = "local-fallback"
+        console.warn("[live-k8s-informer] Valkey lease unavailable; watching locally on this replica")
+      }
+      if (valkey && !leaseHeld && !leaseUnavailable) {
+        wasOwner = false
+        informerMetrics.ownerState = "standby"
+        await new Promise((resolve) => setTimeout(resolve, LEASE_RENEW_MS))
+        continue
+      }
+      if (leaseHeld) {
+        informerMetrics.leaseAcquisitions++
+        informerMetrics.ownerState = "owner"
+      } else if (informerMetrics.ownerState !== "local-fallback") {
+        informerMetrics.ownerState = "local-fallback"
+      }
+      if (leaseHeld) {
+        if (!wasOwner) rv = "0" // resourceVersion is process-local; relist after failover.
+        wasOwner = true
+      } else {
+        wasOwner = false
+      }
+      const watchController = new AbortController()
+      const abortWatch = () => watchController.abort()
+      signal.addEventListener("abort", abortWatch, { once: true })
+      const renewTimer = leaseHeld ? setInterval(() => {
+        void valkey!.eval(RENEW_SCRIPT, 1, cacheKeys.liveK8sInformerLease(), token, LEASE_TTL_MS).then((renewed) => {
+          if (Number(renewed) !== 1) {
+            informerMetrics.leaseLosses++
+            informerMetrics.ownerState = "standby"
+            watchController.abort()
+          }
+        }).catch(() => {
+          informerMetrics.leaseLosses++
+          informerMetrics.ownerState = "local-fallback"
+          watchController.abort()
+        })
+      }, LEASE_RENEW_MS) : null
+      try {
+        if (rv === "0") rv = await getLatestResourceVersion(apiServer, watchController.signal)
+        if (signal.aborted || watchController.signal.aborted) break
+        rv = await watchOnce(apiServer, rv, watchController.signal)
+        if (!signal.aborted) informerMetrics.reconnects++
         backoff = 1000 // clean cycle — reset backoff
       } catch (e) {
         if (signal.aborted) break
         const msg = e instanceof Error ? e.message : String(e)
+        if (watchController.signal.aborted) continue
+        informerMetrics.reconnects++
         // 410 Gone: resourceVersion too old — resync from the latest.
         if (msg.includes("410")) {
+          informerMetrics.resyncs410++
           rv = "0"
           continue
         }
@@ -229,7 +316,14 @@ export function startLiveK8sInformer(): void {
         await new Promise((r) => setTimeout(r, backoff))
         if (signal.aborted) break
         backoff = Math.min(backoff * 2, 30_000)
+      } finally {
+        signal.removeEventListener("abort", abortWatch)
+        if (renewTimer) clearInterval(renewTimer)
+        if (leaseHeld && valkey) {
+          try { await valkey.eval(RELEASE_SCRIPT, 1, cacheKeys.liveK8sInformerLease(), token) } catch { /* TTL expires if release is unavailable. */ }
+        }
       }
     }
+    informerMetrics.ownerState = "stopped"
   })()
 }

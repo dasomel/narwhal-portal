@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { getDependencyHealthSnapshot } from "@/lib/dependency-health"
+import { getLiveK8sInformerStatus } from "@/lib/live-k8s-informer"
 
 export const dynamic = "force-dynamic"
 
@@ -33,5 +34,5 @@ export async function GET() {
 
   const snapshot = await getDependencyHealthSnapshot({ timeoutMs: PROBE_TIMEOUT_MS })
 
-  return NextResponse.json(snapshot)
+  return NextResponse.json({ ...snapshot, informer: getLiveK8sInformerStatus() })
 }

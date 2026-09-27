@@ -24,7 +24,31 @@ class SpyIdempotencyStore implements IdempotencyStore {
 const mockGetK8sApiServer = vi.fn(() => "https://kubernetes.default.svc")
 const mockGetK8sBearerToken = vi.fn(() => "initial-token")
 const mockInvalidateK8sBearerToken = vi.fn()
-const mockPushEvent = vi.fn(async (_ingest: LiveEventIngest): Promise<any> => ({} as any))
+const mockPushEvent = vi.fn(async (ingest: LiveEventIngest): Promise<void> => { void ingest })
+const valkeyState = vi.hoisted(() => ({ value: null as string | null, expiresAt: 0, down: false, rejectRelease: false }))
+const mockLeaseValkey = {
+  set: vi.fn(async (_key: string, value: string, ...options: unknown[]) => {
+    if (valkeyState.down) throw new Error("Valkey down")
+    if (valkeyState.value && valkeyState.expiresAt <= Date.now()) valkeyState.value = null
+    if (valkeyState.value) return null
+    valkeyState.value = value
+    valkeyState.expiresAt = Date.now() + Number(options[1] ?? 15000)
+    return "OK"
+  }),
+  eval: vi.fn(async (script: string, _keys: number, _key: string, ...args: unknown[]) => {
+    if (valkeyState.down) throw new Error("Valkey down")
+    const token = String(args[0])
+    if (valkeyState.expiresAt <= Date.now()) return 0
+    if (valkeyState.value !== token) return 0
+    if (script.includes("pexpire")) {
+      valkeyState.expiresAt = Date.now() + Number(args[1])
+      return 1
+    }
+    if (valkeyState.rejectRelease) return 0
+    valkeyState.value = null
+    return 1
+  }),
+}
 
 vi.mock("./config", () => ({
   getK8sApiServer: () => mockGetK8sApiServer(),
@@ -36,8 +60,10 @@ vi.mock("./k8s-token", () => ({
 }))
 
 vi.mock("./live-stream", () => ({
-  pushEvent: (ingest: any) => mockPushEvent(ingest),
+  pushEvent: (ingest: LiveEventIngest) => mockPushEvent(ingest),
 }))
+
+vi.mock("./valkey", () => ({ getValkey: () => mockLeaseValkey }))
 
 function makeStream(lines: string[]) {
   const encoder = new TextEncoder()
@@ -65,6 +91,10 @@ describe("live-k8s-informer", () => {
     process.env = { ...originalEnv }
     delete process.env.NEXT_RUNTIME // ensure nodejs runtime check passes
     vi.clearAllMocks()
+    valkeyState.value = null
+    valkeyState.expiresAt = 0
+    valkeyState.down = false
+    valkeyState.rejectRelease = false
     setIdempotencyStoreForTesting(new InMemoryIdempotencyStore())
     mockGetK8sApiServer.mockReturnValue("https://kubernetes.default.svc")
     mockGetK8sBearerToken.mockReturnValue("valid-bearer-token")
@@ -77,6 +107,7 @@ describe("live-k8s-informer", () => {
     }
     setIdempotencyStoreForTesting(null)
     process.env = originalEnv
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
@@ -386,5 +417,139 @@ describe("live-k8s-informer", () => {
     expect(() => startLiveK8sInformer()).not.toThrow()
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(mockPushEvent).not.toHaveBeenCalled()
+  })
+
+  it("falls back to a local watch and reports it when Valkey is down", async () => {
+    valkeyState.down = true
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("limit=1")
+      ? { ok: true, status: 200, json: async () => ({ metadata: { resourceVersion: "1" } }) } as Response
+      : { ok: true, status: 200, body: makePendingStream() } as unknown as Response))
+    const { startLiveK8sInformer, stopLiveK8sInformerForTesting, getLiveK8sInformerStatus } = await import("./live-k8s-informer")
+    stopInformer = stopLiveK8sInformerForTesting
+    startLiveK8sInformer()
+    await vi.waitFor(() => expect(getLiveK8sInformerStatus().ownerState).toBe("local-fallback"))
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining("watch=1"), expect.anything())
+  })
+
+  it("allows one of two replicas to watch, then takes over after the owner's lease expires", async () => {
+    vi.useFakeTimers()
+    let watchCalls = 0
+    let listCalls = 0
+    const watchVersions: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("limit=1")
+      ? (listCalls++, { ok: true, status: 200, json: async () => ({ metadata: { resourceVersion: String(listCalls) } }) } as Response)
+      : (watchVersions.push(new URL(url).searchParams.get("resourceVersion") ?? ""), watchCalls++, { ok: true, status: 200, body: makePendingStream() } as unknown as Response)))
+    const replica1 = await import("./live-k8s-informer")
+    replica1.startLiveK8sInformer()
+    await vi.waitFor(() => expect(watchCalls).toBe(1))
+
+    vi.resetModules()
+    const replica2 = await import("./live-k8s-informer")
+    replica2.startLiveK8sInformer()
+    await vi.waitFor(() => expect(replica2.getLiveK8sInformerStatus().ownerState).toBe("standby"))
+    expect(watchCalls).toBe(1)
+
+    // Model process loss: its watch aborts, but it cannot run the token-checked release.
+    valkeyState.rejectRelease = true
+    replica1.stopLiveK8sInformerForTesting()
+    await vi.advanceTimersByTimeAsync(20_000) // TTL + one 5s standby polling tick
+    await vi.waitFor(() => expect(watchCalls).toBe(2))
+    expect(replica2.getLiveK8sInformerStatus().leaseAcquisitions).toBe(1)
+    expect(listCalls).toBe(2)
+    expect(watchVersions).toEqual(["1", "2"])
+    replica2.stopLiveK8sInformerForTesting()
+    vi.useRealTimers()
+    stopInformer = null
+  }, 15_000)
+
+  it("rejects lease renew and release attempts with a foreign token", async () => {
+    await mockLeaseValkey.set("live:k8s-informer:lease", "owner-token")
+    expect(await mockLeaseValkey.eval("pexpire", 1, "live:k8s-informer:lease", "foreign-token", 15000)).toBe(0)
+    expect(await mockLeaseValkey.eval("del", 1, "live:k8s-informer:lease", "foreign-token")).toBe(0)
+    expect(valkeyState.value).toBe("owner-token")
+    expect(await mockLeaseValkey.eval("del", 1, "live:k8s-informer:lease", "owner-token")).toBe(1)
+    expect(valkeyState.value).toBeNull()
+  })
+
+  it("counts a 410 and relists before resuming the watch", async () => {
+    let lists = 0
+    let watches = 0
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("limit=1")) {
+        lists++
+        return { ok: true, status: 200, json: async () => ({ metadata: { resourceVersion: String(lists) } }) } as Response
+      }
+      watches++
+      if (watches === 1) return { ok: false, status: 410 } as Response
+      return { ok: true, status: 200, body: makePendingStream() } as unknown as Response
+    }))
+    const { startLiveK8sInformer, stopLiveK8sInformerForTesting, getLiveK8sInformerStatus } = await import("./live-k8s-informer")
+    stopInformer = stopLiveK8sInformerForTesting
+    startLiveK8sInformer()
+    await vi.waitFor(() => expect(getLiveK8sInformerStatus().resyncs410).toBe(1))
+    expect(lists).toBe(2)
+    expect(watches).toBe(2)
+  })
+
+  it("keeps resourceVersion across owner reconnects", async () => {
+    const watchVersions: string[] = []
+    let watches = 0
+    let lists = 0
+    const event = (rv: string) => JSON.stringify({ type: "ADDED", object: { type: "Warning", reason: "Failed", metadata: { uid: rv, resourceVersion: rv } } })
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("limit=1")) {
+        lists++
+        return { ok: true, status: 200, json: async () => ({ metadata: { resourceVersion: "1" } }) } as Response
+      }
+      watchVersions.push(new URL(url).searchParams.get("resourceVersion") ?? "")
+      watches++
+      return { ok: true, status: 200, body: watches < 3 ? makeStream([event(String(watches + 1))]) : makePendingStream() } as unknown as Response
+    }))
+    const { startLiveK8sInformer, stopLiveK8sInformerForTesting } = await import("./live-k8s-informer")
+    stopInformer = stopLiveK8sInformerForTesting
+    startLiveK8sInformer()
+    await vi.waitFor(() => expect(watches).toBe(3))
+    expect(lists).toBe(1)
+    expect(watchVersions).toEqual(["1", "2", "3"])
+  })
+
+  it("discards an oversized partial line once and resumes at the next event", async () => {
+    const encoder = new TextEncoder()
+    const validEvent = JSON.stringify({ type: "ADDED", object: { type: "Warning", reason: "Failed", metadata: { uid: "after-overflow", resourceVersion: "2" }, involvedObject: { kind: "Pod", name: "valid-pod" } } })
+    const oversizedStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("{" + "x".repeat(1024 * 1024 + 10)))
+        controller.enqueue(encoder.encode("\n" + validEvent + "\n"))
+        controller.close()
+      },
+    })
+    let watches = 0
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("limit=1")) return { ok: true, status: 200, json: async () => ({ metadata: { resourceVersion: "1" } }) } as Response
+      watches++
+      return { ok: true, status: 200, body: watches === 1 ? oversizedStream : makePendingStream() } as unknown as Response
+    }))
+    const { startLiveK8sInformer, stopLiveK8sInformerForTesting, getLiveK8sInformerStatus } = await import("./live-k8s-informer")
+    stopInformer = stopLiveK8sInformerForTesting
+    startLiveK8sInformer()
+    await vi.waitFor(() => expect(mockPushEvent).toHaveBeenCalledWith(expect.objectContaining({ title: "Pod valid-pod — Failed" })))
+    expect(getLiveK8sInformerStatus().droppedByBackpressure).toBe(1)
+  })
+
+  it("drains complete event lines before applying the partial-line limit", async () => {
+    const encoder = new TextEncoder()
+    const eventLines = Array.from({ length: 6000 }, (_, index) => JSON.stringify({ type: "ADDED", object: { type: "Warning", reason: "Failed", metadata: { uid: `burst-${index}`, resourceVersion: String(index + 1) } } }))
+    const burst = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(encoder.encode(eventLines.join("\n") + "\n")); controller.close() } })
+    let watches = 0
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("limit=1")) return { ok: true, status: 200, json: async () => ({ metadata: { resourceVersion: "1" } }) } as Response
+      watches++
+      return { ok: true, status: 200, body: watches === 1 ? burst : makePendingStream() } as unknown as Response
+    }))
+    const { startLiveK8sInformer, stopLiveK8sInformerForTesting, getLiveK8sInformerStatus } = await import("./live-k8s-informer")
+    stopInformer = stopLiveK8sInformerForTesting
+    startLiveK8sInformer()
+    await vi.waitFor(() => expect(mockPushEvent).toHaveBeenCalledTimes(eventLines.length), { timeout: 10_000 })
+    expect(getLiveK8sInformerStatus().droppedByBackpressure).toBe(0)
   })
 })
