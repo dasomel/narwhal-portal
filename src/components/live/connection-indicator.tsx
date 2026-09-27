@@ -36,9 +36,11 @@ export function ConnectionIndicator({ status }: ConnectionIndicatorProps) {
 
   return (
     <span
+      role="status"
+      aria-live="polite"
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${pill}`}
     >
-      <span className={`w-2 h-2 rounded-full ${dot} ${status === "live" ? "animate-pulse" : ""}`} />
+      <span aria-hidden="true" className={`w-2 h-2 rounded-full ${dot} ${status === "live" ? "animate-pulse" : ""}`} />
       {t(label as Parameters<typeof t>[0])}
     </span>
   )

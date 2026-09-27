@@ -24,7 +24,7 @@ function SeverityMini({ severity, count }: { severity: Severity; count: number }
   )
 }
 
-function SortableHeader({
+export function SortableHeader({
   label,
   sortKey,
   current,
@@ -39,16 +39,13 @@ function SortableHeader({
 }) {
   const active = current === sortKey
   return (
-    <th
-      className="px-4 py-3 font-medium cursor-pointer select-none hover:text-foreground transition-colors"
-      onClick={() => onSort(sortKey)}
-    >
-      <span className="flex items-center gap-1">
+    <th aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"} className="px-4 py-3 font-medium">
+      <button type="button" className="flex items-center gap-1 cursor-pointer select-none hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSort(sortKey)}>
         {label}
         <span className="text-xs opacity-60">
           {active ? (dir === "asc" ? "▲" : "▼") : "⇅"}
         </span>
-      </span>
+      </button>
     </th>
   )
 }
@@ -97,7 +94,7 @@ function ExpandedVulnPanel({ image }: { image: string }) {
                     <th className="pb-1.5 pr-3 font-medium">{t("security.detail.severity")}</th>
                     <th className="pb-1.5 pr-3 font-medium">{t("security.detail.score")}</th>
                     <th className="pb-1.5 pr-3 font-medium">{t("security.detail.fixedVersion")}</th>
-                    <th className="pb-1.5 font-medium"></th>
+                    <th className="pb-1.5 font-medium"><span className="sr-only">{t("common.details")}</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -313,7 +310,7 @@ export function VulnerabilitiesTable({ initialData }: Props) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground bg-muted/30">
-                  <th className="px-3 py-3 w-8"></th>
+                  <th className="px-3 py-3 w-8"><span className="sr-only">{t("common.details")}</span></th>
                   <SortableHeader
                     label={t("security.table.namespace")}
                     sortKey="namespace"
@@ -359,18 +356,15 @@ export function VulnerabilitiesTable({ initialData }: Props) {
                   const isExpanded = expandedKey === rowKey
                   return (
                     <Fragment key={rowKey}>
-                      <tr
-                        className="border-b hover:bg-muted/20 cursor-pointer transition-colors"
-                        onClick={() => toggleRow(rowKey)}
+                      <tr className="border-b hover:bg-muted/20 transition-colors"
                       >
                         <td className="px-3 py-2.5 text-muted-foreground">
-                          <span
-                            className="inline-block transition-transform duration-200"
+                          <button type="button" aria-label={t("common.details")} className="inline-block transition-transform duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(event) => { event.stopPropagation(); toggleRow(rowKey) }}
                             style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}
                             title={isExpanded ? t("common.collapse") : t("common.expand")}
                           >
                             ›
-                          </span>
+                          </button>
                         </td>
                         <td className="px-4 py-2.5 text-muted-foreground">{row.namespace}</td>
                         <td className="px-4 py-2.5">

@@ -69,16 +69,13 @@ function SortHeader({
 }) {
   const active = sortKey === col
   return (
-    <th
-      className="pb-2 pr-4 font-medium cursor-pointer select-none whitespace-nowrap"
-      onClick={() => onSort(col)}
-    >
-      <span className="inline-flex items-center gap-1">
+    <th aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"} className="pb-2 pr-4 font-medium whitespace-nowrap">
+      <button type="button" className="inline-flex items-center gap-1 cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSort(col)}>
         {label}
         <span className="text-xs text-muted-foreground">
           {active ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
         </span>
-      </span>
+      </button>
     </th>
   )
 }
@@ -136,16 +133,13 @@ export function NodeMetrics() {
                   <SortHeader label={t("nodeMetrics.role")} col="role" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortHeader label="CPU" col="cpu" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortHeader label="Memory" col="memory" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                  <th
-                    className="pb-2 font-medium cursor-pointer select-none whitespace-nowrap"
-                    onClick={() => toggleSort("disk")}
-                  >
-                    <span className="inline-flex items-center gap-1">
+                  <th aria-sort={sortKey === "disk" ? (sortDir === "asc" ? "ascending" : "descending") : "none"} className="pb-2 font-medium whitespace-nowrap">
+                    <button type="button" className="inline-flex items-center gap-1 cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => toggleSort("disk")}>
                       Disk
                       <span className="text-xs text-muted-foreground">
                         {sortKey === "disk" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
                       </span>
-                    </span>
+                    </button>
                   </th>
                 </tr>
               </thead>
@@ -153,10 +147,9 @@ export function NodeMetrics() {
                 {sorted.map((n) => (
                   <tr
                     key={n.node}
-                    className="border-b last:border-0 cursor-pointer hover:bg-muted/50"
-                    onClick={() => router.push(`/nodes/${n.node}`)}
+                    className="border-b last:border-0 hover:bg-muted/50"
                   >
-                    <td className="py-3 pr-4 font-medium text-foreground">{n.node}</td>
+                    <td className="py-3 pr-4 font-medium text-foreground"><button type="button" className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => router.push(`/nodes/${n.node}`)}>{n.node}</button></td>
                     <td className="py-3 pr-4">
                       <Badge
                         className={

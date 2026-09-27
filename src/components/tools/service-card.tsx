@@ -31,7 +31,7 @@ export function ServiceCard({ tool, health }: ServiceCardProps) {
   const descriptionKey = `tool.${tool.id}` as TranslationKey
 
   return (
-    <a href={tool.url} target="_blank" rel="noopener noreferrer">
+    <a href={tool.url} target="_blank" rel="noopener noreferrer" aria-label={tool.name}>
       <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer group h-full">
         <div className="flex items-start justify-between mb-3">
           <img src={tool.icon} alt={tool.name} width={40} height={40} className="rounded-lg" />

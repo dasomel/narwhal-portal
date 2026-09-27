@@ -88,9 +88,11 @@ export function EventTimeline() {
           ) : (
             <div className="space-y-0 max-h-[400px] overflow-y-auto">
               {events.slice(0, 20).map((evt) => (
-                <div
+                <button
                   key={evt.id}
-                  className="flex gap-3 py-2 border-b border-border last:border-0 cursor-pointer hover:bg-muted/50 transition-colors rounded"
+                  type="button"
+                  aria-labelledby={`${evt.id}-title ${evt.id}-type ${evt.id}-description ${evt.id}-time`}
+                  className="flex w-full text-left gap-3 py-2 border-b border-border last:border-0 hover:bg-muted/50 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => setSelected(evt)}
                 >
                   <div className="flex flex-col items-center pt-1">
@@ -99,19 +101,19 @@ export function EventTimeline() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-foreground truncate">{evt.title}</span>
-                      <Badge variant="outline" className="text-[9px] shrink-0">
+                      <span id={`${evt.id}-title`} className="text-xs font-medium text-foreground truncate">{evt.title}</span>
+                      <Badge id={`${evt.id}-type`} variant="outline" className="text-[9px] shrink-0">
                         {typeLabel[evt.type] ?? evt.type}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">{evt.description}</p>
+                    <p id={`${evt.id}-description`} className="text-xs text-muted-foreground truncate mt-0.5">{evt.description}</p>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
-                      <span className="tabular-nums">{formatOccurrenceTime(evt.timestamp, locale)}</span>
+                      <span id={`${evt.id}-time`} className="tabular-nums">{formatOccurrenceTime(evt.timestamp, locale)}</span>
                       <span className="text-border">·</span>
                       <span>{relativeTime(evt.timestamp, t)}</span>
                     </div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}

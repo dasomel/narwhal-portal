@@ -275,6 +275,7 @@ export function ScorecardsTable() {
       <div className="flex flex-wrap gap-3">
         <input
           type="text"
+          aria-label={t("scorecard.searchPlaceholder")}
           placeholder={t("scorecard.searchPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -346,21 +347,11 @@ export function ScorecardsTable() {
               {services.map((svc) => (
                 <TableRow
                   key={svc.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  role="link"
-                  tabIndex={0}
-                  aria-label={t("scorecard.openService", { name: svc.name })}
-                  onClick={() => router.push(`/catalog/${svc.id}?tab=quality`)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
-                      router.push(`/catalog/${svc.id}?tab=quality`)
-                    }
-                  }}
+                  className="hover:bg-muted/50"
                 >
                   <TableCell><TierBadge tier={svc.tier} /></TableCell>
                   <TableCell>
-                    <div className="font-medium">{svc.name}</div>
+                    <div className="font-medium"><button type="button" className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => router.push(`/catalog/${svc.id}?tab=quality`)}>{svc.name}</button></div>
                     <div className="text-xs text-muted-foreground">{svc.namespace}</div>
                   </TableCell>
                   <TableCell className="text-right font-mono font-semibold">

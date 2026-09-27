@@ -80,15 +80,13 @@ function SortHeader({
   const indicator = active ? (currentDir === "asc" ? "↑" : "↓") : "↕"
   return (
     <th
-      role="columnheader"
       aria-sort={active ? (currentDir === "asc" ? "ascending" : "descending") : "none"}
-      className={`pb-2 font-medium cursor-pointer select-none whitespace-nowrap ${className ?? ""}`}
-      onClick={() => onToggle(sortKey)}
+      className={`pb-2 font-medium whitespace-nowrap ${className ?? ""}`}
     >
-      <span className="inline-flex items-center gap-1">
+      <button type="button" className="inline-flex items-center gap-1 cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onToggle(sortKey)}>
         {label}
         <span className={`text-xs ${active ? "text-foreground" : "text-muted-foreground/30"}`}>{indicator}</span>
-      </span>
+      </button>
     </th>
   )
 }
@@ -221,8 +219,7 @@ export function AuditTable() {
                 {sorted.map((entry) => (
                   <tr
                     key={entry.id}
-                    onClick={() => setSelected(entry)}
-                    className="border-b last:border-0 cursor-pointer hover:bg-muted/50 transition-colors"
+                    className="border-b last:border-0 hover:bg-muted/50 transition-colors"
                   >
                     <td className="py-2 text-xs text-muted-foreground whitespace-nowrap">
                       {entry.timestamp ? relativeTime(entry.timestamp, t) : "—"}
@@ -232,7 +229,7 @@ export function AuditTable() {
                         {entry.type === "Warning" && (
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
                         )}
-                        {entry.action}
+                      <button type="button" className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelected(entry)}>{entry.action}</button>
                       </div>
                     </td>
                     <td className="py-2 text-xs font-mono text-muted-foreground">{entry.resource}</td>

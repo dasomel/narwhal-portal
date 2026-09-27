@@ -168,6 +168,8 @@ export const ko = {
   // common
   "common.loading": "확인하는 중...",
   "common.cancel": "취소",
+  "common.details": "세부 정보",
+  "common.close": "닫기",
   "common.retry": "다시 시도",
   "common.loadError": "데이터를 불러올 수 없습니다",
 
@@ -1343,6 +1345,8 @@ export const en: Record<keyof typeof ko, string> = {
   // common
   "common.loading": "Loading...",
   "common.cancel": "Cancel",
+  "common.details": "Details",
+  "common.close": "Close",
   "common.retry": "Retry",
   "common.loadError": "Failed to load data",
 

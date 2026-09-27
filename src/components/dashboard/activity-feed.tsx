@@ -240,6 +240,8 @@ export function ActivityFeed() {
             {feed.slice(0, 20).map((item) => (
               <button
                 key={item.id}
+                type="button"
+                aria-labelledby={`${item.id}-title ${item.id}-detail ${item.id}-source ${item.id}-time`}
                 className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-muted/50 transition-colors"
                 onClick={() => {
                   if (item._kind === "alert") setSelectedAlert(item._raw as Alert)
@@ -249,14 +251,14 @@ export function ActivityFeed() {
                   className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${severityDot(item.severity)}`}
                 />
                 <div className="flex-1 min-w-0">
-                  <span className={`text-[12px] font-medium ${severityColor(item.severity).split(" ")[0]}`}>
+                  <span id={`${item.id}-title`} className={`text-[12px] font-medium ${severityColor(item.severity).split(" ")[0]}`}>
                     {item.title}
                   </span>
-                  <div className="text-xs text-muted-foreground mt-0.5 truncate">{item.detail}</div>
+                  <div id={`${item.id}-detail`} className="text-xs text-muted-foreground mt-0.5 truncate">{item.detail}</div>
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
-                    <span>{item.source}</span>
+                    <span id={`${item.id}-source`}>{item.source}</span>
                     <span className="text-border">·</span>
-                    <span className="tabular-nums">{formatOccurrenceTime(item.timestamp, locale)}</span>
+                    <span id={`${item.id}-time`} className="tabular-nums">{formatOccurrenceTime(item.timestamp, locale)}</span>
                     <span className="text-border">·</span>
                     <span>{relativeTime(item.timestamp, t)}</span>
                   </div>

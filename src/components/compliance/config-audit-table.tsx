@@ -34,17 +34,15 @@ function SortHeader({
   const indicator = !active ? "↕" : dir === "asc" ? "↑" : "↓"
   return (
     <th
-      role="columnheader"
       aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
-      className="px-4 py-3 font-medium cursor-pointer select-none whitespace-nowrap group"
-      onClick={() => onSort(sortKey)}
+      className="px-4 py-3 font-medium whitespace-nowrap"
     >
-      <span className="inline-flex items-center gap-0.5">
+      <button type="button" className="inline-flex items-center gap-0.5 cursor-pointer select-none group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSort(sortKey)}>
         {label}
         <span className={`text-xs transition-colors ${active ? "text-blue-500" : "text-muted-foreground/40 group-hover:text-muted-foreground"}`}>
           {indicator}
         </span>
-      </span>
+      </button>
     </th>
   )
 }
@@ -297,7 +295,7 @@ export function ConfigAuditTable() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground bg-muted/30">
-                  <th className="px-3 py-3 w-8"></th>
+                  <th className="px-3 py-3 w-8"><span className="sr-only">{t("common.details")}</span></th>
                   <SortHeader label={t("compliance.table.namespace")} sortKey="namespace" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortHeader label={t("compliance.table.kind")} sortKey="kind" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortHeader label={t("compliance.table.name")} sortKey="name" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
@@ -313,18 +311,15 @@ export function ConfigAuditTable() {
                   const isExpanded = expandedKey === rowKey
                   return (
                     <Fragment key={rowKey}>
-                      <tr
-                        className="border-b hover:bg-muted/20 cursor-pointer transition-colors"
-                        onClick={() => toggleRow(rowKey)}
+                      <tr className="border-b hover:bg-muted/20 transition-colors"
                       >
                         <td className="px-3 py-2.5 text-muted-foreground">
-                          <span
-                            className="inline-block transition-transform duration-200"
+                          <button type="button" aria-label={t("common.details")} className="inline-block transition-transform duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(event) => { event.stopPropagation(); toggleRow(rowKey) }}
                             style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}
                             title={isExpanded ? t("common.collapse") : t("common.expand")}
                           >
                             ›
-                          </span>
+                          </button>
                         </td>
                         <td className="px-4 py-2.5 text-muted-foreground">
                           <span>{row.namespace}</span>
