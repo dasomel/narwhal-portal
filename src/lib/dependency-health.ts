@@ -27,7 +27,7 @@
 import { getK8sBearerToken, invalidateK8sBearerToken } from "./k8s-token"
 import { getK8sApiServer } from "./config"
 import { getValkey, cacheGet, cacheSet } from "./valkey"
-import { cacheKeys } from "./cache-keys"
+import { cacheKeys, cacheTtl } from "./cache-keys"
 import { fetchWithPolicy, HttpClientError } from "./http-client"
 import type { TelemetryStatus } from "./prometheus"
 import { getLiveStreamStatus } from "./live-stream"
@@ -66,6 +66,40 @@ export interface DependencyStatus {
    * future consumer exposed to a broader audience must strip this field itself.
    */
   detail?: string
+}
+
+export type AggregateDependencyHealth = {
+  state: "ok" | "degraded" | "unavailable"
+  observedAt: string
+}
+
+// Core dependencies define whether the Portal's control plane is usable at all.
+// D1: keep this list explicit so optional integration failures only degrade the aggregate;
+// callers can revise the boundary here without exposing the dependency map to viewers.
+const CORE_DEPENDENCIES: ReadonlySet<DependencyName> = new Set([
+  "kubernetes",
+  "prometheus",
+  "valkey",
+])
+
+/** Produces the deliberately redacted status contract for authenticated users. */
+export function aggregateDependencyHealth(statuses: readonly DependencyStatus[]): AggregateDependencyHealth {
+  const observedAt = statuses.reduce(
+    (latest, status) => (status.observedAt > latest ? status.observedAt : latest),
+    "",
+  ) || new Date().toISOString()
+
+  if (statuses.every(({ state }) => state === "ok" || state === "empty")) {
+    return { state: "ok", observedAt }
+  }
+
+  if (statuses.some(({ dependency, state }) =>
+    CORE_DEPENDENCIES.has(dependency) && (state === "unavailable" || state === "unauthorized")
+  )) {
+    return { state: "unavailable", observedAt }
+  }
+
+  return { state: "degraded", observedAt }
 }
 
 /**
@@ -260,6 +294,27 @@ const SNAPSHOT_CACHE_TTL_SECONDS = 10
 // reusing a stale in-memory reference — the cross-request freshness guarantee comes from the
 // Valkey cache below, not from this variable living longer than one run.
 let inFlightSnapshot: Promise<DependencyHealthSnapshot> | null = null
+let inFlightSummary: Promise<AggregateDependencyHealth> | null = null
+
+/** Shared, redacted status for the authenticated navigation indicator. */
+export async function getDependencyHealthSummary(): Promise<AggregateDependencyHealth> {
+  const key = cacheKeys.healthSummary()
+  const cached = await cacheGet<AggregateDependencyHealth>(key)
+  if (cached) return cached
+  if (inFlightSummary) return inFlightSummary
+
+  const run = (async () => {
+    const snapshot = await getDependencyHealthSnapshot()
+    const summary = aggregateDependencyHealth(snapshot.dependencies)
+    // This aggregate contains no provider details, so short-lived failure caching protects struggling dependencies.
+    await cacheSet(key, summary, cacheTtl("healthSummary"))
+    return summary
+  })().finally(() => {
+    inFlightSummary = null
+  })
+  inFlightSummary = run
+  return run
+}
 
 async function runDependencyProbes(timeoutMs: number): Promise<DependencyHealthSnapshot> {
   const dependencies = await Promise.all([
