@@ -5,6 +5,8 @@ import { getArgoApps } from "./argocd"
 import { getClusterMetrics } from "./prometheus"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"
+import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
+import { K8S_POLICY } from "./k8s-client"
 import type {
   HeroResponse,
   HeroIncident,
@@ -192,19 +194,18 @@ function nodeToIncident(node: NodePressureInfo): HeroIncident {
 
 async function getNodePressureNodes(): Promise<NodePressureInfo[]> {
   try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 5000)
-    const res = await fetch(`${getK8sApiServer()}/api/v1/nodes`, {
+    const res = await fetchWithPolicy(`${getK8sApiServer()}/api/v1/nodes`, {
       headers: {
         Authorization: `Bearer ${getK8sBearerToken()}`,
         Accept: "application/json",
       },
-      signal: controller.signal,
-    })
-    clearTimeout(timer)
+    }, { ...K8S_POLICY, timeoutMs: 5000 })
     if (!res.ok) return []
 
-    const data = await res.json()
+    const data = await readJsonWithPolicy<{ items?: Array<{
+      metadata: { name: string }
+      status: { conditions?: Array<{ type: string; status: string }> }
+    }> }>(res)
     const nodes: NodePressureInfo[] = (data.items ?? []).map(
       (n: {
         metadata: { name: string }

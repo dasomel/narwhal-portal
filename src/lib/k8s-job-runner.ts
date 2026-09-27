@@ -6,6 +6,8 @@ import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"
 import { assertK8sNamespace, assertK8sNodeName, safeK8sSegment } from "./validation"
 import { buildJobScript, type ApplyTarget } from "./tuning-commands"
+import { fetchWithPolicy, readJsonWithPolicy, readTextWithPolicy } from "./http-client"
+import { K8S_POLICY } from "./k8s-client"
 
 function authHeaders(apiServer: string): Record<string, string> {
   if (!apiServer.startsWith("https://")) return {}
@@ -37,7 +39,7 @@ function getTuningImage(): string {
   return image
 }
 
-async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
+async function k8sFetch<T>(path: string, init?: RequestInit, policy: { timeoutMs?: number } = {}): Promise<T> {
   const apiServer = getK8sApiServer()
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -45,31 +47,35 @@ async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
     ...authHeaders(apiServer),
     ...(init?.headers as Record<string, string> | undefined),
   }
-  const res = await fetch(`${apiServer}${path}`, { ...init, headers })
+  const res = await fetchWithPolicy(`${apiServer}${path}`, { ...init, headers }, {
+    ...K8S_POLICY,
+    timeoutMs: policy.timeoutMs ?? 60_000,
+  })
   if (!res.ok) {
-    const body = await res.text().catch(() => "")
+    const body = await readTextWithPolicy(res).catch(() => "")
     throw new Error(`K8s API ${res.status} ${path}: ${body.slice(0, 400)}`)
   }
-  return res.json() as Promise<T>
+  return readJsonWithPolicy<T>(res)
 }
 
 async function k8sFetchText(path: string): Promise<string> {
   const apiServer = getK8sApiServer()
   const headers: Record<string, string> = { Accept: "text/plain", ...authHeaders(apiServer) }
-  const res = await fetch(`${apiServer}${path}`, { headers })
+  const res = await fetchWithPolicy(`${apiServer}${path}`, { headers }, { ...K8S_POLICY, timeoutMs: 60_000 })
   if (!res.ok) throw new Error(`K8s API ${res.status} ${path}`)
-  return res.text()
+  return readTextWithPolicy(res)
 }
 
 async function deleteJob(namespace: string, name: string): Promise<void> {
   const apiServer = getK8sApiServer()
   // propagationPolicy=Background로 Job + Pod 모두 정리.
-  await fetch(
+  await fetchWithPolicy(
     `${apiServer}/apis/batch/v1/namespaces/${safeK8sSegment(namespace)}/jobs/${safeK8sSegment(name)}?propagationPolicy=Background`,
     {
       method: "DELETE",
       headers: authHeaders(apiServer),
     },
+    { ...K8S_POLICY, timeoutMs: 10_000 },
   ).catch(() => {})
 }
 
@@ -107,6 +113,10 @@ export interface RunJobOptions {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+export function jobStatusPollTimeoutMs(deadline: number, now = Date.now()): number {
+  return Math.min(60_000, deadline - now)
+}
 
 /**
  * 지정 노드에서 셸 스크립트를 1회 실행.
@@ -200,8 +210,12 @@ export async function runHostJob(opts: RunJobOptions): Promise<RunJobResult> {
     let failed = false
     while (Date.now() < deadline) {
       await sleep(1500)
+      const remainingMs = deadline - Date.now()
+      if (remainingMs <= 0) break
       const status = await k8sFetch<JobStatus>(
         `/apis/batch/v1/namespaces/${safeK8sSegment(TUNING_NAMESPACE)}/jobs/${safeK8sSegment(jobName)}`,
+        undefined,
+        { timeoutMs: jobStatusPollTimeoutMs(deadline) },
       )
       if (status.status?.succeeded && status.status.succeeded >= 1) { succeeded = true; break }
       if (status.status?.failed && status.status.failed >= 1) { failed = true; break }
