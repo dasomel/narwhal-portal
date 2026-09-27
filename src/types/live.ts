@@ -39,7 +39,7 @@ interface EventEnvelopeFields {
 }
 
 export interface LiveEvent extends EventEnvelopeFields {
-  id: string // UUID
+  id: string // Monotonic stream ID (`<epoch-ms>-<sequence>`)
   type: LiveEventType
   severity: LiveSeverity
   timestamp: string // ISO8601

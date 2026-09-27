@@ -30,6 +30,7 @@ import { getValkey, cacheGet, cacheSet } from "./valkey"
 import { cacheKeys } from "./cache-keys"
 import { fetchWithPolicy, HttpClientError } from "./http-client"
 import type { TelemetryStatus } from "./prometheus"
+import { getLiveStreamStatus } from "./live-stream"
 
 export type DependencyName =
   | "prometheus"
@@ -269,6 +270,12 @@ async function runDependencyProbes(timeoutMs: number): Promise<DependencyHealthS
     probeHttpDependency("keycloak", process.env.KEYCLOAK_ISSUER, { timeoutMs }),
     probeValkeyDependency(),
   ])
+  const liveStreamStatus = getLiveStreamStatus()
+  const valkeyIndex = dependencies.findIndex((item) => item.dependency === "valkey")
+  const liveStatusAge = Date.now() - Date.parse(liveStreamStatus.observedAt)
+  if (valkeyIndex >= 0 && liveStreamStatus.state !== "ok" && liveStatusAge >= 0 && liveStatusAge <= 30_000) {
+    dependencies[valkeyIndex] = liveStreamStatus
+  }
   return { observedAt: nowIso(), dependencies }
 }
 
