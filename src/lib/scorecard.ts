@@ -1,6 +1,8 @@
 import yaml from "js-yaml"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"
+import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
+import { K8S_POLICY } from "./k8s-client"
 import { cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
 import { getArgoApps, getArgoApp } from "./argocd"
@@ -68,14 +70,14 @@ async function k8sGet<T>(path: string): Promise<T> {
     const token = getK8sBearerToken()
     if (token.length > 0) headers.Authorization = `Bearer ${token}`
   }
-  const res = await fetch(`${apiServer}${path}`, { headers })
+  const res = await fetchWithPolicy(`${apiServer}${path}`, { headers }, { ...K8S_POLICY, timeoutMs: 60_000 })
   if (res.status === 404) {
     const err = new Error(`K8s 404: ${path}`)
     ;(err as NodeJS.ErrnoException).code = "NOT_FOUND"
     throw err
   }
   if (!res.ok) throw new Error(`K8s API ${res.status}: ${path}`)
-  return res.json() as Promise<T>
+  return readJsonWithPolicy<T>(res)
 }
 
 const FALLBACK_RULES: ScorecardRulesDoc = {

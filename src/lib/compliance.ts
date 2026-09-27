@@ -1,6 +1,8 @@
 import "server-only"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken } from "./k8s-token"
+import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
+import { K8S_POLICY } from "./k8s-client"
 import { cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
 import type {
@@ -28,11 +30,11 @@ async function complianceK8sFetch<T>(path: string): Promise<T> {
     const token = getK8sBearerToken()
     if (token.length > 0) headers["Authorization"] = `Bearer ${token}`
   }
-  const res = await fetch(`${apiServer}${path}`, { headers })
+  const res = await fetchWithPolicy(`${apiServer}${path}`, { headers }, { ...K8S_POLICY, timeoutMs: 60_000 })
   if (!res.ok) {
     throw new Error(`K8s API ${res.status} ${res.statusText} for ${path}`)
   }
-  return res.json() as Promise<T>
+  return readJsonWithPolicy<T>(res)
 }
 
 // System namespaces whose config-audit findings are inherent to K8s static pods / CNI / mesh

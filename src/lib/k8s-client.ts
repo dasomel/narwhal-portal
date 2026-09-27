@@ -4,12 +4,16 @@ import { K8S_RECOMMENDED_KERNEL_PARAMS } from "./kernel-params"
 import { assertK8sName, assertK8sNamespace, assertK8sNodeName, safeK8sSegment } from "./validation"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken, invalidateK8sBearerToken } from "./k8s-token"
+import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
 
 export type { Localized, MaybeLocalized } from "./i18n-utils"
 export { pick } from "./i18n-utils"
 
 import type { MaybeLocalized } from "./i18n-utils"
 import type { Locale } from "./i18n"
+
+// Kubernetes callers were single-shot before #48; 401 refresh and 410 list restart remain the only retries, so don't retry into APF throttling.
+export const K8S_POLICY = { retry: false } as const
 
 function authHeaders(apiServer: string): Record<string, string> {
   // kubectl proxy (http://) authenticates via the local kubectl config → no Bearer needed.
@@ -36,15 +40,22 @@ async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
     ...authHeaders(apiServer),
     ...(init?.headers as Record<string, string> | undefined),
   }
-  let res = await fetch(`${apiServer}${path}`, { ...init, headers })
+  const url = `${apiServer}${path}`
+  // Large cluster list pages can exceed the shared client's short default.
+  const request = (requestHeaders: Record<string, string>) => fetchWithPolicy(
+    url,
+    { ...init, headers: requestHeaders },
+    { ...K8S_POLICY, timeoutMs: 60_000 },
+  )
+  let res = await request(headers)
   if (res.status === 401) {
     // Cached token may have rotated or expired underneath us — re-read the
     // projected token file once and retry before giving up.
     invalidateK8sBearerToken()
-    res = await fetch(`${apiServer}${path}`, { ...init, headers: { ...headers, ...authHeaders(apiServer) } })
+    res = await request({ ...headers, ...authHeaders(apiServer) })
   }
   if (!res.ok) throw new K8sHttpError(res.status, path)
-  return res.json() as Promise<T>
+  return readJsonWithPolicy<T>(res)
 }
 
 // --- Bounded/paginated list helper (portal#52) ---
@@ -2192,6 +2203,3 @@ export async function getAllPodsForDistribution(): Promise<BoundedList<K8sPodFor
     return { items: [], truncated: true, pages: 0 }
   }
 }
-
-
-

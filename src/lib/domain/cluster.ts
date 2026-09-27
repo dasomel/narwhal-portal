@@ -32,6 +32,8 @@
  *     `projectClusterDomain` then turns into capability status "unavailable",
  *     never an uncaught exception.
  */
+import { fetchWithPolicy, HttpClientError, readJsonWithPolicy } from "../http-client"
+import { K8S_POLICY } from "../k8s-client"
 import type {
   Cluster,
   ClusterCapabilityProfile,
@@ -219,24 +221,27 @@ export async function probeClusterHealth(
   timeoutMs = 2000,
 ): Promise<ClusterProbeResult> {
   const probedAt = new Date().toISOString()
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const res = await fetch(`${apiServer}/version`, {
+    const res = await fetchWithPolicy(`${apiServer}/version`, {
       headers: {
         Accept: "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      signal: controller.signal,
       cache: "no-store",
-    })
+    }, { ...K8S_POLICY, timeoutMs })
     if (res.status === 401 || res.status === 403) {
       return { reachable: true, authenticated: false, versionKnown: false, probedAt, error: `HTTP ${res.status}` }
     }
     if (!res.ok) {
       return { reachable: true, authenticated: true, versionKnown: false, probedAt, error: `HTTP ${res.status}` }
     }
-    const body = (await res.json().catch(() => null)) as { gitVersion?: string } | null
+    let body: { gitVersion?: string } | null
+    try {
+      body = await readJsonWithPolicy<{ gitVersion?: string }>(res)
+    } catch (err) {
+      if (err instanceof HttpClientError) throw err
+      body = null
+    }
     return { reachable: true, authenticated: true, versionKnown: !!body?.gitVersion, probedAt, error: null }
   } catch (err) {
     return {
@@ -246,7 +251,5 @@ export async function probeClusterHealth(
       probedAt,
       error: err instanceof Error ? err.message : "probe failed",
     }
-  } finally {
-    clearTimeout(timer)
   }
 }

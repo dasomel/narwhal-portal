@@ -24,10 +24,10 @@ interface MockItem {
 }
 
 function pageResponse(names: string[], continueToken?: string) {
-  return {
+  return Response.json({
     metadata: continueToken ? { continue: continueToken } : {},
     items: names.map((name) => ({ metadata: { name } })),
-  }
+  })
 }
 
 function namespaceResponse(name: string) {
@@ -63,9 +63,9 @@ describe("listBounded (portal#52)", () => {
 
   it("follows metadata.continue across pages until the list is exhausted", async () => {
     mockFetch
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a", "b"], "tok-1") })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["c", "d"], "tok-2") })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["e"]) })
+      .mockResolvedValueOnce(pageResponse(["a", "b"], "tok-1"))
+      .mockResolvedValueOnce(pageResponse(["c", "d"], "tok-2"))
+      .mockResolvedValueOnce(pageResponse(["e"]))
 
     const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 2, maxPages: 10 })
 
@@ -88,11 +88,7 @@ describe("listBounded (portal#52)", () => {
   it("stops at maxPages and reports truncated=true when the server still has more (continue set)", async () => {
     // Every page keeps returning a continue token — an unbounded cluster would
     // make listBounded loop forever without the maxPages cap.
-    mockFetch.mockImplementation(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => pageResponse(["x"], "keep-going"),
-    }))
+    mockFetch.mockImplementation(async () => pageResponse(["x"], "keep-going"))
 
     const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 3 })
 
@@ -103,11 +99,7 @@ describe("listBounded (portal#52)", () => {
   })
 
   it("defaults to DEFAULT_LIST_MAX_PAGES when maxPages is not given", async () => {
-    mockFetch.mockImplementation(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => pageResponse(["x"], "keep-going"),
-    }))
+    mockFetch.mockImplementation(async () => pageResponse(["x"], "keep-going"))
 
     const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 1 })
 
@@ -120,10 +112,10 @@ describe("listBounded (portal#52)", () => {
     // token) has expired server-side (410). listBounded should restart the
     // whole list from page 1 rather than fail the caller.
     mockFetch
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
-      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["b"]) })
+      .mockResolvedValueOnce(pageResponse(["a"], "tok-1"))
+      .mockResolvedValueOnce(new Response(null, { status: 410 }))
+      .mockResolvedValueOnce(pageResponse(["a"], "tok-1"))
+      .mockResolvedValueOnce(pageResponse(["b"]))
 
     const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 10 })
 
@@ -134,10 +126,10 @@ describe("listBounded (portal#52)", () => {
 
   it("reports a partial (truncated) result when the restart also hits a 410", async () => {
     mockFetch
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
-      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
-      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
+      .mockResolvedValueOnce(pageResponse(["a"], "tok-1"))
+      .mockResolvedValueOnce(new Response(null, { status: 410 }))
+      .mockResolvedValueOnce(pageResponse(["a"], "tok-1"))
+      .mockResolvedValueOnce(new Response(null, { status: 410 }))
 
     const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 10 })
 
@@ -151,9 +143,9 @@ describe("listBounded (portal#52)", () => {
 
   it("reports items:[] and pages:0 when the restart 410s on its very first page", async () => {
     mockFetch
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
-      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
-      .mockResolvedValueOnce({ ok: false, status: 410, json: async () => ({}) })
+      .mockResolvedValueOnce(pageResponse(["a"], "tok-1"))
+      .mockResolvedValueOnce(new Response(null, { status: 410 }))
+      .mockResolvedValueOnce(new Response(null, { status: 410 }))
 
     const result = await listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 10 })
 
@@ -165,11 +157,18 @@ describe("listBounded (portal#52)", () => {
 
   it("does not restart on a non-410 failure — it propagates", async () => {
     mockFetch
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pageResponse(["a"], "tok-1") })
-      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+      .mockResolvedValueOnce(pageResponse(["a"], "tok-1"))
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
 
     await expect(listBounded<MockItem>("/api/v1/widgets", { limit: 1, maxPages: 10 })).rejects.toThrow(/K8s API 500/)
     expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([503, 429])("does not retry a Kubernetes GET after HTTP %i", async (status) => {
+    mockFetch.mockResolvedValue(new Response(null, { status }))
+
+    await expect(listBounded<MockItem>("/api/v1/widgets", { limit: 1 })).rejects.toThrow(`K8s API ${status}`)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -191,7 +190,7 @@ describe("getNamespacesForScope (portal#52)", () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes("/api/v1/namespaces/")) {
         const name = url.split("/api/v1/namespaces/")[1]
-        return { ok: true, status: 200, json: async () => namespaceResponse(name) }
+        return Response.json(namespaceResponse(name))
       }
       throw new Error(`unexpected cluster-wide LIST call: ${url}`)
     })
@@ -212,7 +211,7 @@ describe("getNamespacesForScope (portal#52)", () => {
     const manyNamespaces = Array.from({ length: SMALL_SCOPE_NAMESPACE_THRESHOLD + 1 }, (_, i) => `ns-${i}`)
     mockFetch.mockImplementation(async (url: string) => {
       if (url.startsWith("http://k8s.mock/api/v1/namespaces?")) {
-        return { ok: true, status: 200, json: async () => namespaceListResponse(manyNamespaces) }
+        return Response.json(namespaceListResponse(manyNamespaces))
       }
       throw new Error(`unexpected per-namespace call: ${url}`)
     })
@@ -228,7 +227,7 @@ describe("getNamespacesForScope (portal#52)", () => {
   it("uses the cluster-wide LIST for an admin (scope.all) caller", async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.startsWith("http://k8s.mock/api/v1/namespaces?")) {
-        return { ok: true, status: 200, json: async () => namespaceListResponse(["ns-a", "ns-b"]) }
+        return Response.json(namespaceListResponse(["ns-a", "ns-b"]))
       }
       throw new Error(`unexpected per-namespace call: ${url}`)
     })

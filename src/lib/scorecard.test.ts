@@ -16,14 +16,10 @@ const { getArgoApps, getArgoApp } = await import("@/lib/argocd")
 const { evaluateAll, evaluateService } = await import("@/lib/scorecard")
 
 function configMapResponse(rulesYaml: string) {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
+  return Response.json({
       metadata: { name: "narwhal-scorecard-rules", namespace: "devtools" },
       data: { "rules.yaml": rulesYaml },
-    }),
-  }
+  })
 }
 
 const rulesA = "version: 1\nrules: []\ntiers:\n  gold: 90\n  silver: 70\n  bronze: 50\n"
@@ -99,14 +95,10 @@ describe("evaluateService — source-unavailable evidence is not coerced into fa
   it("reports a K8s API failure as unavailable, not as a failed rule", async () => {
     global.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes("configmaps")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return Promise.resolve(Response.json({
             metadata: { name: "narwhal-scorecard-rules", namespace: "devtools" },
             data: { "rules.yaml": rulesWithK8sCheck },
-          }),
-        })
+        }))
       }
       // PodDisruptionBudget list and pod list both fail (e.g. transient 500)
       return Promise.reject(new Error("connect ECONNREFUSED"))
