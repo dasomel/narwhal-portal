@@ -36,7 +36,6 @@ export const ko = {
 
   // node metrics
   "nodeMetrics.title": "노드 상태",
-  "nodeMetrics.noData": "노드 데이터 없음",
   "nodeMetrics.node": "노드",
   "nodeMetrics.role": "역할",
 
@@ -174,6 +173,15 @@ export const ko = {
   "common.details": "세부 정보",
   "common.close": "닫기",
   "common.retry": "다시 시도",
+  "dataState.loading": "데이터를 불러오는 중입니다.",
+  "dataState.ok": "데이터가 최신 상태입니다.",
+  "dataState.partial": "일부 데이터만 제공됩니다.",
+  "dataState.stale": "데이터가 오래되었습니다.",
+  "dataState.empty": "표시할 데이터가 없습니다.",
+  "dataState.unavailable": "데이터 제공자를 사용할 수 없습니다.",
+  "dataState.unauthorized": "데이터에 접근할 권한이 없습니다.",
+  "dataState.error": "데이터를 불러오지 못했습니다.",
+  "dataState.updatedMinutes": "{count}분 전에 업데이트됨",
   "common.loadError": "데이터를 불러올 수 없습니다",
 
   // certs table
@@ -753,7 +761,6 @@ export const ko = {
   "security.runtime.priority": "심각도",
   "security.runtime.rule": "규칙",
   "security.forbidden": "cluster-admin 권한이 필요합니다",
-  "security.empty": "데이터 없음 — Trivy Operator 설치 후 확인하세요",
   "security.runtime.empty": "런타임 이벤트 없음 — Falco가 위협을 감지하면 여기에 표시됩니다",
   "security.runtimeEvents.unavailable2604": "런타임 보안(Falco)은 Ubuntu 26.04에서 지원되지 않습니다",
   "security.detail.title": "취약점 상세",
@@ -897,7 +904,6 @@ export const ko = {
   "cost.storageCostHourly": "Storage 비용/h",
   "cost.trendTitle30d": "30일 비용 추이 (시간당 $)",
   "cost.breakdownTitle": "비용 분해",
-  "cost.noDataPrometheus": "데이터 없음 — Prometheus 메트릭 수집 상태를 확인하세요.",
   "cost.monthlyEstimate": "월 추정",
   "cost.estimateNotice": "이 값은 청구서가 아닌 사용량 × 구성된 단가 기반의 추정치입니다.",
   "cost.pricingMetadata": "통화: {currency} · 단가 버전: {version} · 적용일: {effectiveDate} · 출처: {source} · 범위: {scope}",
@@ -1216,7 +1222,6 @@ export const en: Record<keyof typeof ko, string> = {
 
   // node metrics
   "nodeMetrics.title": "Node Status",
-  "nodeMetrics.noData": "No node data",
   "nodeMetrics.node": "Node",
   "nodeMetrics.role": "Role",
 
@@ -1354,6 +1359,15 @@ export const en: Record<keyof typeof ko, string> = {
   "common.details": "Details",
   "common.close": "Close",
   "common.retry": "Retry",
+  "dataState.loading": "Loading data.",
+  "dataState.ok": "Data is up to date.",
+  "dataState.partial": "Some data is available.",
+  "dataState.stale": "Data is stale.",
+  "dataState.empty": "No data to display.",
+  "dataState.unavailable": "The data provider is unavailable.",
+  "dataState.unauthorized": "You are not authorized to access this data.",
+  "dataState.error": "Could not load data.",
+  "dataState.updatedMinutes": "Updated {count} min ago",
   "common.loadError": "Failed to load data",
 
   // certs table
@@ -1933,7 +1947,6 @@ export const en: Record<keyof typeof ko, string> = {
   "security.runtime.priority": "Priority",
   "security.runtime.rule": "Rule",
   "security.forbidden": "cluster-admin role required",
-  "security.empty": "No data — install Trivy Operator first",
   "security.runtime.empty": "No runtime events — Falco-detected events will appear here",
   "security.runtimeEvents.unavailable2604": "Runtime security (Falco) is unavailable on Ubuntu 26.04",
   "security.detail.title": "Vulnerability Detail",
@@ -2077,7 +2090,6 @@ export const en: Record<keyof typeof ko, string> = {
   "cost.storageCostHourly": "Storage Cost/h",
   "cost.trendTitle30d": "30-Day Cost Trend ($/hour)",
   "cost.breakdownTitle": "Cost Breakdown",
-  "cost.noDataPrometheus": "No data — Check Prometheus metric collection status.",
   "cost.monthlyEstimate": "Monthly Estimate",
   "cost.estimateNotice": "This is an estimate based on usage × configured unit prices, not an invoice.",
   "cost.pricingMetadata": "Currency: {currency} · Pricing version: {version} · Effective: {effectiveDate} · Source: {source} · Scope: {scope}",

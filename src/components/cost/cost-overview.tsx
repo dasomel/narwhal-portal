@@ -6,6 +6,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 import { useT } from "@/lib/i18n-client"
 import {
   LineChart,
@@ -17,6 +18,7 @@ import {
   CartesianGrid,
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { DataState } from "@/components/ui/data-state"
 
 interface CostItem {
   id: string
@@ -32,6 +34,7 @@ interface CostItem {
 // all and must not be rendered as "$0 / no data".
 interface CostTelemetry {
   state: "ok" | "empty" | "unavailable" | "partial" | "ambiguous" | "stale"
+  queriedAt?: string
 }
 
 interface CostResponse {
@@ -66,9 +69,27 @@ interface TrendResponse {
   telemetry?: CostTelemetry
 }
 
+export function CostTelemetryState({ state, onRetry, now }: { state: CostTelemetry | undefined; onRetry: () => void; now?: number }) {
+  if (state?.state === "unavailable") return <DataState state="unavailable" onRetry={onRetry} observedAt={state.queriedAt} now={now} detailKey="costUnavailable" />
+  if (state?.state === "partial" || state?.state === "ambiguous") return <DataState state="partial" onRetry={onRetry} observedAt={state.queriedAt} now={now} detailKey="costPartial" />
+  return null
+}
+
 export function CostOverview() {
   const t = useT()
-  const { data: costData, isLoading: costLoading, error: costError } = useQuery<CostResponse>({
+  const [now, setNow] = useState<number>()
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined
+    const initialTick = setTimeout(() => {
+      setNow(Date.now())
+      interval = setInterval(() => setNow(Date.now()), 60_000)
+    }, 0)
+    return () => {
+      clearTimeout(initialTick)
+      if (interval) clearInterval(interval)
+    }
+  }, [])
+  const { data: costData, isLoading: costLoading, error: costError, refetch: refetchCost } = useQuery<CostResponse>({
     queryKey: ["cost", "cluster"],
     queryFn: async () => {
       const response = await fetch("/api/cost?scope=cluster")
@@ -78,7 +99,7 @@ export function CostOverview() {
     refetchInterval: 60_000,
   })
 
-  const { data: trendData, isLoading: trendLoading, error: trendError } = useQuery<TrendResponse>({
+  const { data: trendData, isLoading: trendLoading, error: trendError, refetch: refetchTrend } = useQuery<TrendResponse>({
     queryKey: ["cost-trend", "cluster", "cluster", 30],
     queryFn: async () => {
       const response = await fetch("/api/cost/trend?scope=cluster&id=cluster&days=30")
@@ -104,27 +125,16 @@ export function CostOverview() {
     total: p.total,
   }))
 
-  if (costError) {
-    return (
-      <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-        {t("cost.dataUnavailable")}
-      </div>
-    )
+  if (costLoading) return <DataState state="loading" onRetry={() => { void refetchCost() }} />
+  if (costError || !costData) {
+    return <DataState state="error" onRetry={() => { void refetchCost() }} />
   }
 
   return (
     <div className="space-y-4">
       {/* portal#64 AC4: Prometheus 실패는 "$0/데이터 없음"이 아니라 명시적 unavailable
           배너로 표시한다 — telemetry.state가 notice와 별도로 이를 구분해준다. */}
-      {telemetryUnavailable ? (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {t("cost.telemetryUnavailable")}
-        </div>
-      ) : costData?.telemetry?.state === "partial" ? (
-        <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
-          {t("cost.telemetryPartial")}
-        </div>
-      ) : null}
+      <CostTelemetryState state={costData.telemetry} onRetry={() => { void refetchCost() }} now={now} />
       {costData?.notice && (
         <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
           {costData.notice}
@@ -159,13 +169,9 @@ export function CostOverview() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
-            {costLoading ? (
-              <div className="h-8 w-24 animate-pulse rounded bg-muted" />
-            ) : (
-              <p className="text-2xl font-bold text-foreground">
-                {formatCurrency(totalHourly)}
-              </p>
-            )}
+            <p className="text-2xl font-bold text-foreground">
+              {formatCurrency(totalHourly)}
+            </p>
           </CardContent>
         </Card>
 
@@ -176,13 +182,9 @@ export function CostOverview() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
-            {costLoading ? (
-              <div className="h-8 w-24 animate-pulse rounded bg-muted" />
-            ) : (
-              <p className="text-2xl font-bold text-foreground">
-                {formatCurrency(totalMonthly, 2)}
-              </p>
-            )}
+            <p className="text-2xl font-bold text-foreground">
+              {formatCurrency(totalMonthly, 2)}
+            </p>
           </CardContent>
         </Card>
 
@@ -193,18 +195,14 @@ export function CostOverview() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
-            {costLoading ? (
-              <div className="h-8 w-20 animate-pulse rounded bg-muted" />
-            ) : (
-              <div>
-                <p className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
-                  {formatCurrency(cpuHourly)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {item?.cpu.cores.toFixed(3) ?? "0"} {t("cost.cores")}
-                </p>
-              </div>
-            )}
+            <div>
+              <p className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
+                {formatCurrency(cpuHourly)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {item?.cpu.cores.toFixed(3) ?? "0"} {t("cost.cores")}
+              </p>
+            </div>
           </CardContent>
         </Card>
 
@@ -215,18 +213,14 @@ export function CostOverview() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
-            {costLoading ? (
-              <div className="h-8 w-20 animate-pulse rounded bg-muted" />
-            ) : (
-              <div>
-                <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
-                  {formatCurrency(memHourly)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {item?.memory.gb.toFixed(2) ?? "0"} {t("cost.gb")}
-                </p>
-              </div>
-            )}
+            <div>
+              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                {formatCurrency(memHourly)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {item?.memory.gb.toFixed(2) ?? "0"} {t("cost.gb")}
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -269,21 +263,11 @@ export function CostOverview() {
         </CardHeader>
         <CardContent className="pt-0">
           {trendLoading ? (
-            <div className="h-52 flex items-center justify-center text-xs text-muted-foreground">
-              {t("common.loading")}
-            </div>
+            <DataState state="loading" onRetry={() => { void refetchTrend() }} />
           ) : trendError ? (
-            <div className="h-52 flex items-center justify-center text-xs text-destructive">
-              {t("cost.dataUnavailable")}
-            </div>
+            <DataState state="error" onRetry={() => { void refetchTrend() }} />
           ) : chartData.length === 0 ? (
-            <div className="h-52 flex items-center justify-center text-xs text-muted-foreground">
-              {/* 크리틱 리뷰 #4: trend telemetry가 unavailable이면 빈 차트를 "데이터 없음"으로
-                  오인시키지 않고 명시적으로 알린다. */}
-              {trendData?.telemetry?.state === "unavailable"
-                ? t("cost.telemetryUnavailable")
-                : trendData?.notice ?? t("cost.noTrendData")}
-            </div>
+            <DataState state={trendData?.telemetry?.state === "unavailable" ? "unavailable" : "empty"} onRetry={() => { void refetchTrend() }} />
           ) : (
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={chartData} margin={{ top: 4, right: 16, left: -10, bottom: 0 }}>
