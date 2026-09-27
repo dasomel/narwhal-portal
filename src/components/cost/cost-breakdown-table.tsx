@@ -6,7 +6,7 @@
 
 import { useState, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { useT } from "@/lib/i18n-client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -74,7 +74,6 @@ function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; s
 
 export function CostBreakdownTable() {
   const t = useT()
-  const router = useRouter()
   const [scopeView, setScopeView] = useState<ScopeView>("namespace")
   const [sortKey, setSortKey] = useState<SortKey>("monthly")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
@@ -120,14 +119,6 @@ export function CostBreakdownTable() {
       setSortKey(key)
       setSortDir("desc")
     }
-  }
-
-  function handleRowClick(item: CostItem) {
-    if (scopeView === "service") {
-      router.push(`/catalog/${item.id}?tab=cost`)
-      return
-    }
-    router.push(`/catalog?namespace=${encodeURIComponent(item.id)}`)
   }
 
   return (
@@ -224,109 +215,86 @@ export function CostBreakdownTable() {
             <TableHeader>
               <TableRow>
                 <TableHead
-                  className="cursor-pointer select-none"
-                  role="button"
-                  tabIndex={0}
                   aria-sort={sortKey === "id" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-                  onClick={() => toggleSort("id")}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
-                      toggleSort("id")
-                    }
-                  }}
+                  className="cursor-pointer select-none"
                 >
-                  {scopeView === "namespace" ? t("cost.namespace") : t("cost.service")}
-                  <SortIcon col="id" sortKey={sortKey} sortDir={sortDir} />
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => toggleSort("id")}
+                  >
+                    {scopeView === "namespace" ? t("cost.namespace") : t("cost.service")}
+                    <SortIcon col="id" sortKey={sortKey} sortDir={sortDir} />
+                  </button>
                 </TableHead>
                 <TableHead
-                  className="cursor-pointer select-none text-right"
-                  role="button"
-                  tabIndex={0}
                   aria-sort={sortKey === "cpu" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-                  onClick={() => toggleSort("cpu")}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
-                      toggleSort("cpu")
-                    }
-                  }}
+                  className="cursor-pointer select-none text-right"
                 >
-                  {t("cost.cpuHourlyShort")}
-                  <SortIcon col="cpu" sortKey={sortKey} sortDir={sortDir} />
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => toggleSort("cpu")}
+                  >
+                    {t("cost.cpuHourlyShort")}
+                    <SortIcon col="cpu" sortKey={sortKey} sortDir={sortDir} />
+                  </button>
                 </TableHead>
                 <TableHead
-                  className="cursor-pointer select-none text-right"
-                  role="button"
-                  tabIndex={0}
                   aria-sort={sortKey === "memory" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-                  onClick={() => toggleSort("memory")}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
-                      toggleSort("memory")
-                    }
-                  }}
+                  className="cursor-pointer select-none text-right"
                 >
-                  {t("cost.memoryHourlyShort")}
-                  <SortIcon col="memory" sortKey={sortKey} sortDir={sortDir} />
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => toggleSort("memory")}
+                  >
+                    {t("cost.memoryHourlyShort")}
+                    <SortIcon col="memory" sortKey={sortKey} sortDir={sortDir} />
+                  </button>
                 </TableHead>
                 <TableHead
-                  className="cursor-pointer select-none text-right"
-                  role="button"
-                  tabIndex={0}
                   aria-sort={sortKey === "storage" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-                  onClick={() => toggleSort("storage")}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
-                      toggleSort("storage")
-                    }
-                  }}
+                  className="cursor-pointer select-none text-right"
                 >
-                  {t("cost.storageHourlyShort")}
-                  <SortIcon col="storage" sortKey={sortKey} sortDir={sortDir} />
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => toggleSort("storage")}
+                  >
+                    {t("cost.storageHourlyShort")}
+                    <SortIcon col="storage" sortKey={sortKey} sortDir={sortDir} />
+                  </button>
                 </TableHead>
                 <TableHead
-                  className="cursor-pointer select-none text-right"
-                  role="button"
-                  tabIndex={0}
                   aria-sort={sortKey === "monthly" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-                  onClick={() => toggleSort("monthly")}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
-                      toggleSort("monthly")
-                    }
-                  }}
+                  className="cursor-pointer select-none text-right"
                 >
-                  {t("cost.monthlyEstimate")}
-                  <SortIcon col="monthly" sortKey={sortKey} sortDir={sortDir} />
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => toggleSort("monthly")}
+                  >
+                    {t("cost.monthlyEstimate")}
+                    <SortIcon col="monthly" sortKey={sortKey} sortDir={sortDir} />
+                  </button>
                 </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sorted.map((item) => (
-                <TableRow
-                  key={item.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  role="link"
-                  tabIndex={0}
-                  aria-label={t("cost.openDetails", { name: item.id })}
-                  onClick={() => handleRowClick(item)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
-                      handleRowClick(item)
-                    }
-                  }}
-                >
+                <TableRow key={item.id} className="hover:bg-muted/50">
                   <TableCell className="font-mono text-xs">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-xs">
                         {scopeView === "namespace" ? t("cost.namespaceShort") : t("cost.serviceShort")}
                       </Badge>
-                      {item.id}
+                      <Link
+                        href={scopeView === "service" ? `/catalog/${item.id}?tab=cost` : `/catalog?namespace=${encodeURIComponent(item.id)}`}
+                        className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {item.id}
+                      </Link>
                     </div>
                   </TableCell>
                   <TableCell className="text-right text-xs text-indigo-600 dark:text-indigo-400">

@@ -125,7 +125,7 @@ export function KisaChecklist() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground bg-muted/30">
-                <th className="px-3 py-3 w-8"></th>
+                <th className="px-3 py-3 w-8"><span className="sr-only">{t("common.details")}</span></th>
                 <th className="px-4 py-3 font-medium whitespace-nowrap">{t("compliance.kisa.col.id")}</th>
                 <th className="px-4 py-3 font-medium whitespace-nowrap">{t("compliance.kisa.col.domain")}</th>
                 <th className="px-4 py-3 font-medium whitespace-nowrap">{t("compliance.kisa.col.control")}</th>
@@ -139,19 +139,14 @@ export function KisaChecklist() {
                 const isExpanded = expandedId === control.id
                 return (
                   <>
-                    <tr
-                      key={control.id}
-                      className="border-b hover:bg-muted/20 cursor-pointer transition-colors"
-                      onClick={() => toggleRow(control.id)}
-                    >
+                    <tr key={control.id} className="border-b hover:bg-muted/20 transition-colors">
                       <td className="px-3 py-2.5 text-muted-foreground">
-                        <span
-                          className="inline-block transition-transform duration-200"
+                        <button type="button" aria-label={t("common.details")} className="inline-block transition-transform duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={(event) => { event.stopPropagation(); toggleRow(control.id) }}
                           style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}
                           title={isExpanded ? t("common.collapse") : t("common.expand")}
                         >
                           ›
-                        </span>
+                        </button>
                       </td>
                       <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground whitespace-nowrap">
                         {control.id}

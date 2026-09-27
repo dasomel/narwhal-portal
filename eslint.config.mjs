@@ -15,6 +15,15 @@ const eslintConfig = [
   ...nextTypescript,
   {
     rules: {
+      // Accessibility controls were audited and brought to zero violations in the
+      // application components and pages. Keep these checks in CI to prevent regressions.
+      "jsx-a11y/click-events-have-key-events": "error",
+      "jsx-a11y/no-static-element-interactions": "error",
+      "jsx-a11y/interactive-supports-focus": "error",
+      "jsx-a11y/no-noninteractive-element-interactions": "error",
+      "jsx-a11y/no-noninteractive-tabindex": "error",
+      "jsx-a11y/control-has-associated-label": "error",
+      "jsx-a11y/role-supports-aria-props": "error",
       // 18 hits / 12 pre-existing files (never linted before this gate). Fixing all of
       // them is a real typing pass, out of scope for adding the lint gate itself.
       "@typescript-eslint/no-explicit-any": "warn",

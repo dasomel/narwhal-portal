@@ -45,12 +45,11 @@ interface SortHeaderProps {
 function SortHeader({ label, sortKey, current, dir, onToggle, className }: SortHeaderProps) {
   const icon = current === sortKey ? (dir === "asc" ? "↑" : "↓") : "↕"
   return (
-    <th
-      className={`pb-2 font-medium cursor-pointer select-none whitespace-nowrap hover:text-foreground ${className ?? ""}`}
-      onClick={() => onToggle(sortKey)}
-    >
+    <th aria-sort={current === sortKey ? (dir === "asc" ? "ascending" : "descending") : "none"} className={`pb-2 font-medium whitespace-nowrap ${className ?? ""}`}>
+      <button type="button" className="cursor-pointer select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onToggle(sortKey)}>
       {label}{" "}
       <span className="text-xs opacity-60">{icon}</span>
+      </button>
     </th>
   )
 }

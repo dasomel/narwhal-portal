@@ -27,11 +27,8 @@ function SortHeader({
 }) {
   const active = current === sortKey
   return (
-    <th
-      className="pb-2 font-medium cursor-pointer select-none whitespace-nowrap"
-      onClick={() => onToggle(sortKey)}
-    >
-      <span className="inline-flex items-center gap-1">
+    <th aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"} className="pb-2 font-medium whitespace-nowrap">
+      <button type="button" className="inline-flex items-center gap-1 cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onToggle(sortKey)}>
         {label}
         {active ? (
           dir === "asc" ? (
@@ -42,7 +39,7 @@ function SortHeader({
         ) : (
           <ChevronsUpDown className="w-3 h-3 text-muted-foreground/40" />
         )}
-      </span>
+      </button>
     </th>
   )
 }

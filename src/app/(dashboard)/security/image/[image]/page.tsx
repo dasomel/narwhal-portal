@@ -125,7 +125,7 @@ export default async function ImageVulnDetailPage({ params }: Props) {
                 <th className="px-4 py-2.5 font-medium">{t(locale, "security.detail.installedVersion")}</th>
                 <th className="px-4 py-2.5 font-medium">{t(locale, "security.detail.fixedVersion")}</th>
                 <th className="px-4 py-2.5 font-medium">Title</th>
-                <th className="px-4 py-2.5 font-medium"></th>
+                <th aria-hidden="true" className="px-4 py-2.5 font-medium"></th>
               </tr>
             </thead>
             <tbody>

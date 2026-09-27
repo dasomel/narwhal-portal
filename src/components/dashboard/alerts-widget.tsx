@@ -133,9 +133,13 @@ export function AlertsWidget() {
             {alerts.slice(0, 5).map((a, i) => (
               <li
                 key={i}
-                onClick={() => setSelected(a)}
-                className="text-sm flex gap-2 items-center cursor-pointer hover:bg-muted rounded px-1 -mx-1 transition-colors"
               >
+                <div className="text-sm flex gap-2 items-center rounded px-1 -mx-1">
+                <button
+                  type="button"
+                  onClick={() => setSelected(a)}
+                  className="flex min-w-0 flex-1 gap-2 items-center text-left hover:bg-muted rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
                 <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
                   a.labels.severity === "critical"
                     ? "bg-narwhal-danger/15 text-narwhal-danger"
@@ -143,8 +147,10 @@ export function AlertsWidget() {
                 }`}>
                   {a.labels.severity ?? "warn"}
                 </span>
-                <span className="text-foreground truncate flex-1">{a.labels.alertname}</span>
+                <span className="text-foreground truncate">{a.labels.alertname}</span>
+                </button>
                 {canSilence && <SilenceButton alertname={a.labels.alertname ?? `alert-${i}`} />}
+                </div>
               </li>
             ))}
             {alerts.length > 5 && <li className="text-xs text-muted-foreground">{t("alerts.more", { count: alerts.length - 5 })}</li>}

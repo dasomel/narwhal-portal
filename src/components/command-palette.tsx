@@ -87,7 +87,13 @@ export function CommandPalette() {
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="fixed inset-0 bg-black/50" onClick={() => setOpen(false)} />
+      <button
+        type="button"
+        aria-label={t("common.close")}
+        tabIndex={-1}
+        className="fixed inset-0 bg-black/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => setOpen(false)}
+      />
       <div className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-lg">
         <Command
           className="rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl overflow-hidden"
@@ -95,7 +101,7 @@ export function CommandPalette() {
         >
           <Command.Input
             placeholder={t("search.placeholder")}
-            className="w-full px-4 py-3 text-sm border-b border-border outline-none bg-transparent"
+            className="w-full px-4 py-3 text-sm border-b border-border outline-none bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
           />
           <Command.List className="max-h-[320px] overflow-y-auto p-2 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground">
             <Command.Empty className="text-center text-sm text-muted-foreground py-6">

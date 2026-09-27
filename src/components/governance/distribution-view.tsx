@@ -302,9 +302,9 @@ export function DistributionView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {multiReplicaWorkloads.map((w, idx) => (
+                    {multiReplicaWorkloads.map((w, idx) => (
                     <tr key={idx} className="hover:bg-muted/20 transition-colors">
-                      <td className="p-3">
+                      <td className="p-3" aria-label={`${w.namespace}/${w.name} ${w.kind}`}>
                         <div className="flex items-center gap-2">
                           <Badge className={`text-[10px] px-1.5 py-0 h-4 uppercase shrink-0 ${severityBadgeClass[w.risk]}`}>
                             {w.risk}
@@ -482,19 +482,12 @@ export function DistributionView() {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {data.controlPlanePods.map((pod, idx) => (
-                      <tr
-                        key={idx}
-                        onClick={() => {
-                          setIsDrilldownOpen(false)
-                          setSelectedPodForDrawer({ namespace: pod.namespace, pod: pod.pod })
-                        }}
-                        className="cursor-pointer hover:bg-muted/30 transition-colors"
-                      >
+                      <tr key={idx} className="hover:bg-muted/30 transition-colors">
                         <td className="p-3 font-medium text-foreground whitespace-nowrap">
                           {pod.namespace}
                         </td>
                         <td className="p-3 font-mono text-primary hover:underline font-medium break-all">
-                          {pod.pod}
+                          <button type="button" className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { setIsDrilldownOpen(false); setSelectedPodForDrawer({ namespace: pod.namespace, pod: pod.pod }) }}>{pod.pod}</button>
                         </td>
                         <td className="p-3 text-muted-foreground">
                           <span className="font-semibold text-foreground">{pod.workload}</span>

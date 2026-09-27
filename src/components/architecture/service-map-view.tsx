@@ -673,6 +673,7 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
           <span>{t("svcMap.errorThreshold")}</span>
           <input
             type="range"
+            aria-label={t("svcMap.errorThreshold")}
             min={0}
             max={100}
             step={1}

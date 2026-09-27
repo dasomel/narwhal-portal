@@ -114,7 +114,7 @@ export function RbacGraph({ bindings }: { bindings: RbacBinding[] }) {
               <th
                 className="sticky left-0 top-0 z-20 bg-card border-b border-r border-border"
                 style={{ width: 200, minWidth: 200 }}
-              />
+              ><span className="sr-only">{t("common.details")}</span></th>
               {roles.map((role) => {
                 const rs = ROLE_STYLE[role.kind] ?? { bg: "var(--muted)", text: "var(--foreground)" }
                 return (
@@ -123,6 +123,7 @@ export function RbacGraph({ bindings }: { bindings: RbacBinding[] }) {
                     className="sticky top-0 z-10 bg-card border-b border-r border-border align-bottom pb-1"
                     style={{ width: 32, minWidth: 32, height: 120 }}
                     title={`${role.kind}: ${role.name}`}
+                    aria-label={`${role.kind}: ${role.name}`}
                   >
                     <div
                       className="flex items-center"
@@ -153,6 +154,7 @@ export function RbacGraph({ bindings }: { bindings: RbacBinding[] }) {
                   {/* Subject 행 헤더 */}
                   <td
                     className="sticky left-0 z-10 border-b border-r border-border px-2 py-1 font-mono"
+                    aria-label={`${subject.kind}: ${subject.name}`}
                     style={{
                       background: i % 2 === 0 ? "var(--card)" : "var(--muted/30)",
                       width: 200,

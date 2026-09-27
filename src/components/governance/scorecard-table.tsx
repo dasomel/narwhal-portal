@@ -84,17 +84,15 @@ function SortHeader({
   const indicator = !active ? "↕" : dir === "asc" ? "↑" : "↓"
   return (
     <th
-      role="columnheader"
       aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
-      className={`pb-2 font-medium cursor-pointer select-none whitespace-nowrap group ${center ? "text-center" : ""}`}
-      onClick={() => onSort(sortKey)}
+      className={`pb-2 font-medium whitespace-nowrap ${center ? "text-center" : ""}`}
     >
-      <span className="inline-flex items-center gap-0.5">
+      <button type="button" className="inline-flex items-center gap-0.5 cursor-pointer select-none group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onSort(sortKey)}>
         {label}
         <span className={`text-xs transition-colors ${active ? "text-blue-500" : "text-muted-foreground/40 group-hover:text-muted-foreground"}`}>
           {indicator}
         </span>
-      </span>
+      </button>
     </th>
   )
 }
@@ -234,11 +232,10 @@ export function ScorecardTable() {
               {sorted.map((item) => (
                 <tr
                   key={item.service}
-                  onClick={() => setSelectedRow({ namespace: item.namespace, service: item.service })}
-                  className="border-b last:border-0 cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="border-b last:border-0 hover:bg-muted/50 transition-colors"
                 >
                   <td className="py-2.5 font-medium">
-                    <div>{item.service}</div>
+                    <div><button type="button" className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedRow({ namespace: item.namespace, service: item.service })}>{item.service}</button></div>
                     {item.details && item.details.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {item.details.map((d, i) => (

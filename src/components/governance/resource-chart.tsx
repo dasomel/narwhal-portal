@@ -134,16 +134,8 @@ export function ResourceChart() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {statCards.map((card, idx) => {
           const isClickable = idx === 3
-          return (
-            <div
-              key={idx}
-              className={`rounded-lg border p-4 flex flex-col justify-between transition-all ${card.bg} ${
-                isClickable
-                  ? "cursor-pointer hover:ring-2 hover:ring-ring focus:outline-none"
-                  : ""
-              }`}
-              onClick={isClickable ? () => setNoRequestDialogOpen(true) : undefined}
-            >
+          const cardContent = (
+            <>
               <div>
                 <div className="text-xs font-medium text-muted-foreground">
                   {card.tooltip ? (
@@ -175,7 +167,22 @@ export function ResourceChart() {
                   </div>
                 )
               )}
-            </div>
+            </>
+          )
+          const cardClass = `rounded-lg border p-4 flex flex-col justify-between transition-all ${card.bg}`
+
+          return isClickable ? (
+            <button
+              key={idx}
+              type="button"
+              className={`${cardClass} cursor-pointer hover:ring-2 hover:ring-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+              onClick={() => setNoRequestDialogOpen(true)}
+              aria-label={card.label}
+            >
+              {cardContent}
+            </button>
+          ) : (
+            <div key={idx} className={cardClass}>{cardContent}</div>
           )
         })}
       </div>
@@ -307,13 +314,9 @@ export function ResourceChart() {
                   </tr>
                 ) : (
                   topCpuPods.map((pod, idx) => (
-                    <tr
-                      key={idx}
-                      className="border-b last:border-0 hover:bg-muted/40 cursor-pointer transition-colors"
-                      onClick={() => handlePodClick(pod.namespace, pod.pod)}
-                    >
+                    <tr key={idx} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
                       <td className="py-2 pr-2 font-medium max-w-[120px] truncate" title={pod.namespace}>{pod.namespace}</td>
-                      <td className="py-2 pr-2 font-mono text-[11px] truncate max-w-[180px]" title={pod.pod}>{pod.pod}</td>
+                      <td className="py-2 pr-2 font-mono text-[11px] truncate max-w-[180px]" title={pod.pod}><button type="button" className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => handlePodClick(pod.namespace, pod.pod)}>{pod.pod}</button></td>
                       <td className="py-2 text-right font-mono text-[11px] font-semibold text-foreground">
                         {pod.cpuCores.toFixed(3)} cores
                       </td>
@@ -355,13 +358,9 @@ export function ResourceChart() {
                   </tr>
                 ) : (
                   topMemPods.map((pod, idx) => (
-                    <tr
-                      key={idx}
-                      className="border-b last:border-0 hover:bg-muted/40 cursor-pointer transition-colors"
-                      onClick={() => handlePodClick(pod.namespace, pod.pod)}
-                    >
+                    <tr key={idx} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
                       <td className="py-2 pr-2 font-medium max-w-[120px] truncate" title={pod.namespace}>{pod.namespace}</td>
-                      <td className="py-2 pr-2 font-mono text-[11px] truncate max-w-[180px]" title={pod.pod}>{pod.pod}</td>
+                      <td className="py-2 pr-2 font-mono text-[11px] truncate max-w-[180px]" title={pod.pod}><button type="button" className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => handlePodClick(pod.namespace, pod.pod)}>{pod.pod}</button></td>
                       <td className="py-2 text-right font-mono text-[11px] font-semibold text-foreground">
                         {formatBytes(pod.memBytes)}
                       </td>
@@ -438,16 +437,10 @@ export function ResourceChart() {
                 </thead>
                 <tbody className="divide-y">
                   {filteredNoRequestPods.map((pod, idx) => (
-                    <tr
-                      key={idx}
-                      className="hover:bg-muted/40 cursor-pointer transition-colors"
-                      onClick={() => {
-                        setNoRequestDialogOpen(false)
-                        handlePodClick(pod.namespace, pod.pod)
-                      }}
+                    <tr key={idx} className="hover:bg-muted/40 transition-colors"
                     >
                       <td className="p-3 font-medium text-foreground">
-                        {pod.namespace}
+                        <button type="button" className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => { setNoRequestDialogOpen(false); handlePodClick(pod.namespace, pod.pod) }}>{pod.namespace}</button>
                       </td>
                       <td className="p-3 font-mono text-[11px] text-foreground">
                         {pod.pod}
