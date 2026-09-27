@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server"
 import { requireRole, getActorId } from "@/lib/auth"
-import { getCertificate, invalidateCertificatesCache, renewCertificate } from "@/lib/k8s-client"
+import { getCertificate, renewCertificate } from "@/lib/k8s-client"
 import { ValidationError, toValidationErrorBody } from "@/lib/validation"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 import { claimIdempotencyKey, fulfillIdempotencyKey, getIdempotencyStore } from "@/lib/idempotency"
+import { invalidateFor } from "@/lib/cache-invalidation"
 
 export const dynamic = "force-dynamic"
 
@@ -113,7 +114,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Renewal failed" }, { status: 500 })
   }
 
-  await invalidateCertificatesCache()
+  await invalidateFor("certificate.renewed", { namespace: target.namespace, name: target.name })
 
   // portal#35: post-renewal read-back — a 2xx PATCH only means cert-manager
   // accepted the request, not that renewal actually happened. Re-read the

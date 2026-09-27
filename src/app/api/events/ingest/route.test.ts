@@ -22,9 +22,11 @@ vi.mock("@/lib/live-stream", () => ({
 vi.mock("@/lib/auth", () => ({
   auth: vi.fn(),
 }))
+vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
 
 const { pushEvent } = await import("@/lib/live-stream")
 const { auth } = await import("@/lib/auth")
+const { invalidateFor } = await import("@/lib/cache-invalidation")
 
 function createRequest(
   body: unknown,
@@ -73,6 +75,7 @@ describe("/api/events/ingest hardening", () => {
     process.env.LIVE_INGEST_SECRET = "global-shared-secret"
 
     vi.mocked(pushEvent).mockClear()
+    vi.mocked(invalidateFor).mockClear()
     vi.mocked(auth).mockResolvedValue(null as never)
 
     // Clean in-memory state
@@ -306,6 +309,7 @@ describe("/api/events/ingest hardening", () => {
       const data = await res.json()
       expect(data.producer).toBe("alertmanager")
       expect(data.credential_scope).toBe("producer:alertmanager")
+      expect(invalidateFor).not.toHaveBeenCalled()
 
       expect(vi.mocked(pushEvent)).toHaveBeenCalledWith(
         expect.objectContaining({

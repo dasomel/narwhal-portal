@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { setUserActive } from "@/lib/keycloak-client"
 import { requireAdmin } from "@/lib/auth"
 import { assertUuid, ValidationError, toValidationErrorBody } from "@/lib/validation"
+import { invalidateFor } from "@/lib/cache-invalidation"
 
 export const dynamic = "force-dynamic"
 
@@ -33,6 +34,7 @@ export async function PATCH(
       )
     }
     await setUserActive(pk, isActive)
+    await invalidateFor("iam.changed", { userPk: pk })
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error("PATCH /api/settings/users/[pk] error:", err)

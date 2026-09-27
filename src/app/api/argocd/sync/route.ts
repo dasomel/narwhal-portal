@@ -9,7 +9,7 @@ import {
   getOperationOutcome,
   syncArgoApp,
 } from "@/lib/argocd"
-import { cacheDel } from "@/lib/valkey"
+import { invalidateFor } from "@/lib/cache-invalidation"
 import { assertK8sName, ValidationError } from "@/lib/validation"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 import type { ArgoCDSyncRequest, ArgoCDSyncResponse } from "@/types/api"
@@ -82,13 +82,7 @@ export async function POST(
       throw err
     }
 
-    // Invalidate app-list cache so next GET fetches fresh state
-    try {
-      await cacheDel("argocd:apps")
-      await cacheDel(`argocd:app:${trimmed}`)
-    } catch {
-      // cache invalidation failure is non-fatal
-    }
+    await invalidateFor("argocd.app.changed", { appName: trimmed })
 
     // portal#59: the sync response above only means ArgoCD *accepted* the sync
     // request, not that reconciliation finished. Re-read the app and check

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdmin } from "@/lib/auth"
+import { invalidateFor } from "@/lib/cache-invalidation"
 import { ValidationError, toValidationErrorBody } from "@/lib/validation"
 import {
   listClusters,
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "ValidationError", message: "request body is required", field: "body" }, { status: 400 })
     }
     const cluster = await registerCluster(body)
+    await invalidateFor("cluster.changed", { clusterId: cluster.id })
     return NextResponse.json(toListItem(cluster), { status: 201 })
   } catch (err) {
     if (err instanceof ValidationError) {
@@ -80,6 +82,7 @@ export async function DELETE(req: NextRequest) {
     if (!verdict.ok) {
       return NextResponse.json({ error: "ValidationError", message: verdict.message, field: "id" }, { status: 400 })
     }
+    await invalidateFor("cluster.changed", { clusterId: id })
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error("DELETE /api/settings/clusters error:", err)

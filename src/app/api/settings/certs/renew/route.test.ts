@@ -15,9 +15,11 @@ vi.mock("@/lib/operation-context", () => ({
   completeOperation: vi.fn().mockResolvedValue(undefined),
   failOperation: vi.fn().mockResolvedValue(undefined),
 }))
+vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
 
 const { requireRole } = await import("@/lib/auth")
-const { getCertificate, invalidateCertificatesCache, renewCertificate } = await import("@/lib/k8s-client")
+const { getCertificate, renewCertificate } = await import("@/lib/k8s-client")
+const { invalidateFor } = await import("@/lib/cache-invalidation")
 const { beginOperation, completeOperation, failOperation } = await import("@/lib/operation-context")
 const { POST } = await import("./route")
 
@@ -101,7 +103,7 @@ describe("POST /api/settings/certs/renew — failed renewal", () => {
     const res = await POST(req({ name: "narwhal-tls", namespace: "platform-system" }))
     expect(res.status).toBe(500)
     expect(failOperation).toHaveBeenCalled()
-    expect(invalidateCertificatesCache).not.toHaveBeenCalled()
+    expect(invalidateFor).not.toHaveBeenCalled()
   })
 })
 
@@ -110,7 +112,7 @@ describe("POST /api/settings/certs/renew — cache invalidation and audit/event 
     vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
   })
 
-  it("invalidates the certs cache and emits operation.started/completed on a converged renewal", async () => {
+  it("invalidates certificate views and emits operation.started/completed on a converged renewal", async () => {
     vi.mocked(getCertificate)
       .mockResolvedValueOnce(cert)
       .mockResolvedValueOnce({ ...cert, renewalTime: "2026-06-01T00:00:00.000Z" })
@@ -119,7 +121,7 @@ describe("POST /api/settings/certs/renew — cache invalidation and audit/event 
     const body = await res.json()
     expect(body.success).toBe(true)
     expect(body.pending).toBeUndefined()
-    expect(invalidateCertificatesCache).toHaveBeenCalled()
+    expect(invalidateFor).toHaveBeenCalledWith("certificate.renewed", { namespace: "platform-system", name: "narwhal-tls" })
     expect(beginOperation).toHaveBeenCalledWith(
       expect.objectContaining({ operationType: "pki.certificate.renew" }),
     )

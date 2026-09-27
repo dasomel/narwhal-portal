@@ -5,6 +5,7 @@ import { GiteaError, GiteaCredentialError, isGiteaConfigured, requestTenantNames
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 import { resolveNamespaceOwner } from "@/lib/namespace-ownership"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
+import { invalidateFor } from "@/lib/cache-invalidation"
 
 export const dynamic = "force-dynamic"
 
@@ -90,6 +91,7 @@ export async function POST(req: Request) {
       team,
       requestedBy: session.user.email ?? session.user.name ?? "unknown",
     })
+    await invalidateFor("namespace.changed", { namespace: name })
     await completeOperation(
       ctx,
       `Namespace request opened: ${name}`,

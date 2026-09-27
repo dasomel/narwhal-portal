@@ -11,6 +11,7 @@ import {
 } from "@/lib/argocd"
 import { assertK8sName, ValidationError, toValidationErrorBody } from "@/lib/validation"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
+import { invalidateFor } from "@/lib/cache-invalidation"
 
 export const dynamic = "force-dynamic"
 
@@ -65,6 +66,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
       )
       throw err
     }
+
+    await invalidateFor("argocd.app.changed", { appName: name })
 
     // portal#59: the sync response above only means ArgoCD *accepted* the sync
     // request, not that reconciliation finished. Re-read the app and check

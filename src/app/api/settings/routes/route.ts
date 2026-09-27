@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getRoutes, toggleRoute } from "@/lib/apisix-client"
 import { requireAdmin } from "@/lib/auth"
-import { cacheGet, cacheSet, cacheDel } from "@/lib/valkey"
+import { cacheGet, cacheSet } from "@/lib/valkey"
 import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
+import { invalidateFor } from "@/lib/cache-invalidation"
 
 export const dynamic = "force-dynamic"
 
@@ -38,7 +39,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Invalid input: id (string) and enable (boolean) required" }, { status: 400 })
     }
     await toggleRoute(id, enable)
-    await cacheDel(cacheKeys.routesList())
+    await invalidateFor("apisix.route.changed", { routeId: id })
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error("PATCH /api/settings/routes error:", err)
