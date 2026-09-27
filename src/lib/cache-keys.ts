@@ -258,6 +258,7 @@ export const cacheKeys = {
   // dependency in one key, not one per dependency.
   healthDependencies: () => "health:dependencies",
   healthSummary: () => "health:summary",
+  liveK8sInformerLease: () => "live:k8s-informer:lease",
 } as const
 
 /**
@@ -970,6 +971,16 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     securitySensitive: false,
     unscopedReason: { code: "cluster-wide-state", detail: "Same redacted aggregate for every authenticated user; contains no per-user data." },
   },
+  "live:k8s-informer:lease": {
+    example: "live:k8s-informer:lease",
+    dimensions: [],
+    ttlSeconds: 15,
+    owner: "src/lib/live-k8s-informer.ts",
+    invalidation: "Lease expiry or owner-token compare-and-delete",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "One process-wide informer lease for the configured Kubernetes Events watch." },
+  },
   "keycloak:* / api:groups-enriched": {
     example: "keycloak:users | keycloak:groups | keycloak:groups-detailed | api:groups-enriched",
     dimensions: [],
@@ -1158,6 +1169,7 @@ export const BUILDER_CHECKS: Record<keyof typeof cacheKeys, BuilderCheck> = {
 
   healthDependencies: { registryKey: "health:dependencies", ttlSeconds: 10, args: [], dimensionArgIndex: {} },
   healthSummary: { registryKey: "health:summary", ttlSeconds: 20, args: [], dimensionArgIndex: {} },
+  liveK8sInformerLease: { registryKey: "live:k8s-informer:lease", ttlSeconds: 15, args: [], dimensionArgIndex: {} },
 }
 
 /**
