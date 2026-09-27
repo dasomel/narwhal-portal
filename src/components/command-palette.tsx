@@ -5,6 +5,7 @@ import { Command } from "cmdk"
 import { useRouter } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { useSession } from "next-auth/react"
 import type { CatalogService } from "@/lib/argocd"
 import type { UserRole } from "@/lib/auth"
@@ -42,7 +43,7 @@ export function CommandPalette() {
   const { data: session } = useSession()
   const role = session?.user?.role as UserRole | undefined
 
-  const { data: services } = useQuery<CatalogService[]>({
+  const { data: services, isLoading, isError, refetch } = useQuery<CatalogService[]>({
     queryKey: ["catalog"],
     queryFn: () => fetch("/api/catalog").then((r) => r.json()),
     enabled: open,
@@ -104,6 +105,10 @@ export function CommandPalette() {
             className="w-full px-4 py-3 text-sm border-b border-border outline-none bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
           />
           <Command.List className="max-h-[320px] overflow-y-auto p-2 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground">
+            {isLoading && !services ? <DataState variant="inline" state="loading" onRetry={() => { void refetch() }} /> : null}
+            {isError && !services ? <DataState variant="inline" state="unavailable" onRetry={() => { void refetch() }} /> : null}
+            {isError && services ? <DataState variant="inline" state="stale" onRetry={() => { void refetch() }} /> : null}
+            {!isLoading && !isError && services?.length === 0 ? <DataState variant="inline" state="empty" /> : null}
             <Command.Empty className="text-center text-sm text-muted-foreground py-6">
               {t("search.noResults")}
             </Command.Empty>

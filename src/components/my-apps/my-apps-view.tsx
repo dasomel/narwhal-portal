@@ -10,6 +10,7 @@ import { ScopedDeploysList } from "@/components/my-apps/scoped-deploys-list"
 import { MyAppsHero, MyAppsHeroEmpty } from "@/components/my-apps/my-apps-hero"
 import { Narwhal } from "@/components/narwhal/narwhal"
 import type { MyAppsResponse } from "@/types/my-apps"
+import { DataState } from "@/components/ui/data-state"
 
 function BackToOverviewButton() {
   const t = useT()
@@ -33,7 +34,7 @@ function BackToOverviewButton() {
 export function MyAppsView() {
   const t = useT()
 
-  const { data, isLoading, error } = useQuery<MyAppsResponse>({
+  const { data, isLoading, isError, refetch } = useQuery<MyAppsResponse>({
     queryKey: ["my-apps"],
     queryFn: () => fetch("/api/my-apps").then((r) => r.json()),
     refetchInterval: 15_000,
@@ -48,25 +49,19 @@ export function MyAppsView() {
             <p className="text-muted-foreground text-sm mt-1">{t("myApps.description")}</p>
           </div>
         </div>
-        <Card
-          className="p-8 flex items-center justify-center"
-                  >
-          <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-        </Card>
+        <DataState state="loading" onRetry={() => { void refetch() }} />
       </div>
     )
   }
 
-  if (error || !data) {
+  if (isError || !data) {
     return (
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground">{t("myApps.title")}</h1>
           <p className="text-muted-foreground text-sm mt-1">{t("myApps.description")}</p>
         </div>
-        <Card className="p-4">
-          <span className="text-sm text-narwhal-danger">{t("common.loadError")}</span>
-        </Card>
+        <DataState state={isError ? "error" : "empty"} onRetry={() => { void refetch() }} />
       </div>
     )
   }

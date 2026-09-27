@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import fs from "node:fs"
 import path from "node:path"
 import { ko, en } from "./i18n"
+import { VARIANT_COUNTS } from "@/components/narwhal/narwhal-copy"
 
 // portal#62: keeps the i18n dictionary and its call sites honest without a
 // build-time i18n-lint tool — scans every src/**/*.{ts,tsx} file for `t(...)`
@@ -99,6 +100,16 @@ function findI18nTodoLines(content: string): number[] {
 const SOURCE_FILES = walk(SRC_ROOT)
 
 describe("i18n dictionary completeness", () => {
+  it("contains every generated narwhal copy variant in both locales", () => {
+    for (const [family, count] of Object.entries(VARIANT_COUNTS)) {
+      for (let index = 0; index < count; index++) {
+        const key = `narwhal.copy.${family}.${index}`
+        expect(ko, `ko is missing ${key}`).toHaveProperty(key)
+        expect(en, `en is missing ${key}`).toHaveProperty(key)
+      }
+    }
+  })
+
   it("ko and en expose identical key sets", () => {
     const koKeys = new Set(Object.keys(ko))
     const enKeys = new Set(Object.keys(en))

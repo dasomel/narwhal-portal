@@ -13,6 +13,19 @@ import { useQuery } from "@tanstack/react-query"
 
 describe("DependencyHealthIndicator", () => {
   it.each([
+    { queryState: { isLoading: true } },
+    { queryState: { isError: true, error: new Error("offline") } },
+  ])("renders null for loading and error states", ({ queryState }) => {
+    vi.mocked(useQuery).mockReturnValue(queryState as never)
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <LocaleProvider locale="en"><DependencyHealthIndicator /></LocaleProvider>
+      </QueryClientProvider>,
+    )
+    expect(html).toBe("")
+  })
+
+  it.each([
     ["ok", "All systems normal"],
     ["degraded", "Degraded"],
     ["unavailable", "Unavailable"],

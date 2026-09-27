@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface TemplateField {
   name: string
@@ -37,7 +38,7 @@ export function TemplateList() {
   const [fieldValues, setFieldValues] = useState<Record<string, Record<string, string>>>({})
   const [preview, setPreview] = useState<PreviewResult | null>(null)
 
-  const { data: templates = [], isLoading } = useQuery<ServiceTemplate[]>({
+  const { data: templates, isLoading, isError, refetch } = useQuery<ServiceTemplate[]>({
     queryKey: ["templates"],
     queryFn: () => fetch("/api/templates").then((r) => r.json()),
     refetchInterval: 30_000,
@@ -68,19 +69,15 @@ export function TemplateList() {
   }
 
   if (isLoading) {
-    return (
-      <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-        <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-      </div>
-    )
+    return <DataState state="loading" onRetry={() => { void refetch() }} />
   }
 
-  if (templates.length === 0) {
-    return (
-      <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-        <span className="text-sm text-muted-foreground">{t("templates.empty")}</span>
-      </div>
-    )
+  if (isError) {
+    return <DataState state="error" onRetry={() => { void refetch() }} />
+  }
+
+  if (!templates?.length) {
+    return <DataState state="empty" />
   }
 
   return (

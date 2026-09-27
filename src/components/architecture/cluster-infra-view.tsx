@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { DataState } from "@/components/ui/data-state"
 
 const SYSTEM_NAMESPACES = new Set([
   "kube-system",
@@ -28,6 +29,17 @@ const SYSTEM_NAMESPACES = new Set([
   "logging",
   "tracing",
 ])
+
+function isClusterInfra(value: unknown): value is ClusterInfra {
+  if (typeof value !== "object" || value === null) return false
+  const response = value as Partial<ClusterInfra>
+  return Array.isArray(response.nodes)
+    && Array.isArray(response.controlPlane)
+    && Array.isArray(response.namespaces)
+    && typeof response.summary === "object"
+    && response.summary !== null
+    && typeof response.summary.truncated === "boolean"
+}
 
 function usageColor(percent: number): string {
   if (percent >= 90) return "bg-narwhal-danger"
@@ -83,61 +95,48 @@ function SummaryCard({
   )
 }
 
-function SkeletonRow({ cols }: { cols: number }) {
-  return (
-    <TableRow>
-      {Array.from({ length: cols }).map((_, i) => (
-        <TableCell key={i}>
-          <div className="h-4 bg-muted rounded animate-pulse w-20" />
-        </TableCell>
-      ))}
-    </TableRow>
-  )
-}
-
 export function ClusterInfraView() {
   const t = useT()
 
-  const { data, isLoading, error } = useQuery<ClusterInfra>({
+  const { data, isLoading, isError, refetch } = useQuery<ClusterInfra>({
     queryKey: ["cluster-infra"],
     queryFn: () => fetch("/api/cluster").then((r) => r.json()),
     refetchInterval: 30_000,
   })
 
-  const cpReady = data ? data.controlPlane.filter((c) => c.status === "Running").length : 0
-  const cpTotal = data?.controlPlane.length ?? 0
+  const validData = isClusterInfra(data) ? data : undefined
+  if (isLoading && !data) return <DataState state="loading" onRetry={() => { void refetch() }} />
+  if ((isError && !data) || (data && !validData)) return <DataState state="error" onRetry={() => { void refetch() }} />
+  if (!validData) return <DataState state="empty" />
+
+  const cpReady = validData.controlPlane.filter((c) => c.status === "Running").length
+  const cpTotal = validData.controlPlane.length
 
   return (
     <div className="space-y-6">
+      {isError ? (
+        <DataState state="error" onRetry={() => { void refetch() }} />
+      ) : validData.summary.truncated ? (
+        <DataState state="partial" />
+      ) : null}
+
       {/* 섹션 1: 요약 카드 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="rounded-lg border bg-card p-4 space-y-2">
-              <div className="h-3 bg-muted rounded animate-pulse w-16" />
-              <div className="h-7 bg-muted rounded animate-pulse w-24" />
-            </div>
-          ))
-        ) : error ? (
-          <div className="col-span-4 rounded-lg border border-narwhal-danger/30 bg-narwhal-danger/10 p-4 text-sm text-narwhal-danger">
-            {t("common.loadError")}
-          </div>
-        ) : data ? (
-          <>
+        <>
             <SummaryCard
               label={t("arch.nodes")}
-              value={`${data.summary.readyNodes}/${data.summary.totalNodes} ${t("arch.ready")}`}
-              accent={data.summary.readyNodes === data.summary.totalNodes ? "green" : "red"}
+              value={`${validData.summary.readyNodes}/${validData.summary.totalNodes} ${t("arch.ready")}`}
+              accent={validData.summary.readyNodes === validData.summary.totalNodes ? "green" : "red"}
             />
             <SummaryCard
               label={t("arch.pods")}
-              value={String(data.summary.totalPods)}
+              value={String(validData.summary.totalPods)}
               sub={t("arch.running")}
               accent="default"
             />
             <SummaryCard
               label={t("arch.namespaces")}
-              value={String(data.summary.totalNamespaces)}
+              value={String(validData.summary.totalNamespaces)}
               accent="default"
             />
             <SummaryCard
@@ -145,8 +144,7 @@ export function ClusterInfraView() {
               value={`${cpReady}/${cpTotal} ${t("arch.running")}`}
               accent={cpReady === cpTotal && cpTotal > 0 ? "green" : "red"}
             />
-          </>
-        ) : null}
+        </>
       </div>
 
       {/* 섹션 2: 노드 상태 테이블 */}
@@ -167,16 +165,14 @@ export function ClusterInfraView() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading ? (
-              Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={7} />)
-            ) : !data || data.nodes.length === 0 ? (
+            {validData.nodes.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-8">
-                  {t("common.loadError")}
+                  <DataState state="empty" />
                 </TableCell>
               </TableRow>
             ) : (
-              data.nodes.map((node) => (
+              validData.nodes.map((node) => (
                 <TableRow key={node.name}>
                   <TableCell className="font-medium">
                     <Link
@@ -242,17 +238,11 @@ export function ClusterInfraView() {
             </span>
           </div>
         </div>
-        {isLoading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-            {Array.from({ length: 12 }).map((_, i) => (
-              <div key={i} className="h-14 bg-muted rounded-lg animate-pulse" />
-            ))}
-          </div>
-        ) : !data || data.namespaces.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("common.loadError")}</p>
+        {validData.namespaces.length === 0 ? (
+          <DataState state="empty" />
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-            {data.namespaces.map((ns) => {
+            {validData.namespaces.map((ns) => {
               const isSystem = SYSTEM_NAMESPACES.has(ns.name)
               return (
                 <div

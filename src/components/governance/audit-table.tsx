@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
 import { useT, useLocale } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import type { TranslationKey } from "@/lib/i18n"
 
 // portal#16: these are Kubernetes Events (operational signal), not Kubernetes
@@ -101,7 +102,7 @@ export function AuditTable() {
   const [sortKey, setSortKey] = useState<SortKey>("timestamp")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
-  const { data = [], isLoading } = useQuery<OperationalEventEntry[]>({
+  const { data = [], isLoading, isError, refetch } = useQuery<OperationalEventEntry[]>({
     queryKey: ["governance-audit"],
     queryFn: () => fetch("/api/governance/audit").then((r) => r.json()),
     refetchInterval: 30_000,
@@ -171,13 +172,11 @@ export function AuditTable() {
           </select>
         </div>
         {isLoading ? (
-          <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-            <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-          </div>
+          <DataState state="loading" onRetry={() => { void refetch() }} />
+        ) : isError ? (
+          <DataState state="unavailable" onRetry={() => { void refetch() }} />
         ) : sorted.length === 0 ? (
-          <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-            <span className="text-sm text-muted-foreground">{t("opEvents.empty")}</span>
-          </div>
+          <DataState state="empty" />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

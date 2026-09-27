@@ -5,6 +5,7 @@ import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { DataState } from "@/components/ui/data-state"
 import { Input } from "@/components/ui/input"
 import { useState } from "react"
 import { useT } from "@/lib/i18n-client"
@@ -39,7 +40,7 @@ export function CatalogTable() {
   const t = useT()
   const [search, setSearch] = useState("")
 
-  const { data: services, isLoading } = useQuery<CatalogService[]>({
+  const { data: services, isLoading, isError, refetch } = useQuery<CatalogService[]>({
     queryKey: ["catalog"],
     queryFn: () => fetch("/api/catalog").then((r) => r.json()),
     refetchInterval: 15_000,
@@ -68,11 +69,13 @@ export function CatalogTable() {
         </p>
       </CardHeader>
       <CardContent className="p-0">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-            {t("common.loading")}
-          </div>
+        {isLoading && !services ? (
+          <div className="p-4"><DataState state="loading" onRetry={() => { void refetch() }} /></div>
+        ) : isError && !services ? (
+          <div className="p-4"><DataState state="unavailable" onRetry={() => { void refetch() }} /></div>
         ) : (
+          <>
+          {isError && <div className="p-4 pb-0"><DataState state="stale" onRetry={() => { void refetch() }} /></div>}
           <Table>
             <TableHeader>
               <TableRow>
@@ -114,13 +117,14 @@ export function CatalogTable() {
               ))}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-8">
-                    {t("catalog.empty")}
+                  <TableCell colSpan={7} className="py-3">
+                    {isError ? <DataState state="unavailable" onRetry={() => { void refetch() }} /> : <DataState state="empty" />}
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
+          </>
         )}
       </CardContent>
     </Card>

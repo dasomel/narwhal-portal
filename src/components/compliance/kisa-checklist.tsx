@@ -2,6 +2,7 @@
 import { useState, useCallback } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import type { KisaResponse, KisaControl, KisaStatus } from "@/types/kisa"
@@ -61,7 +62,7 @@ export function KisaChecklist() {
   const t = useT()
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  const { data, isLoading } = useQuery<KisaResponse>({
+  const { data, isLoading, isError, refetch } = useQuery<KisaResponse>({
     queryKey: ["compliance", "kisa"],
     queryFn: () => fetch("/api/compliance/kisa").then((r) => r.json()),
     staleTime: 60_000,
@@ -71,20 +72,11 @@ export function KisaChecklist() {
     setExpandedId((prev) => (prev === id ? null : id))
   }, [])
 
-  if (isLoading) {
-    return (
-      <div className="h-40 flex items-center justify-center">
-        <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-      </div>
-    )
-  }
+  if (isLoading) return <DataState state="loading" onRetry={() => { void refetch() }} />
+  if (isError) return <DataState state="unavailable" onRetry={() => { void refetch() }} />
 
   if (!data || data.controls.length === 0) {
-    return (
-      <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">
-        {t("compliance.kisa.empty")}
-      </div>
-    )
+    return <DataState state="empty" />
   }
 
   const { controls, summary } = data

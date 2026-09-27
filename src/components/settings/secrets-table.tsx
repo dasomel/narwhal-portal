@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface SecretEntry {
   path: string
@@ -13,7 +14,7 @@ interface SecretEntry {
 
 export function SecretsTable() {
   const t = useT()
-  const { data: secrets = [], isLoading, isError } = useQuery<SecretEntry[]>({
+  const { data: secrets, isLoading, isError, refetch } = useQuery<SecretEntry[]>({
     queryKey: ["secrets"],
     queryFn: async () => {
       const r = await fetch("/api/secrets")
@@ -29,15 +30,11 @@ export function SecretsTable() {
     <Card className="p-5">
       <h2 className="font-semibold text-foreground mb-4">{t("secrets.title")}</h2>
       {isLoading ? (
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-        </div>
+        <DataState state="loading" onRetry={() => { void refetch() }} />
       ) : isError ? (
-        <div className="h-32 bg-red-50 rounded flex items-center justify-center">
-          <span className="text-sm text-red-500">{t("secrets.error")}</span>
-        </div>
-      ) : secrets.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("secrets.empty")}</p>
+        <DataState state="error" onRetry={() => { void refetch() }} />
+      ) : !secrets?.length ? (
+        <DataState state="empty" />
       ) : (
         <table className="w-full text-sm">
           <thead>

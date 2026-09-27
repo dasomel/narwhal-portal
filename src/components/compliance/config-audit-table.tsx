@@ -2,6 +2,7 @@
 import { useState, useMemo, useCallback, Fragment } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useT, useLocale } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { translateTitle, translateRemediation } from "@/lib/check-translations"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -154,7 +155,7 @@ export function ConfigAuditTable() {
   if (severity !== "all") queryParams.set("severity", severity)
   if (namespace !== "all") queryParams.set("namespace", namespace)
 
-  const { data: rows = [], isLoading } = useQuery<ConfigAuditRow[]>({
+  const { data: rows = [], isLoading, isError, refetch } = useQuery<ConfigAuditRow[]>({
     queryKey: ["compliance-config-audit", severity, namespace],
     queryFn: () => fetch(`/api/compliance/config-audit?${queryParams}`).then((r) => r.json()),
     staleTime: 60_000,
@@ -283,13 +284,11 @@ export function ConfigAuditTable() {
 
       <Card className="p-0 overflow-hidden">
         {isLoading ? (
-          <div className="h-40 flex items-center justify-center">
-            <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-          </div>
+          <DataState state="loading" onRetry={() => { void refetch() }} />
+        ) : isError ? (
+          <DataState state="unavailable" onRetry={() => { void refetch() }} />
         ) : pageRows.length === 0 ? (
-          <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">
-            {t("compliance.empty")}
-          </div>
+          <DataState state="empty" />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

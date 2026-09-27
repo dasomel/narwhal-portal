@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface Certificate {
   name: string
@@ -74,7 +75,7 @@ export function CertsTable() {
   const role = (session?.user as { role?: string })?.role ?? "guest"
   const isAdmin = role === "cluster-admin"
 
-  const { data: certs = [], isLoading } = useQuery<Certificate[]>({
+  const { data: certs, isLoading, isError, refetch } = useQuery<Certificate[]>({
     queryKey: ["settings-certs"],
     queryFn: () => fetch("/api/settings/certs").then((r) => r.json()),
   })
@@ -82,13 +83,9 @@ export function CertsTable() {
   return (
     <Card className="p-5">
       <h2 className="font-semibold text-foreground mb-4">{t("certs.title")}</h2>
-      {isLoading ? (
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-        </div>
-      ) : certs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("certs.empty")}</p>
-      ) : (
+      {isLoading ? <DataState state="loading" onRetry={() => { void refetch() }} />
+        : isError ? <DataState state="error" onRetry={() => { void refetch() }} />
+        : !certs?.length ? <DataState state="empty" /> : (
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-muted-foreground">

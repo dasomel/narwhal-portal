@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useT, useLocale } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
@@ -59,7 +60,7 @@ function getPhaseBadgeClass(phase: string): string {
 
 function ContainerVulnSummary({ image }: { image: string }) {
   const t = useT()
-  const { data, isLoading, isError } = useQuery<ImageVulnReport>({
+  const { data, isLoading, isError, refetch } = useQuery<ImageVulnReport>({
     queryKey: ["governance-container-vuln", image],
     queryFn: () =>
       fetch(`/api/security/vulnerabilities?image=${encodeURIComponent(image)}`).then((r) => {
@@ -70,13 +71,9 @@ function ContainerVulnSummary({ image }: { image: string }) {
     staleTime: 60_000,
   })
 
-  if (isLoading) {
-    return <span className="animate-pulse text-xs text-muted-foreground">{t("common.loading")}</span>
-  }
-
-  if (isError || !data || !data.summary) {
-    return <span className="text-xs text-muted-foreground">{t("governance.detail.security.noVuln")}</span>
-  }
+  if (isLoading && !data) return <DataState variant="inline" state="loading" onRetry={() => { void refetch() }} />
+  if (isError && !data) return <DataState variant="inline" state="unavailable" onRetry={() => { void refetch() }} />
+  if (!data || !data.summary) return <DataState variant="inline" state="empty" reason={t("governance.detail.security.noVuln")} />
 
   const summary = data.summary
   const hasFindings = Object.values(summary).some((count) => count > 0)
@@ -86,7 +83,9 @@ function ContainerVulnSummary({ image }: { image: string }) {
   }
 
   return (
-    <div className="flex gap-1.5 flex-wrap items-center">
+    <div className="space-y-2">
+      {isError && <DataState variant="inline" state="stale" onRetry={() => { void refetch() }} />}
+      <div className="flex gap-1.5 flex-wrap items-center">
       {Object.entries(summary).map(([severity, count]) => {
         if (count === 0) return null
         let badgeColor = "bg-zinc-100 text-zinc-800 border-zinc-200"
@@ -101,6 +100,7 @@ function ContainerVulnSummary({ image }: { image: string }) {
           </Badge>
         )
       })}
+      </div>
     </div>
   )
 }
@@ -110,7 +110,7 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange, initi
   const locale = useLocale()
   const [selectedPodName, setSelectedPodName] = useState<string | null>(null)
 
-  const { data: podListData, isLoading: listLoading, error: listError } = useQuery<PodListResponse>({
+  const { data: podListData, isLoading: listLoading, error: listError, refetch: refetchPods } = useQuery<PodListResponse>({
     queryKey: ["governance-pods", namespace, app],
     queryFn: () => {
       const url = `/api/k8s/pods?namespace=${encodeURIComponent(namespace)}` + (app ? `&app=${encodeURIComponent(app)}` : "")
@@ -123,7 +123,7 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange, initi
     refetchInterval: 15_000,
   })
 
-  const { data: podDetail, isLoading: detailLoading } = useQuery<PodDetail>({
+  const { data: podDetail, isLoading: detailLoading, isError: detailError, refetch: refetchDetail } = useQuery<PodDetail>({
     queryKey: ["governance-pod-detail", namespace, selectedPodName],
     queryFn: () => {
       return fetch(`/api/k8s/resource?kind=Pod&namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(selectedPodName!)}`).then((r) => {
@@ -135,7 +135,7 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange, initi
     refetchInterval: 10_000,
   })
 
-  const { data: eventsData, isLoading: eventsLoading } = useQuery<ResourceEventsResponse>({
+  const { data: eventsData, isLoading: eventsLoading, isError: eventsError, refetch: refetchEvents } = useQuery<ResourceEventsResponse>({
     queryKey: ["governance-pod-events", namespace, selectedPodName],
     queryFn: () => {
       return fetch(`/api/k8s/events?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(selectedPodName!)}`).then((r) => {
@@ -189,17 +189,14 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange, initi
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto pr-1">
-          {listLoading ? (
-            <div className="h-48 flex items-center justify-center">
-              <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-            </div>
-          ) : listError ? (
-            <div className="h-48 flex items-center justify-center">
-              <span className="text-sm text-rose-500 font-medium">{t("common.loadError")}</span>
-            </div>
+          {listLoading && !podListData ? (
+            <DataState state="loading" onRetry={() => { void refetchPods() }} />
+          ) : listError && !podListData ? (
+            <DataState state="unavailable" onRetry={() => { void refetchPods() }} />
           ) : !selectedPodName ? (
             // Pod List Mode
             <div className="space-y-4">
+              {listError && <DataState state="stale" onRetry={() => { void refetchPods() }} />}
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-foreground">{t("governance.detail.pods")}</h3>
                 <span className="text-xs text-muted-foreground">Total: {pods.length}</span>
@@ -283,12 +280,15 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange, initi
                 </div>
               </div>
 
-              {detailLoading || !podDetail ? (
-                <div className="h-48 flex items-center justify-center">
-                  <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-                </div>
+              {detailLoading && !podDetail ? (
+                <DataState state="loading" onRetry={() => { void refetchDetail() }} />
+              ) : detailError && !podDetail ? (
+                <DataState state="unavailable" onRetry={() => { void refetchDetail() }} />
+              ) : !podDetail ? (
+                <DataState state="empty" />
               ) : (
                 <Tabs defaultValue="overview" className="w-full">
+                  {detailError && <div className="mb-3"><DataState state="stale" onRetry={() => { void refetchDetail() }} /></div>}
                   <TabsList className="grid grid-cols-4 w-full h-9 mb-4">
                     <TabsTrigger value="overview" className="text-xs">
                       {t("governance.detail.tab.overview")}
@@ -460,16 +460,15 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange, initi
 
                   {/* Events Tab */}
                   <TabsContent value="events" className="outline-none">
-                    {eventsLoading ? (
-                      <div className="h-32 flex items-center justify-center">
-                        <span className="text-xs text-muted-foreground animate-pulse">{t("common.loading")}</span>
-                      </div>
+                    {eventsLoading && !eventsData ? (
+                      <DataState state="loading" onRetry={() => { void refetchEvents() }} />
+                    ) : eventsError && !eventsData ? (
+                      <DataState state="unavailable" onRetry={() => { void refetchEvents() }} />
                     ) : events.length === 0 ? (
-                      <div className="h-32 bg-muted/20 border border-dashed rounded-lg flex flex-col items-center justify-center gap-1 px-4 text-center">
-                        <span className="text-sm text-muted-foreground">{t("governance.detail.events.empty")}</span>
-                        <span className="text-xs text-muted-foreground/70">{t("governance.detail.events.retentionHint")}</span>
-                      </div>
+                      <div className="space-y-2"><DataState state={eventsError ? "stale" : "empty"} onRetry={() => { void refetchEvents() }} />{!eventsError && <p className="text-center text-xs text-muted-foreground">{t("governance.detail.events.retentionHint")}</p>}</div>
                     ) : (
+                      <div className="space-y-2">
+                      {eventsError && <DataState state="stale" onRetry={() => { void refetchEvents() }} />}
                       <div className="border rounded-lg overflow-hidden bg-card">
                         <Table>
                           <TableHeader className="bg-muted/20">
@@ -504,6 +503,7 @@ export function ResourceDetailDrawer({ namespace, app, open, onOpenChange, initi
                             ))}
                           </TableBody>
                         </Table>
+                      </div>
                       </div>
                     )}
                   </TabsContent>

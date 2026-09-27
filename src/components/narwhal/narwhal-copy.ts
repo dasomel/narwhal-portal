@@ -2,7 +2,7 @@ import type { MascotState } from "@/types/api"
 import { t } from "@/lib/i18n"
 import type { Locale } from "@/lib/i18n"
 
-const VARIANT_COUNTS: Record<MascotState, number> = {
+export const VARIANT_COUNTS: Record<MascotState, number> = {
   healthy: 3,
   warning: 3,
   critical: 3,

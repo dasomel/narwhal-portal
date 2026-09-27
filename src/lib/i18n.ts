@@ -41,7 +41,6 @@ export const ko = {
 
   // argocd
   "argocd.title": "ArgoCD 앱 상태",
-  "argocd.error": "ArgoCD 연결 실패",
   "argocd.totalApps": "전체 {count}개 앱",
 
   // alerts
@@ -182,11 +181,9 @@ export const ko = {
   "dataState.unauthorized": "데이터에 접근할 권한이 없습니다.",
   "dataState.error": "데이터를 불러오지 못했습니다.",
   "dataState.updatedMinutes": "{count}분 전에 업데이트됨",
-  "common.loadError": "데이터를 불러올 수 없습니다",
 
   // certs table
   "certs.title": "TLS 인증서",
-  "certs.empty": "등록된 인증서 없음",
   "certs.name": "인증서명",
   "certs.namespace": "네임스페이스",
   "certs.dnsNames": "DNS 이름",
@@ -198,7 +195,6 @@ export const ko = {
 
   // policies table
   "policies.title": "Kyverno 정책",
-  "policies.empty": "등록된 정책 없음",
   "policies.name": "정책명",
   "policies.scope": "범위",
   "policies.action": "액션",
@@ -270,8 +266,6 @@ export const ko = {
   "catalog.revision": "리비전",
   "catalog.resources": "리소스",
   "catalog.lastDeploy": "최근 배포",
-  "catalog.empty": "등록된 서비스 없음",
-  "catalog.notFound": "서비스를 찾을 수 없습니다",
   "catalog.backToList": "목록으로 돌아가기",
   "catalog.relatedAlerts": "관련 알럿",
   "catalog.resourceList": "리소스 목록",
@@ -295,7 +289,6 @@ export const ko = {
   "events.description": "설명",
   "events.viewInCatalog": "카탈로그에서 보기",
   "events.checkAlertmanager": "Alertmanager에서 확인하세요",
-  "events.partialUnavailable": "알림 또는 이벤트 데이터를 불러오지 못했습니다.",
   "events.relative.justNow": "방금 전",
   "events.relative.minutesAgo": "{n}분 전",
   "events.relative.hoursAgo": "{n}시간 전",
@@ -323,14 +316,12 @@ export const ko = {
 
   // secrets table
   "secrets.title": "OpenBao 시크릿",
-  "secrets.empty": "시크릿 없음",
   "secrets.path": "경로",
   "secrets.keys": "키",
   "secrets.version": "버전",
   "secrets.created": "생성일",
   "secrets.updated": "수정일",
   "secrets.masked": "***",
-  "secrets.error": "시크릿 목록을 불러오지 못했습니다 — 잠시 후 다시 시도하세요",
 
   // namespace form
   "ns.title": "개발 네임스페이스",
@@ -374,7 +365,6 @@ export const ko = {
   "ns.createPending": "승인 대기 중",
   "ns.createError": "요청 실패",
   "ns.existing": "기존 네임스페이스",
-  "ns.empty": "네임스페이스 없음",
 
   // certs renew
   "certs.renew": "갱신",
@@ -431,8 +421,6 @@ export const ko = {
   "scorecard.alerting": "알럿",
   "scorecard.resources": "리소스",
   "scorecard.overall": "종합",
-  "scorecard.empty": "서비스 없음",
-  "scorecard.error": "ArgoCD 연결 실패 — 잠시 후 다시 시도하세요",
 
   // rbac
   "rbac.title": "RBAC 바인딩",
@@ -446,13 +434,11 @@ export const ko = {
   "rbac.forbidden": "cluster-admin 권한이 필요합니다",
   "rbac.cluster": "클러스터",
   "rbac.namespace": "네임스페이스",
-  "rbac.empty": "바인딩 없음",
 
   // resource chart
   "resources.title": "네임스페이스 리소스 현황",
   "resources.cpu": "CPU %",
   "resources.memory": "Memory %",
-  "resources.empty": "리소스 데이터 없음",
 
   // operational events (Kubernetes Events — NOT audit evidence; portal#16)
   "opEvents.title": "운영 이벤트",
@@ -464,7 +450,6 @@ export const ko = {
   "opEvents.detail": "상세",
   "opEvents.filterAll": "전체 네임스페이스",
   "opEvents.forbidden": "cluster-admin 권한이 필요합니다",
-  "opEvents.empty": "운영 이벤트 없음",
   "opEvents.detail.title": "운영 이벤트 상세",
   "opEvents.detail.firstSeen": "최초 발생",
   "opEvents.detail.lastSeen": "마지막 발생",
@@ -539,7 +524,6 @@ export const ko = {
   "governance.detail.events.message": "메시지",
   "governance.detail.events.count": "횟수",
   "governance.detail.events.lastSeen": "마지막 발생",
-  "governance.detail.events.empty": "최근 이벤트가 없습니다.",
   "governance.detail.events.retentionHint": "Kubernetes는 이벤트를 약 1시간만 보존합니다. 안정적으로 실행 중인 파드는 표시할 이벤트가 없을 수 있습니다.",
 
   // traces
@@ -551,7 +535,6 @@ export const ko = {
   "traces.duration": "소요시간",
   "traces.spans": "Spans",
   "traces.time": "시간",
-  "traces.empty": "트레이스 없음",
   "traces.viewInTempo": "Tempo에서 보기",
 
   // templates page
@@ -564,7 +547,6 @@ export const ko = {
   "templates.submitting": "생성 중...",
   "templates.preview": "생성 예정 리소스",
   "templates.required": "필수",
-  "templates.empty": "사용 가능한 템플릿 없음",
   "templates.successTitle": "생성 완료",
 
   // nodes
@@ -717,6 +699,7 @@ export const ko = {
   "narwhal.copy.critical.2": "narwhal이 걱정 중",
   "narwhal.copy.loading.0": "심연을 듣는 중…",
   "narwhal.copy.loading.1": "데이터를 끌어올리는 중…",
+  "scorecard.loadErrorConfigMap": "Scorecard 데이터를 불러올 수 없습니다. ConfigMap을 클러스터에 생성하세요.",
 
   // hero zone
   "hero.viewAll": "전체 보기 ({count}) →",
@@ -761,7 +744,6 @@ export const ko = {
   "security.runtime.priority": "심각도",
   "security.runtime.rule": "규칙",
   "security.forbidden": "cluster-admin 권한이 필요합니다",
-  "security.runtime.empty": "런타임 이벤트 없음 — Falco가 위협을 감지하면 여기에 표시됩니다",
   "security.runtimeEvents.unavailable2604": "런타임 보안(Falco)은 Ubuntu 26.04에서 지원되지 않습니다",
   "security.detail.title": "취약점 상세",
   "security.detail.cveId": "CVE ID",
@@ -826,7 +808,6 @@ export const ko = {
   "compliance.table.acceptedRbac": "수용(빌트인/업스트림)",
   "compliance.table.acceptedRbacHint": "K8s 빌트인 역할(system:*, cluster-admin 등) 또는 업스트림 컨트롤러/차트 소유 역할 — 조치 대상 아님",
   "compliance.table.rbacActionableSummary": "조치가능 {actionable}건 · 수용(빌트인/업스트림) {accepted}건",
-  "compliance.empty": "데이터 없음 — Trivy Operator scan 대기 중",
   "compliance.forbidden": "cluster-admin 권한이 필요합니다",
   "compliance.filter.severity": "심각도 필터",
   "compliance.filter.namespace": "네임스페이스 필터",
@@ -841,7 +822,6 @@ export const ko = {
   "compliance.detail.checks": "점검 목록",
   "compliance.tab.kisa": "KISA",
   "compliance.kisa.title": "KISA 보안 통제 점검",
-  "compliance.kisa.empty": "KISA 점검 데이터 없음",
   "compliance.kisa.col.id": "통제 ID",
   "compliance.kisa.col.domain": "도메인",
   "compliance.kisa.col.control": "통제",
@@ -910,7 +890,6 @@ export const ko = {
   "cost.notConfigured": "미구성",
   "cost.developmentPricing": "개발 환경 기본 단가가 사용 중입니다. 운영 배포에는 가격 구성이 필요합니다.",
   "cost.pricingUnavailable": "비용 단가 구성이 없어 비용 데이터를 표시할 수 없습니다.",
-  "cost.dataUnavailable": "비용 데이터를 불러올 수 없습니다. 잠시 후 다시 시도하세요.",
   "cost.namespace": "네임스페이스",
   "cost.service": "서비스",
   "cost.namespaceShort": "ns",
@@ -932,7 +911,6 @@ export const ko = {
   "scorecard.viewRules": "규칙 정의 보기",
   "scorecard.rulesTitle": "Scorecard 규칙 정의",
   "scorecard.noConfigMap": "규칙 ConfigMap이 클러스터에 없습니다.",
-  "scorecard.evaluating": "품질 점수 평가 중...",
   "scorecard.rulesMissing": "Scorecard 규칙이 클러스터에 정의되지 않았습니다. 운영팀에 문의하세요.",
   "scorecard.loadError": "품질 점수를 불러올 수 없습니다.",
   "scorecard.evaluatedAt": "{date} 평가",
@@ -950,7 +928,6 @@ export const ko = {
   "scorecard.owner": "Owner",
   "scorecard.points": "{count}점",
   "scorecard.viewRulesShort": "규칙 보기",
-  "scorecard.loadErrorConfigMap": "Scorecard 데이터를 불러올 수 없습니다. ConfigMap을 클러스터에 생성하세요.",
   "scorecard.qualityScore": "서비스 품질 점수",
   "scorecard.summaryText": "총 {total}개 서비스 · 룰 버전 {version} · {date} 평가",
   "scorecard.exportCsv": "CSV 내보내기",
@@ -1002,7 +979,6 @@ export const ko = {
   "svcMap.legend.normal": "정상",
   "svcMap.legend.warning": "경고 (1–5%)",
   "svcMap.legend.error": "오류 (>5%)",
-  "svcMap.loadError": "서비스 그래프를 불러오는 중 오류가 발생했습니다.",
   "svcMap.stats.services": "서비스:",
   "svcMap.stats.connections": "연결:",
   "svcMap.stats.unmapped": "* 미매핑 워크로드 포함",
@@ -1015,7 +991,6 @@ export const ko = {
   "svcDep.p95Latency": "p95 지연",
   "svcDep.noOutbound": "아웃바운드 호출 없음",
   "svcDep.targetService": "대상 서비스",
-  "svcDep.loadError": "의존성 정보를 불러오지 못했습니다.",
   "svcDep.noTraffic": "이 서비스에 대한 트래픽 데이터가 없습니다.",
   "svcDep.noIstioDesc": "Istio 사이드카가 주입되지 않은 워크로드는 의존성이 표시되지 않습니다.",
   "svcDep.inboundCall": "인바운드 호출",
@@ -1176,8 +1151,6 @@ export const ko = {
   "status.incidents.severity.critical": "긴급",
   "status.incidents.severity.warning": "경고",
   "status.incidents.componentNone": "전체 플랫폼",
-  "status.loading": "플랫폼 상태를 확인하는 중...",
-  "status.error": "플랫폼 상태를 불러오지 못했습니다",
   "status.generatedAt": "마지막 업데이트: {time}",
 
   // route-level error/loading fallbacks (issue #62)
@@ -1227,7 +1200,6 @@ export const en: Record<keyof typeof ko, string> = {
 
   // argocd
   "argocd.title": "ArgoCD App Status",
-  "argocd.error": "ArgoCD connection failed",
   "argocd.totalApps": "{count} apps total",
 
   // alerts
@@ -1368,11 +1340,9 @@ export const en: Record<keyof typeof ko, string> = {
   "dataState.unauthorized": "You are not authorized to access this data.",
   "dataState.error": "Could not load data.",
   "dataState.updatedMinutes": "Updated {count} min ago",
-  "common.loadError": "Failed to load data",
 
   // certs table
   "certs.title": "TLS Certificates",
-  "certs.empty": "No certificates found",
   "certs.name": "Certificate",
   "certs.namespace": "Namespace",
   "certs.dnsNames": "DNS Names",
@@ -1384,7 +1354,6 @@ export const en: Record<keyof typeof ko, string> = {
 
   // policies table
   "policies.title": "Kyverno Policies",
-  "policies.empty": "No policies found",
   "policies.name": "Policy",
   "policies.scope": "Scope",
   "policies.action": "Action",
@@ -1456,8 +1425,6 @@ export const en: Record<keyof typeof ko, string> = {
   "catalog.revision": "Revision",
   "catalog.resources": "Resources",
   "catalog.lastDeploy": "Last Deploy",
-  "catalog.empty": "No services found",
-  "catalog.notFound": "Service not found",
   "catalog.backToList": "Back to list",
   "catalog.relatedAlerts": "Related Alerts",
   "catalog.resourceList": "Resources",
@@ -1481,7 +1448,6 @@ export const en: Record<keyof typeof ko, string> = {
   "events.description": "Description",
   "events.viewInCatalog": "View in Catalog",
   "events.checkAlertmanager": "Check in Alertmanager",
-  "events.partialUnavailable": "Alert or event data is unavailable.",
   "events.relative.justNow": "just now",
   "events.relative.minutesAgo": "{n}m ago",
   "events.relative.hoursAgo": "{n}h ago",
@@ -1509,14 +1475,12 @@ export const en: Record<keyof typeof ko, string> = {
 
   // secrets table
   "secrets.title": "OpenBao Secrets",
-  "secrets.empty": "No secrets found",
   "secrets.path": "Path",
   "secrets.keys": "Keys",
   "secrets.version": "Version",
   "secrets.created": "Created",
   "secrets.updated": "Updated",
   "secrets.masked": "***",
-  "secrets.error": "Failed to load secrets — please try again later",
 
   // namespace form
   "ns.title": "Dev Namespaces",
@@ -1560,7 +1524,6 @@ export const en: Record<keyof typeof ko, string> = {
   "ns.createPending": "Awaiting approval",
   "ns.createError": "Request failed",
   "ns.existing": "Existing Namespaces",
-  "ns.empty": "No namespaces",
 
   // certs renew
   "certs.renew": "Renew",
@@ -1617,8 +1580,6 @@ export const en: Record<keyof typeof ko, string> = {
   "scorecard.alerting": "Alerting",
   "scorecard.resources": "Resources",
   "scorecard.overall": "Overall",
-  "scorecard.empty": "No services",
-  "scorecard.error": "ArgoCD connection failed — please try again later",
 
   // rbac
   "rbac.title": "RBAC Bindings",
@@ -1632,13 +1593,11 @@ export const en: Record<keyof typeof ko, string> = {
   "rbac.forbidden": "cluster-admin role required",
   "rbac.cluster": "Cluster",
   "rbac.namespace": "Namespace",
-  "rbac.empty": "No bindings",
 
   // resource chart
   "resources.title": "Namespace Resource Usage",
   "resources.cpu": "CPU %",
   "resources.memory": "Memory %",
-  "resources.empty": "No resource data",
 
   // operational events (Kubernetes Events — NOT audit evidence; portal#16)
   "opEvents.title": "Operational Events",
@@ -1650,7 +1609,6 @@ export const en: Record<keyof typeof ko, string> = {
   "opEvents.detail": "Detail",
   "opEvents.filterAll": "All Namespaces",
   "opEvents.forbidden": "cluster-admin role required",
-  "opEvents.empty": "No operational events",
   "opEvents.detail.title": "Operational Event Detail",
   "opEvents.detail.firstSeen": "First Seen",
   "opEvents.detail.lastSeen": "Last Seen",
@@ -1725,7 +1683,6 @@ export const en: Record<keyof typeof ko, string> = {
   "governance.detail.events.message": "Message",
   "governance.detail.events.count": "Count",
   "governance.detail.events.lastSeen": "Last Seen",
-  "governance.detail.events.empty": "No recent events.",
   "governance.detail.events.retentionHint": "Kubernetes retains events for only ~1 hour. A pod running stably may have no events to show.",
 
   // traces
@@ -1737,7 +1694,6 @@ export const en: Record<keyof typeof ko, string> = {
   "traces.duration": "Duration",
   "traces.spans": "Spans",
   "traces.time": "Time",
-  "traces.empty": "No traces",
   "traces.viewInTempo": "View in Tempo",
 
   // templates page
@@ -1750,7 +1706,6 @@ export const en: Record<keyof typeof ko, string> = {
   "templates.submitting": "Creating...",
   "templates.preview": "Resources to be created",
   "templates.required": "Required",
-  "templates.empty": "No templates available",
   "templates.successTitle": "Created",
 
   // nodes
@@ -1903,6 +1858,7 @@ export const en: Record<keyof typeof ko, string> = {
   "narwhal.copy.critical.2": "Your narwhal is worried",
   "narwhal.copy.loading.0": "Listening to the depths\u2026",
   "narwhal.copy.loading.1": "Surfacing data\u2026",
+  "scorecard.loadErrorConfigMap": "Failed to load Scorecard data. Create the ConfigMap in the cluster.",
 
   // hero zone
   "hero.viewAll": "View all ({count}) \u2192",
@@ -1947,7 +1903,6 @@ export const en: Record<keyof typeof ko, string> = {
   "security.runtime.priority": "Priority",
   "security.runtime.rule": "Rule",
   "security.forbidden": "cluster-admin role required",
-  "security.runtime.empty": "No runtime events — Falco-detected events will appear here",
   "security.runtimeEvents.unavailable2604": "Runtime security (Falco) is unavailable on Ubuntu 26.04",
   "security.detail.title": "Vulnerability Detail",
   "security.detail.cveId": "CVE ID",
@@ -2012,7 +1967,6 @@ export const en: Record<keyof typeof ko, string> = {
   "compliance.table.acceptedRbac": "Accepted (built-in/upstream)",
   "compliance.table.acceptedRbacHint": "Kubernetes built-in role (system:*, cluster-admin, etc.) or upstream controller/chart-owned role — not actionable",
   "compliance.table.rbacActionableSummary": "{actionable} actionable · {accepted} accepted (built-in/upstream)",
-  "compliance.empty": "No data — Trivy Operator scan pending",
   "compliance.forbidden": "cluster-admin role required",
   "compliance.filter.severity": "Severity filter",
   "compliance.filter.namespace": "Namespace filter",
@@ -2027,7 +1981,6 @@ export const en: Record<keyof typeof ko, string> = {
   "compliance.detail.checks": "Check List",
   "compliance.tab.kisa": "KISA",
   "compliance.kisa.title": "KISA Security Controls",
-  "compliance.kisa.empty": "No KISA check data",
   "compliance.kisa.col.id": "Control ID",
   "compliance.kisa.col.domain": "Domain",
   "compliance.kisa.col.control": "Control",
@@ -2096,7 +2049,6 @@ export const en: Record<keyof typeof ko, string> = {
   "cost.notConfigured": "Not configured",
   "cost.developmentPricing": "Development placeholder prices are in use. Production deployments require pricing configuration.",
   "cost.pricingUnavailable": "Cost data cannot be displayed because pricing is not configured.",
-  "cost.dataUnavailable": "Cost data is unavailable. Please try again shortly.",
   "cost.namespace": "Namespace",
   "cost.service": "Service",
   "cost.namespaceShort": "ns",
@@ -2118,7 +2070,6 @@ export const en: Record<keyof typeof ko, string> = {
   "scorecard.viewRules": "View Rule Definitions",
   "scorecard.rulesTitle": "Scorecard Rule Definitions",
   "scorecard.noConfigMap": "Rules ConfigMap is not found in the cluster.",
-  "scorecard.evaluating": "Evaluating quality scorecard...",
   "scorecard.rulesMissing": "Scorecard rules are not defined in the cluster. Please contact the operations team.",
   "scorecard.loadError": "Failed to load quality scorecard.",
   "scorecard.evaluatedAt": "Evaluated {date}",
@@ -2136,7 +2087,6 @@ export const en: Record<keyof typeof ko, string> = {
   "scorecard.owner": "Owner",
   "scorecard.points": "{count}pt",
   "scorecard.viewRulesShort": "View Rules",
-  "scorecard.loadErrorConfigMap": "Failed to load Scorecard data. Create the ConfigMap in the cluster.",
   "scorecard.qualityScore": "Service Quality Score",
   "scorecard.summaryText": "Total {total} services · Rule version {version} · Evaluated {date}",
   "scorecard.exportCsv": "Export CSV",
@@ -2188,7 +2138,6 @@ export const en: Record<keyof typeof ko, string> = {
   "svcMap.legend.normal": "Normal",
   "svcMap.legend.warning": "Warning (1-5%)",
   "svcMap.legend.error": "Error (>5%)",
-  "svcMap.loadError": "An error occurred while loading the service graph.",
   "svcMap.stats.services": "Services:",
   "svcMap.stats.connections": "Connections:",
   "svcMap.stats.unmapped": "* Includes unmapped workloads",
@@ -2201,7 +2150,6 @@ export const en: Record<keyof typeof ko, string> = {
   "svcDep.p95Latency": "p95 Latency",
   "svcDep.noOutbound": "No outbound calls",
   "svcDep.targetService": "Target Service",
-  "svcDep.loadError": "Failed to load dependencies.",
   "svcDep.noTraffic": "No traffic data for this service.",
   "svcDep.noIstioDesc": "Workloads without Istio sidecars will not display dependencies.",
   "svcDep.inboundCall": "Inbound Calls",
@@ -2362,8 +2310,6 @@ export const en: Record<keyof typeof ko, string> = {
   "status.incidents.severity.critical": "Critical",
   "status.incidents.severity.warning": "Warning",
   "status.incidents.componentNone": "Platform-wide",
-  "status.loading": "Checking platform status...",
-  "status.error": "Failed to load platform status",
   "status.generatedAt": "Last updated: {time}",
 
   // route-level error/loading fallbacks (issue #62)

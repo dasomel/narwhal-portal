@@ -4,8 +4,8 @@ import { useQuery } from "@tanstack/react-query"
 import { Narwhal } from "@/components/narwhal/narwhal"
 import { HeroSummary } from "./hero-summary"
 import { HeroRadar } from "./hero-radar"
-import { useT } from "@/lib/i18n-client"
 import type { HeroResponse } from "@/types/api"
+import { DataState } from "@/components/ui/data-state"
 
 // Wave SVG path from hero-content.html mockup
 function HeroWave() {
@@ -42,9 +42,7 @@ export function HeroZoneFromData({ data }: HeroZoneFromDataProps) {
 }
 
 export function HeroZone() {
-  const t = useT()
-
-  const { data, isLoading, error } = useQuery<HeroResponse>({
+  const { data, isLoading, isError, refetch } = useQuery<HeroResponse>({
     queryKey: ["hero"],
     queryFn: () => fetch("/api/hero").then((r) => r.json()),
     refetchInterval: 15_000,
@@ -60,17 +58,22 @@ export function HeroZone() {
     >
       <HeroWave />
 
-      {isLoading || error || !data ? (
+      {isLoading && !data ? (
         <div className="flex items-center gap-4">
           <Narwhal state="loading" size={120} />
-          <div className="text-[15px] text-text-secondary animate-pulse">
-            {t("narwhal.copy.loading.0")}
-          </div>
+          <DataState state="loading" onRetry={() => { void refetch() }} />
         </div>
-      ) : data.mode === "summary" ? (
+      ) : !data ? (
+        <DataState state={isError ? "unavailable" : "loading"} onRetry={() => { void refetch() }} />
+      ) : (
+        <>
+          {isError && <div className="mb-3"><DataState state="stale" onRetry={() => { void refetch() }} /></div>}
+          {data.mode === "summary" ? (
         <HeroSummary data={data} />
       ) : (
         <HeroRadar data={data} />
+          )}
+        </>
       )}
     </div>
   )

@@ -72,6 +72,15 @@ describe("DataState", () => {
     expect(onRetry).toHaveBeenCalledOnce()
   })
 
+  it("renders inline state with the same role and text without a border", () => {
+    const tree = DataState({ state: "unavailable", reason: "Details", variant: "inline" })
+    const alert = find(tree, (item) => item.props.role === "alert")
+    const outer = find(tree, (item) => item.type === "div")
+    expect(text(alert!)).toContain("The data provider is unavailable.")
+    expect(text(alert!)).toContain("Details")
+    expect(outer?.props.className).not.toContain("border")
+  })
+
   it("shows freshness when supplied as an observation timestamp", () => {
     const tree = DataState({ state: "ok", observedAt: new Date(1_000_000).toISOString(), now: 1_120_000 })
     expect(text(tree)).toContain("Updated 2 min ago")

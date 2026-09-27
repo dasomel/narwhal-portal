@@ -7,6 +7,7 @@ import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { DataState } from "@/components/ui/data-state"
 import { useT } from "@/lib/i18n-client"
 import type { ArgoApp } from "@/lib/argocd"
 import { PodLogsViewer } from "./pod-logs-viewer"
@@ -46,7 +47,7 @@ export function ServiceDetail() {
   const { name } = useParams<{ name: string }>()
   const [activeTab, setActiveTab] = useState<Tab>("overview")
 
-  const { data, isLoading, error } = useQuery<DetailResponse>({
+  const { data, isLoading, error, refetch } = useQuery<DetailResponse>({
     queryKey: ["catalog", name],
     queryFn: () => fetch(`/api/catalog/${name}`).then((r) => {
       if (!r.ok) throw new Error("Not found")
@@ -55,14 +56,14 @@ export function ServiceDetail() {
     refetchInterval: 15_000,
   })
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">{t("common.loading")}</div>
+  if (isLoading && !data) {
+    return <DataState state="loading" onRetry={() => { void refetch() }} />
   }
 
   if (error || !data) {
     return (
       <Card className="p-8 text-center">
-        <p className="text-muted-foreground">{t("catalog.notFound")}</p>
+        <DataState state="unavailable" onRetry={() => { void refetch() }} />
         <Link href="/catalog" className="text-blue-600 hover:underline text-sm mt-2 inline-block">
           {t("catalog.backToList")}
         </Link>

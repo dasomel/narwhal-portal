@@ -16,9 +16,10 @@ interface DataStateProps {
   reason?: string
   detailKey?: "costUnavailable" | "costPartial"
   className?: string
+  variant?: "banner" | "inline"
 }
 
-export function DataState({ state, onRetry, observedAt, now, freshnessSeconds, reason, detailKey, className }: DataStateProps) {
+export function DataState({ state, onRetry, observedAt, now, freshnessSeconds, reason, detailKey, className, variant = "banner" }: DataStateProps) {
   const t = useT()
   const content = (() => {
     switch (state) {
@@ -36,17 +37,18 @@ export function DataState({ state, onRetry, observedAt, now, freshnessSeconds, r
   const age = freshnessSeconds ?? (observedAt && now !== undefined ? Math.max(0, Math.floor((now - Date.parse(observedAt)) / 1000)) : undefined)
   const minutes = age === undefined ? undefined : Math.floor(age / 60)
 
+  const inline = variant === "inline"
   return (
-    <div className={`flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm ${state === "unavailable" || state === "error" || state === "unauthorized" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border bg-muted/30 text-foreground"} ${className ?? ""}`}>
+    <div className={`flex ${inline ? "items-center gap-1.5 whitespace-nowrap text-xs" : "flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm"} ${inline ? (state === "unavailable" || state === "error" || state === "unauthorized" ? "text-destructive" : "text-foreground") : (state === "unavailable" || state === "error" || state === "unauthorized" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border bg-muted/30 text-foreground")} ${className ?? ""}`}>
       <div role={content.role} className="flex items-center gap-2">
-        <Icon aria-hidden="true" className={`size-4 shrink-0 ${state === "loading" ? "animate-spin" : ""}`} />
+        <Icon aria-hidden="true" className={`${inline ? "size-3" : "size-4"} shrink-0 ${state === "loading" ? "animate-spin" : ""}`} />
         <span>{content.label}</span>
         {reason && <span>{reason}</span>}
         {detailKey === "costUnavailable" && <span>{t("cost.telemetryUnavailable")}</span>}
         {detailKey === "costPartial" && <span>{t("cost.telemetryPartial")}</span>}
       </div>
       {minutes !== undefined && <span className="text-xs text-muted-foreground">{t("dataState.updatedMinutes", { count: String(minutes) })}</span>}
-      {onRetry && <Button type="button" size="sm" variant="outline" onClick={onRetry}><RefreshCw aria-hidden="true" />{t("common.retry")}</Button>}
+      {onRetry && <Button type="button" size="sm" variant={inline ? "ghost" : "outline"} className={inline ? "h-auto border-0 bg-transparent px-1 py-0 text-xs shadow-none hover:bg-transparent" : undefined} onClick={onRetry}><RefreshCw aria-hidden="true" />{t("common.retry")}</Button>}
     </div>
   )
 }
