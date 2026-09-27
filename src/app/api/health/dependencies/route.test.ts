@@ -95,4 +95,16 @@ describe("GET /api/health/dependencies (portal#47)", () => {
 
     expect(json).toEqual(snapshot)
   })
+
+  it("re-probes a degraded snapshot on each admin request", async () => {
+    mockGetSnapshot.mockResolvedValue({
+      observedAt: "2026-09-27T00:00:00.000Z",
+      dependencies: [{ dependency: "kubernetes", state: "unavailable", observedAt: "2026-09-27T00:00:00.000Z" }],
+    })
+
+    await GET()
+    await GET()
+
+    expect(mockGetSnapshot).toHaveBeenCalledTimes(2)
+  })
 })

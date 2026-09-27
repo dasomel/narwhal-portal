@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle"
 import type { UserRole } from "@/lib/auth"
 import type { TranslationKey } from "@/lib/i18n"
 import { getAppVersion } from "@/lib/app-version"
+import { DependencyHealthIndicator } from "@/components/dependency-health-indicator"
 
 interface MenuItem {
   href: string
@@ -88,6 +89,7 @@ export function Nav() {
         </div>
       </div>
       <div className="flex items-center gap-3">
+        <DependencyHealthIndicator />
         <button
           onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
           className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"

@@ -256,6 +256,7 @@ export const cacheKeys = {
   // cluster-admin-only (same value for every admin) and the snapshot covers every
   // dependency in one key, not one per dependency.
   healthDependencies: () => "health:dependencies",
+  healthSummary: () => "health:summary",
 } as const
 
 /**
@@ -957,6 +958,17 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
       detail: "requireRole('cluster-admin')-gated; identical dependency topology snapshot for every cluster-admin.",
     },
   },
+  "health:summary": {
+    example: "health:summary",
+    dimensions: [],
+    ttlSeconds: 20,
+    owner: "src/lib/dependency-health.ts",
+    ownerPath: "src/app/api/health/summary/route.ts",
+    invalidation: "TTL only. Redacted aggregate shared by all authenticated users; failures are cached briefly to limit probe amplification.",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "cluster-wide-state", detail: "Same redacted aggregate for every authenticated user; contains no per-user data." },
+  },
   "keycloak:* / api:groups-enriched": {
     example: "keycloak:users | keycloak:groups | keycloak:groups-detailed | api:groups-enriched",
     dimensions: [],
@@ -1144,6 +1156,7 @@ export const BUILDER_CHECKS: Record<keyof typeof cacheKeys, BuilderCheck> = {
   k8sNode: { registryKey: "k8s:node", ttlSeconds: 30, args: ["node-1"], dimensionArgIndex: { query: 0 } },
 
   healthDependencies: { registryKey: "health:dependencies", ttlSeconds: 10, args: [], dimensionArgIndex: {} },
+  healthSummary: { registryKey: "health:summary", ttlSeconds: 20, args: [], dimensionArgIndex: {} },
 }
 
 /**

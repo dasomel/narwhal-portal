@@ -40,6 +40,7 @@ import {
   probeK8sDependency,
   probeValkeyDependency,
   getDependencyHealthSnapshot,
+  getDependencyHealthSummary,
 } from "./dependency-health"
 
 describe("dependency-health vocabulary mapping (portal#47)", () => {
@@ -318,5 +319,51 @@ describe("getDependencyHealthSnapshot: coalescing + success-only caching", () =>
 
     expect(snapshot.dependencies.find((item) => item.dependency === "valkey")?.state).toBe("ok")
     expect(mockCacheSet).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("getDependencyHealthSummary: bounded aggregate caching", () => {
+  const originalEnv = { ...process.env }
+
+  beforeEach(() => {
+    process.env = { ...originalEnv, PROMETHEUS_URL: "https://prometheus.narwhal.internal", ARGOCD_URL: "https://argocd.narwhal.internal", GITEA_URL: "https://gitea.narwhal.internal", KEYCLOAK_ISSUER: "https://keycloak.narwhal.internal", VALKEY_URL: "redis://valkey:6379" }
+    fakeCacheStore.clear()
+    mockCacheGet.mockClear()
+    mockCacheSet.mockClear()
+    mockPing.mockReset()
+    mockPing.mockResolvedValue("PONG")
+    mockLiveStreamStatus.mockReturnValue({ dependency: "valkey", state: "ok", observedAt: new Date().toISOString() })
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+    vi.unstubAllGlobals()
+  })
+
+  it("caches degraded summary across 10 sequential calls and stores only aggregate fields", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) =>
+      url.includes("argocd") ? Promise.reject(new Error("ECONNREFUSED")) : Promise.resolve({ ok: true, status: 200 } as Response)
+    ))
+
+    const results = []
+    for (let index = 0; index < 10; index += 1) results.push(await getDependencyHealthSummary())
+
+    expect(results.every((result) => result.state === "degraded")).toBe(true)
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(5)
+    const summaryEntry = fakeCacheStore.get("health:summary")
+    expect(summaryEntry).toEqual({ state: "degraded", observedAt: expect.any(String) })
+    expect(Object.keys(summaryEntry as object).sort()).toEqual(["observedAt", "state"])
+    expect(mockCacheSet).toHaveBeenCalledWith("health:summary", summaryEntry, 20)
+  })
+
+  it("coalesces concurrent summary cache misses", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      return url.includes("argocd") ? Promise.reject(new Error("ECONNREFUSED")) : { ok: true, status: 200 } as Response
+    }))
+
+    await Promise.all(Array.from({ length: 10 }, () => getDependencyHealthSummary()))
+
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(5)
   })
 })

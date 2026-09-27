@@ -13,6 +13,9 @@ export const ko = {
   "nav.onboarding": "온보딩",
   "nav.logout": "로그아웃",
   "nav.versionLabel": "포털 버전 및 커밋",
+  "healthSummary.ok": "모든 시스템 정상",
+  "healthSummary.degraded": "저하됨",
+  "healthSummary.unavailable": "사용 불가",
 
   // login
   "login.welcome": "Internal Developer Platform에 오신 것을 환영합니다",
@@ -1190,6 +1193,9 @@ export const en: Record<keyof typeof ko, string> = {
   "nav.onboarding": "Onboarding",
   "nav.logout": "Logout",
   "nav.versionLabel": "Portal version and commit",
+  "healthSummary.ok": "All systems normal",
+  "healthSummary.degraded": "Degraded",
+  "healthSummary.unavailable": "Unavailable",
 
   // login
   "login.welcome": "Welcome to Internal Developer Platform",
