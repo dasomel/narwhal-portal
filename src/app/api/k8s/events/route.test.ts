@@ -8,14 +8,14 @@ import type { NamespaceInfo, ResourceEvent } from "@/lib/k8s-client"
 // namespaceVisible. See src/app/api/k8s/pods/route.test.ts for the mocking rationale
 // (auth mocked wholesale; scope.ts left real).
 vi.mock("@/lib/auth", () => ({ auth: vi.fn() }))
-vi.mock("@/lib/valkey", () => ({ cacheGet: vi.fn(), cacheSet: vi.fn() }))
+vi.mock("@/lib/valkey", () => ({ cacheGet: vi.fn(), cacheGetWithMeta: vi.fn(), cacheSet: vi.fn() }))
 vi.mock("@/lib/k8s-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/k8s-client")>()
   return { ...actual, getNamespaces: vi.fn(), getResourceEvents: vi.fn() }
 })
 
 const { auth } = await import("@/lib/auth")
-const { cacheGet, cacheSet } = await import("@/lib/valkey")
+const { cacheGet, cacheGetWithMeta, cacheSet } = await import("@/lib/valkey")
 const { getNamespaces, getResourceEvents } = await import("@/lib/k8s-client")
 const { GET } = await import("./route")
 
@@ -51,6 +51,7 @@ beforeEach(() => {
   vi.mocked(getNamespaces).mockResolvedValue(namespaces)
   vi.mocked(getResourceEvents).mockResolvedValue(events)
   vi.mocked(cacheGet).mockResolvedValue(null)
+  vi.mocked(cacheGetWithMeta).mockResolvedValue(null)
   vi.mocked(cacheSet).mockResolvedValue(undefined)
 })
 
@@ -69,7 +70,18 @@ describe("GET /api/k8s/events — scope enforcement", () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.events).toEqual(events)
+    expect(body.freshness.source).toBe("live")
     expect(getResourceEvents).toHaveBeenCalledWith("platform-system", "pod-1")
+  })
+
+  it("reports the original capture time for cached events", async () => {
+    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    vi.mocked(cacheGetWithMeta).mockResolvedValueOnce({
+      value: events, cachedAt: "2026-09-27T00:00:00.000Z", ageSeconds: 86_400,
+    })
+    const body = await (await GET(req("platform-system"))).json()
+    expect(body.freshness).toEqual({ source: "cache", observedAt: "2026-09-27T00:00:00.000Z" })
+    expect(body.events).toEqual(events)
   })
 
   it("401s an unauthenticated caller", async () => {

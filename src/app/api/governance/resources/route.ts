@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { queryVector, getClusterMetrics } from "@/lib/prometheus"
 import { getNamespaces, getAllPodsMinimal } from "@/lib/k8s-client"
-import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheGetWithMeta, cacheSet } from "@/lib/valkey"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 
@@ -34,6 +34,7 @@ export interface NoRequestPod {
 }
 
 export interface ResourcesResponseV2 {
+  freshness: { source: "cache" | "live"; observedAt: string | null }
   namespaces: NamespaceUsageV2[]
   topCpuPods: TopPod[]        // top 10 by cpu usage, cluster-wide (exclude kube-*)
   topMemPods: TopPod[]        // top 10 by memory
@@ -78,8 +79,8 @@ export async function GET() {
   const scope = await getEffectiveScope(session)
   const cacheKey = cacheKeys.governanceResourcesV3(scope.fingerprint)
   try {
-    const cached = await cacheGet<ResourcesResponseV2>(cacheKey)
-    if (cached) return NextResponse.json(cached)
+    const cached = await cacheGetWithMeta<ResourcesResponseV2>(cacheKey)
+    if (cached) return NextResponse.json({ ...cached.value, freshness: { source: "cache" as const, observedAt: cached.cachedAt } })
   } catch (err) {
     console.warn("[governance/resources] Cache read failed (non-fatal):", err)
   }
@@ -255,6 +256,7 @@ export async function GET() {
         })()
 
     const response: ResourcesResponseV2 = {
+      freshness: { source: "live", observedAt: new Date().toISOString() },
       namespaces: resultNamespaces,
       topCpuPods,
       topMemPods,

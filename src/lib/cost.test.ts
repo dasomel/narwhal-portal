@@ -5,6 +5,10 @@ const cacheStore = new Map<string, unknown>()
 
 vi.mock("./valkey", () => ({
   cacheGet: vi.fn(async (key: string) => cacheStore.get(key) ?? null),
+  cacheGetWithMeta: vi.fn(async (key: string) => {
+    const value = cacheStore.get(key)
+    return value === undefined ? null : { value, cachedAt: null, ageSeconds: null }
+  }),
   cacheSet: vi.fn(async (key: string, value: unknown) => {
     cacheStore.set(key, value)
   }),
@@ -14,7 +18,7 @@ vi.mock("./k8s-client", () => ({
   getNamespaces: vi.fn(),
 }))
 
-const { cacheGet, cacheSet } = await import("./valkey")
+const { cacheSet } = await import("./valkey")
 const { getNamespaces } = await import("./k8s-client")
 const { getEffectiveScope } = await import("./scope")
 const { scopeFingerprint } = await import("./role-filter")
@@ -221,7 +225,9 @@ describe("cost cache multi-cluster and cross-scope isolation (Portal #64)", () =
     const fetchSpy = vi.mocked(global.fetch)
     fetchSpy.mockClear()
     const cachedClusterA = await getCost("namespace", scopeClusterA)
-    expect(cachedClusterA).toEqual(clusterAResult)
+    expect(cachedClusterA.items).toEqual(clusterAResult.items)
+    expect(cachedClusterA.telemetry.queriedAt).toBe(clusterAResult.telemetry.queriedAt)
+    expect(cachedClusterA.freshnessSource).toBe("cache")
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 

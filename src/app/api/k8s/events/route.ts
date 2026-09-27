@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { getResourceEvents, ResourceEvent } from "@/lib/k8s-client"
-import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheGetWithMeta, cacheSet } from "@/lib/valkey"
 import { ValidationError, toValidationErrorBody, assertK8sNamespace } from "@/lib/validation"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic"
 
 export interface ResourceEventsResponse {
   events: ResourceEvent[]
+  freshness: { source: "cache" | "live"; observedAt: string | null }
 }
 
 export async function GET(req: NextRequest) {
@@ -50,9 +51,9 @@ export async function GET(req: NextRequest) {
 
   const cacheKey = cacheKeys.k8sEvents(namespace, name)
   try {
-    const cached = await cacheGet<ResourceEvent[]>(cacheKey)
+    const cached = await cacheGetWithMeta<ResourceEvent[]>(cacheKey)
     if (cached) {
-      return NextResponse.json<ResourceEventsResponse>({ events: cached })
+      return NextResponse.json<ResourceEventsResponse>({ events: cached.value, freshness: { source: "cache", observedAt: cached.cachedAt } })
     }
   } catch (err) {
     console.warn("[k8s-events-api] Cache lookup failed:", err)
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest) {
       console.warn("[k8s-events-api] Cache save failed:", err)
     }
 
-    return NextResponse.json<ResourceEventsResponse>({ events })
+    return NextResponse.json<ResourceEventsResponse>({ events, freshness: { source: "live", observedAt: new Date().toISOString() } })
   } catch (err) {
     if (err instanceof ValidationError) {
       return NextResponse.json(toValidationErrorBody(err), { status: 400 })

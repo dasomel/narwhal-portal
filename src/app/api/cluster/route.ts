@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
-import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheGetWithMeta, cacheSet } from "@/lib/valkey"
 import { getCluster, resolveClusterCredentials, clusterCacheKey, DEFAULT_CLUSTER_ID } from "@/lib/cluster-registry"
 
 export const dynamic = "force-dynamic"
 
 export interface ClusterInfra {
+  freshness: { source: "cache" | "live"; observedAt: string | null }
   nodes: Array<{
     name: string
     status: "Ready" | "NotReady"
@@ -137,8 +138,8 @@ export async function GET(request: NextRequest) {
   const token = credentials?.token ?? ""
 
   const cacheKey = clusterCacheKey(clusterId, "infra")
-  const cached = await cacheGet<ClusterInfra>(cacheKey)
-  if (cached) return NextResponse.json(cached)
+  const cached = await cacheGetWithMeta<ClusterInfra>(cacheKey)
+  if (cached) return NextResponse.json({ ...cached.value, freshness: { source: "cache", observedAt: cached.cachedAt } })
 
   try {
     type NodeList = {
@@ -277,6 +278,7 @@ export async function GET(request: NextRequest) {
     const totalPods = allPods.length
 
     const result: ClusterInfra = {
+      freshness: { source: "live", observedAt: new Date().toISOString() },
       nodes,
       controlPlane,
       namespaces,
