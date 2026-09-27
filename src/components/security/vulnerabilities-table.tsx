@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button"
 import type { WorkloadVulnRow, ImageVulnReport, Severity } from "@/types/security"
 import { SEVERITIES, severityBadgeClass } from "@/components/security/severity"
+import { DataState } from "@/components/ui/data-state"
 
 const PAGE_SIZE = 20
 
@@ -170,7 +171,7 @@ export function VulnerabilitiesTable({ initialData }: Props) {
     return params.toString()
   }, [severity, namespace])
 
-  const { data: rows = [], isLoading } = useQuery<WorkloadVulnRow[]>({
+  const { data: rows = [], isLoading, isError, refetch } = useQuery<WorkloadVulnRow[]>({
     queryKey: ["security-vulnerabilities", severity, namespace],
     queryFn: () =>
       fetch(`/api/security/vulnerabilities?${queryParamStr}`).then((r) => r.json()),
@@ -298,13 +299,11 @@ export function VulnerabilitiesTable({ initialData }: Props) {
 
       <Card className="p-0 overflow-hidden">
         {isLoading ? (
-          <div className="h-40 flex items-center justify-center">
-            <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-          </div>
+          <DataState state="loading" onRetry={() => { void refetch() }} />
+        ) : isError ? (
+          <DataState state="unavailable" onRetry={() => { void refetch() }} />
         ) : pageRows.length === 0 ? (
-          <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">
-            {t("security.empty")}
-          </div>
+          <DataState state="empty" />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

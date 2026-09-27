@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ResourceDetailDrawer } from "./resource-detail-drawer"
 import type { DistributionResponse } from "./types"
+import { DataState } from "@/components/ui/data-state"
 
 const severityBadgeClass = {
   high: "bg-orange-100 text-orange-700 dark:bg-orange-950/50 dark:text-orange-400",
@@ -42,7 +43,7 @@ export function DistributionView() {
   const [isDrilldownOpen, setIsDrilldownOpen] = useState(false)
   const [selectedPodForDrawer, setSelectedPodForDrawer] = useState<{ namespace: string; pod: string } | null>(null)
 
-  const { data, isLoading, error } = useQuery<DistributionResponse>({
+  const { data, isLoading, error, refetch } = useQuery<DistributionResponse>({
     queryKey: ["governance-distribution"],
     queryFn: () => fetch("/api/governance/distribution").then((r) => {
       if (!r.ok) throw new Error("Failed to fetch distribution data")
@@ -53,17 +54,13 @@ export function DistributionView() {
 
   if (isLoading) {
     return (
-      <div className="h-64 flex items-center justify-center text-xs text-muted-foreground animate-pulse">
-        {t("common.loading")}
-      </div>
+      <DataState state="loading" onRetry={() => { void refetch() }} />
     )
   }
 
   if (error || !data) {
     return (
-      <div className="h-64 flex items-center justify-center text-xs text-red-500 font-medium">
-        Failed to load workload distribution details.
-      </div>
+      <DataState state="error" onRetry={() => { void refetch() }} />
     )
   }
 

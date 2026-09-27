@@ -4,6 +4,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { MetricCard } from "./metric-card"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface ClusterMetrics {
   cpu: number | null
@@ -14,7 +15,7 @@ interface ClusterMetrics {
 
 export function ClusterMetrics() {
   const t = useT()
-  const { data, isLoading, isError } = useQuery<ClusterMetrics>({
+  const { data, isLoading, isError, refetch } = useQuery<ClusterMetrics>({
     queryKey: ["metrics"],
     queryFn: () => fetch("/api/metrics").then((r) => r.json()),
     refetchInterval: 30_000,
@@ -22,21 +23,13 @@ export function ClusterMetrics() {
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[t("metrics.cpu"), t("metrics.memory"), t("metrics.nodes"), t("metrics.pods")].map((title) => (
-          <MetricCard key={title} title={title} value={null} color="default" />
-        ))}
-      </div>
+      <DataState state="loading" onRetry={() => { void refetch() }} />
     )
   }
 
   if (isError) {
     return (
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[t("metrics.cpu"), t("metrics.memory"), t("metrics.nodes"), t("metrics.pods")].map((title) => (
-          <MetricCard key={title} title={title} value={t("common.loadError")} color="default" />
-        ))}
-      </div>
+      <DataState state="error" onRetry={() => { void refetch() }} />
     )
   }
 

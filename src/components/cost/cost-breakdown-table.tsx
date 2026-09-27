@@ -8,6 +8,8 @@ import { useState, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
+import { CostTelemetryState } from "@/components/cost/cost-overview"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -44,6 +46,7 @@ interface CostExclusions {
 
 interface CostTelemetry {
   state: "ok" | "empty" | "unavailable" | "partial" | "ambiguous" | "stale"
+  queriedAt?: string
 }
 
 interface CostResponse {
@@ -78,7 +81,7 @@ export function CostBreakdownTable() {
   const [sortKey, setSortKey] = useState<SortKey>("monthly")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
-  const { data, isLoading, error } = useQuery<CostResponse>({
+  const { data, isLoading, error, refetch } = useQuery<CostResponse>({
     queryKey: ["cost", scopeView],
     queryFn: async () => {
       const response = await fetch(`/api/cost?scope=${scopeView}`)
@@ -157,15 +160,7 @@ export function CostBreakdownTable() {
         {/* 크리틱 리뷰 #4: partial/unavailable을 notice 유무와 무관하게 명시적 배너로
             보여준다 — 이전에는 items가 비어 있을 때만 텍스트를 바꿨고, partial처럼
             items가 채워져 있는 degraded 상태는 아예 표시되지 않았다. */}
-        {data?.telemetry?.state === "unavailable" ? (
-          <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {t("cost.telemetryUnavailable")}
-          </div>
-        ) : data?.telemetry?.state === "partial" ? (
-          <p className="mt-2 text-xs text-yellow-700 dark:text-yellow-400">
-            {t("cost.telemetryPartial")}
-          </p>
-        ) : null}
+        <CostTelemetryState state={data?.telemetry} onRetry={() => { void refetch() }} />
         {data?.notice && (
           <p className="mt-2 text-xs text-yellow-700 dark:text-yellow-400">
             {data.notice}
@@ -195,21 +190,11 @@ export function CostBreakdownTable() {
       </CardHeader>
       <CardContent className="pt-0">
         {isLoading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="h-10 w-full animate-pulse rounded bg-muted" />
-            ))}
-          </div>
+          <DataState state="loading" onRetry={() => { void refetch() }} />
         ) : error ? (
-          <div className="py-12 text-center text-sm text-destructive">
-            {t("cost.dataUnavailable")}
-          </div>
+          <DataState state="error" onRetry={() => { void refetch() }} />
         ) : sorted.length === 0 ? (
-          <div className="py-12 text-center text-sm text-muted-foreground">
-            {data?.telemetry?.state === "unavailable"
-              ? t("cost.telemetryUnavailable")
-              : t("cost.noDataPrometheus")}
-          </div>
+          <DataState state={data?.telemetry?.state === "unavailable" ? "unavailable" : "empty"} onRetry={() => { void refetch() }} />
         ) : (
           <Table>
             <TableHeader>

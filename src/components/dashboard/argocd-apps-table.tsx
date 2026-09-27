@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useT } from "@/lib/i18n-client"
 import { useRole } from "@/hooks/use-role"
 import type { ArgoCDResponse, ArgoCDApp } from "@/types/api"
+import { DataState } from "@/components/ui/data-state"
 
 // @deprecated — see docs/superpowers/specs/2026-04-17-dashboard-narwhal-redesign-design.md §5.3
 // (old argocd-status.tsx is replaced by this component)
@@ -73,7 +74,7 @@ export function ArgoCDAppsTable({ apps: propApps }: ArgoCDAppsTableProps = {}) {
   const { can } = useRole()
   const queryClient = useQueryClient()
 
-  const { data, isLoading, error } = useQuery<ArgoCDResponse>({
+  const { data, isLoading, error, refetch } = useQuery<ArgoCDResponse>({
     queryKey: ["argocd"],
     queryFn: () => fetch("/api/argocd").then((r) => r.json()),
     refetchInterval: 15_000,
@@ -92,17 +93,13 @@ export function ArgoCDAppsTable({ apps: propApps }: ArgoCDAppsTableProps = {}) {
 
   if (propApps === undefined && isLoading) {
     return (
-      <Card className="p-4 h-36 flex items-center justify-center" >
-        <span className="text-sm text-text-secondary animate-pulse">{t("common.loading")}</span>
-      </Card>
+      <DataState state="loading" onRetry={() => { void refetch() }} />
     )
   }
 
   if (propApps === undefined && (error || !data)) {
     return (
-      <Card className="p-4" >
-        <span className="text-sm text-narwhal-danger">{t("argocd.error")}</span>
-      </Card>
+      <DataState state="unavailable" onRetry={() => { void refetch() }} />
     )
   }
 

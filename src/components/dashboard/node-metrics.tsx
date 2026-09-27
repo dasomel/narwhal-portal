@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface NodeMetric {
   node: string
@@ -86,7 +87,7 @@ export function NodeMetrics() {
   const [sortKey, setSortKey] = useState<SortKey>("node")
   const [sortDir, setSortDir] = useState<SortDir>("asc")
 
-  const { data, isLoading } = useQuery<MetricsResponse>({
+  const { data, isLoading, isError, refetch } = useQuery<MetricsResponse>({
     queryKey: ["metrics"],
     queryFn: () => fetch("/api/metrics").then((r) => r.json()),
     refetchInterval: 30_000,
@@ -119,11 +120,11 @@ export function NodeMetrics() {
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <div className="h-48 bg-muted/50 rounded flex items-center justify-center">
-            <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-          </div>
+          <DataState state="loading" onRetry={() => { void refetch() }} />
+        ) : isError ? (
+          <DataState state="error" onRetry={() => { void refetch() }} />
         ) : !nodes || nodes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("nodeMetrics.noData")}</p>
+          <DataState state="empty" />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
