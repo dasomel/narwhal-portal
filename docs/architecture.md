@@ -69,7 +69,26 @@ matching dimension, and no namespace caches a failed/partial provider fetch.
 (`KEYCLOAK_CACHE_KEYS`, already centralized per #49) own their own key construction and are
 referenced in the registry for completeness rather than migrated into this module.
 
+## Live event pipeline
+
+The live event path stores a bounded replay ring in Valkey and publishes each event on a
+dedicated pub/sub channel. The SSE route subscribes before reading the replay snapshot, then
+uses the snapshot's high-water ID to discard overlap between replay and live delivery.
+
+| Condition | Behavior |
+|---|---|
+| Cursor is retained | Replay events strictly after the cursor, then continue live delivery |
+| Cursor predates the retained ring | Send `replay-gap` with `state: "gap"`; the client must refresh its snapshot |
+| Cursor cannot be established | Send `replay-gap` with `state: "unknown"`; the client must refresh its snapshot |
+| Valkey is unavailable | Keep a process-local ring and IDs for best-effort delivery; events can be lost on restart or replica change |
+
+The Valkey replay ring retains the newest 1,000 events. Ordering and replay boundaries use
+only the integer from the shared Valkey `INCR` counter. If `INCR` fails, the publisher uses a
+`d-<epoch-ms>-<local-seq>` ID and still attempts to persist and publish the event. Degraded IDs
+are non-comparable with shared counters; they replay only when the exact ID is still in the
+same process's in-memory ring. Other degraded cursors are reported as `unknown`. Client abort
+signals end the subscription and release its pub/sub listener and connection.
+
 ## Relationship to Narwhal
 
 This repository owns portal code and packaging. The [Narwhal repository](https://github.com/dasomel/narwhal) owns cluster provisioning, GitOps applications, gateways, identity and platform services. A new cluster capability therefore needs a portal contract here and deployment/configuration in Narwhal separately.
-

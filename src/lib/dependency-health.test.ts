@@ -4,6 +4,7 @@ const mockGetK8sApiServer = vi.fn(() => "https://kubernetes.default.svc")
 const mockGetK8sBearerToken = vi.fn(() => "test-token")
 const mockInvalidateK8sBearerToken = vi.fn()
 const mockPing = vi.fn()
+const mockLiveStreamStatus = vi.fn((): { dependency: "valkey"; state: "ok" | "partial"; observedAt: string; reason?: string } => ({ dependency: "valkey", state: "ok", observedAt: new Date().toISOString() }))
 
 // In-memory stand-in for Valkey's cache, so getDependencyHealthSnapshot's cache read/write can
 // be asserted deterministically without a real Redis connection.
@@ -28,6 +29,7 @@ vi.mock("./valkey", () => ({
   cacheGet: (key: string) => mockCacheGet(key),
   cacheSet: (key: string, value: unknown, ttl: number) => mockCacheSet(key, value, ttl),
 }))
+vi.mock("./live-stream", () => ({ getLiveStreamStatus: () => mockLiveStreamStatus() }))
 
 import {
   fromTelemetryStatus,
@@ -235,6 +237,7 @@ describe("getDependencyHealthSnapshot: coalescing + success-only caching", () =>
     mockCacheSet.mockClear()
     mockPing.mockReset()
     mockPing.mockResolvedValue("PONG")
+    mockLiveStreamStatus.mockReturnValue({ dependency: "valkey", state: "ok", observedAt: new Date().toISOString() })
   })
 
   afterEach(() => {
@@ -300,5 +303,20 @@ describe("getDependencyHealthSnapshot: coalescing + success-only caching", () =>
     await getDependencyHealthSnapshot()
 
     expect(mockCacheSet).not.toHaveBeenCalled()
+  })
+
+  it("ignores an expired local live-stream degradation when the Valkey probe succeeds", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response))
+    mockLiveStreamStatus.mockReturnValue({
+      dependency: "valkey",
+      state: "partial",
+      observedAt: new Date(Date.now() - 31_000).toISOString(),
+      reason: "persistence_failure",
+    })
+
+    const snapshot = await getDependencyHealthSnapshot()
+
+    expect(snapshot.dependencies.find((item) => item.dependency === "valkey")?.state).toBe("ok")
+    expect(mockCacheSet).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth"
-import { getRecentEvents, subscribeLive } from "@/lib/live-stream"
+import { compareLiveEventIds, subscribeLiveWithReplay } from "@/lib/live-stream"
 import { getEffectiveScope } from "@/lib/scope"
 import { isEventFiltered } from "@/lib/event-visibility"
 import type { LiveEvent } from "@/types/live"
@@ -9,11 +9,12 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 const HEARTBEAT_MS = 30_000
-const DEFAULT_REPLAY = 50
-const MAX_EVENTS_REPLAY = 1000
-
 function formatSSE(event: LiveEvent): string {
   return `id: ${event.id}\nevent: live\ndata: ${JSON.stringify(event)}\n\n`
+}
+
+function formatControl(type: string, data: unknown): string {
+  return `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`
 }
 
 export async function GET(request: Request) {
@@ -49,18 +50,15 @@ export async function GET(request: Request) {
       enqueue("retry: 5000\n\n")
       enqueue(": connected\n\n")
 
-      const fetchLimit = lastEventId ? MAX_EVENTS_REPLAY : DEFAULT_REPLAY
-      const recent = await getRecentEvents(fetchLimit)
-      // getRecentEvents returns newest-first; reverse to send oldest first.
-      const ordered = recent.reverse()
-
-      let replaySlice: LiveEvent[]
-      if (lastEventId) {
-        const idx = ordered.findIndex((e) => e.id === lastEventId)
-        replaySlice = idx >= 0 ? ordered.slice(idx + 1) : ordered.slice(-DEFAULT_REPLAY)
-      } else {
-        replaySlice = ordered
+      const setup = await subscribeLiveWithReplay(lastEventId ?? undefined, request.signal)
+      if (lastEventId && setup.replay) {
+        if (setup.replay.gap) enqueue(formatControl("replay-gap", { after: lastEventId, state: "gap" }))
+        if (setup.replay.unknown) enqueue(formatControl("replay-gap", { after: lastEventId, state: "unknown" }))
       }
+      enqueue(formatControl("status", setup.status))
+      const replaySlice = setup.replay?.events ?? []
+      const replayedIds = new Set(replaySlice.map((event) => event.id))
+      const replayHighWaterId = replaySlice.map((event) => event.id).filter((id) => /^\d+$/.test(id)).at(-1)
 
       for (const event of replaySlice) {
         if (!isEventFiltered(event, role, scope)) {
@@ -87,6 +85,7 @@ export async function GET(request: Request) {
         }
       }
       request.signal.addEventListener("abort", cleanup)
+      if (request.signal.aborted) cleanup()
 
       // Consume live pub/sub in the background. If it ends or throws (e.g. Valkey
       // pub/sub unavailable / degraded), DO NOT close the stream — the heartbeat
@@ -96,14 +95,19 @@ export async function GET(request: Request) {
       // seconds ("reconnecting" forever) even though Valkey was healthy.
       void (async () => {
         try {
-          for await (const event of subscribeLive()) {
+          for await (const event of setup.live) {
             if (request.signal.aborted) break
+            if (/^\d+$/.test(event.id)) {
+              if (replayHighWaterId && compareLiveEventIds(event.id, replayHighWaterId) !== 1) continue
+            } else {
+              if (replayedIds.has(event.id)) continue
+            }
             if (!isEventFiltered(event, role, scope)) {
               enqueue(formatSSE(event))
             }
           }
         } catch {
-          // pub/sub unavailable — heartbeat keeps the connection alive
+          enqueue(formatControl("status", { dependency: "valkey", state: "partial", observedAt: new Date().toISOString(), reason: "subscription_failure" }))
         }
       })()
     },
