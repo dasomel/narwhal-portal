@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Card } from "@/components/ui/card"
+import { DataState } from "@/components/ui/data-state"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useT, useLocale } from "@/lib/i18n-client"
 import type { Locale } from "@/lib/i18n"
@@ -78,7 +79,6 @@ function AlertDetail({
   canSilence: boolean
 }) {
   const t = useT()
-  const alertname = alert.labels.alertname ?? "Alert"
   const runbook = alert.annotations.runbook_url ?? alert.annotations.runbook
 
   return (
@@ -159,7 +159,7 @@ export function ActivityFeed() {
 
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null)
 
-  const { data: alerts = [], isError: alertsError, refetch: refetchAlerts } = useQuery<Alert[]>({
+  const { data: alertData, isLoading: alertsLoading, isError: alertsError, refetch: refetchAlerts } = useQuery<Alert[]>({
     queryKey: ["alerts"],
     queryFn: () =>
       fetch("/api/alerts")
@@ -168,7 +168,7 @@ export function ActivityFeed() {
     refetchInterval: 15_000,
   })
 
-  const { data: events = [], isError: eventsError, refetch: refetchEvents } = useQuery<TimelineEvent[]>({
+  const { data: eventData, isLoading: eventsLoading, isError: eventsError, refetch: refetchEvents } = useQuery<TimelineEvent[]>({
     queryKey: ["events"],
     queryFn: () =>
       fetch("/api/events")
@@ -176,6 +176,9 @@ export function ActivityFeed() {
         .then((d) => (Array.isArray(d) ? d : [])),
     refetchInterval: 30_000,
   })
+
+  const alerts = alertData ?? []
+  const events = eventData ?? []
 
   const silenceMutation = useMutation({
     mutationFn: (alertname: string) =>
@@ -219,22 +222,24 @@ export function ActivityFeed() {
         <div className="px-4 pt-4 pb-2">
           <h3 className="text-[13px] font-semibold text-foreground">⚡ Activity Feed</h3>
         </div>
-        {(alertsError || eventsError) && (
-          <div className="mx-4 mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            <span>{t("events.partialUnavailable")}</span>
-            <button
-              className="ml-2 underline underline-offset-2"
-              onClick={() => {
-                if (alertsError) void refetchAlerts()
-                if (eventsError) void refetchEvents()
-              }}
-            >
-              {t("common.retry")}
-            </button>
-          </div>
+        {(alertsError || eventsError) && feed.length > 0 && (
+          <div className="mx-4 mb-3"><DataState state="partial" onRetry={() => {
+            if (alertsError) void refetchAlerts()
+            if (eventsError) void refetchEvents()
+          }} /></div>
         )}
-        {feed.length === 0 ? (
-          <div className="px-4 pb-4 text-[13px] text-muted-foreground">{t("events.empty")}</div>
+        {alertsError && eventsError && feed.length === 0 ? (
+          <div className="mx-4 mb-4"><DataState state="unavailable" onRetry={() => {
+            void refetchAlerts()
+            void refetchEvents()
+          }} /></div>
+        ) : alertsLoading && eventsLoading && feed.length === 0 ? (
+          <div className="mx-4 mb-4"><DataState state="loading" /></div>
+        ) : feed.length === 0 ? (
+          alertsError || eventsError ? <div className="mx-4 mb-4"><DataState state="partial" onRetry={() => {
+            if (alertsError) void refetchAlerts()
+            if (eventsError) void refetchEvents()
+          }} /></div> : <div className="mx-4 mb-4"><DataState state="empty" /></div>
         ) : (
           <div className="divide-y divide-border">
             {feed.slice(0, 20).map((item) => (

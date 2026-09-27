@@ -6,6 +6,7 @@ import { Table2, Grid3X3, ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { RbacGraph } from "./rbac-graph"
 import type { RbacResponseV2, RbacBindingV2, RbacRisk } from "./types"
 
@@ -68,7 +69,7 @@ export function RbacTable() {
   const [sortKey, setSortKey] = useState<SortKey>("risk")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
-  const { data, isLoading } = useQuery<RbacResponseV2>({
+  const { data, isLoading, isError, refetch } = useQuery<RbacResponseV2>({
     queryKey: ["governance-rbac"],
     queryFn: () => fetch("/api/governance/rbac").then((r) => r.json()),
     refetchInterval: 30_000,
@@ -214,13 +215,11 @@ export function RbacTable() {
         </div>
 
         {isLoading ? (
-          <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-            <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-          </div>
+          <DataState state="loading" onRetry={() => { void refetch() }} />
+        ) : isError || !data ? (
+          <DataState state="unavailable" onRetry={() => { void refetch() }} />
         ) : filtered.length === 0 ? (
-          <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-            <span className="text-sm text-muted-foreground">{t("rbac.empty")}</span>
-          </div>
+          <DataState state="empty" />
         ) : viewMode === "graph" ? (
           <RbacGraph key={`${filter}-${riskFilter}`} bindings={filtered} />
         ) : (

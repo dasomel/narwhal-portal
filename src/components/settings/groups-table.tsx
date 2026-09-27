@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Search, CheckCircle2, XCircle, Save, Users, ChevronDown, ChevronUp } from "lucide-react"
 import { GroupMembers } from "./group-members"
 import type { GroupMember } from "./group-members"
+import { DataState } from "@/components/ui/data-state"
 
 interface GroupRole {
   pk: string
@@ -47,7 +48,7 @@ export function GroupsTable({ tools }: { tools: PlatformTool[] }) {
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
   const [selectedUser, setSelectedUser] = useState<string>("")
 
-  const { data: groups = [], isLoading } = useQuery<Group[]>({
+  const { data: groups = [], isLoading, isError, refetch } = useQuery<Group[]>({
     queryKey: ["settings-groups"],
     queryFn: async () => {
       const res = await fetch("/api/settings/groups")
@@ -149,11 +150,9 @@ export function GroupsTable({ tools }: { tools: PlatformTool[] }) {
         />
       </div>
 
-      {isLoading ? (
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-        </div>
-      ) : (
+      {isLoading ? <DataState state="loading" onRetry={() => { void refetch() }} />
+        : isError ? <DataState state="error" onRetry={() => { void refetch() }} />
+        : groups.length === 0 ? <DataState state="empty" /> : (
         <div className="overflow-auto rounded-lg border border-border/50 shadow-sm">
           <table className="w-full text-sm border-collapse">
             <thead>

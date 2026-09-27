@@ -2,6 +2,7 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useT, useLocale } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { translateTitle, translateRemediation } from "@/lib/check-translations"
 import { Badge } from "@/components/ui/badge"
 import type { InfraAuditRow, InfraAuditDetail, Severity } from "@/types/compliance"
@@ -87,26 +88,17 @@ export function InfraAuditList() {
   const t = useT()
   const [expandedNode, setExpandedNode] = useState<string | null>(null)
 
-  const { data: rows = [], isLoading } = useQuery<InfraAuditRow[]>({
+  const { data: rows = [], isLoading, isError, refetch } = useQuery<InfraAuditRow[]>({
     queryKey: ["compliance-infra-audit"],
     queryFn: () => fetch("/api/compliance/infra-audit").then((r) => r.json()),
     staleTime: 60_000,
   })
 
-  if (isLoading) {
-    return (
-      <div className="h-40 flex items-center justify-center">
-        <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-      </div>
-    )
-  }
+  if (isLoading) return <DataState state="loading" onRetry={() => { void refetch() }} />
+  if (isError) return <DataState state="unavailable" onRetry={() => { void refetch() }} />
 
   if (rows.length === 0) {
-    return (
-      <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">
-        {t("compliance.empty")}
-      </div>
-    )
+    return <DataState state="empty" />
   }
 
   return (

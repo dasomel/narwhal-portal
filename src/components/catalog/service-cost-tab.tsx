@@ -6,6 +6,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 import { useT } from "@/lib/i18n-client"
 import {
   LineChart,
@@ -17,6 +18,7 @@ import {
   CartesianGrid,
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { DataState } from "@/components/ui/data-state"
 import {
   Table,
   TableBody,
@@ -36,6 +38,7 @@ interface TopPod {
 // portal#64 AC4: mirrors CostTelemetry in src/lib/cost.ts.
 interface CostTelemetry {
   state: "ok" | "empty" | "unavailable" | "partial" | "ambiguous" | "stale"
+  queriedAt?: string
 }
 
 interface CostDetailResponse {
@@ -73,7 +76,19 @@ interface Props {
 
 export function ServiceCostTab({ serviceId }: Props) {
   const t = useT()
-  const { data: detail, isLoading: detailLoading, error: detailError } = useQuery<CostDetailResponse>({
+  const [now, setNow] = useState<number>()
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined
+    const initialTick = setTimeout(() => {
+      setNow(Date.now())
+      interval = setInterval(() => setNow(Date.now()), 60_000)
+    }, 0)
+    return () => {
+      clearTimeout(initialTick)
+      if (interval) clearInterval(interval)
+    }
+  }, [])
+  const { data: detail, isLoading: detailLoading, error: detailError, refetch: refetchDetail } = useQuery<CostDetailResponse>({
     queryKey: ["cost-service", serviceId],
     queryFn: async () => {
       const response = await fetch(`/api/cost/${serviceId}`)
@@ -83,7 +98,7 @@ export function ServiceCostTab({ serviceId }: Props) {
     refetchInterval: 60_000,
   })
 
-  const { data: trendData, isLoading: trendLoading, error: trendError } = useQuery<TrendResponse>({
+  const { data: trendData, isLoading: trendLoading, error: trendError, refetch: refetchTrend } = useQuery<TrendResponse>({
     queryKey: ["cost-trend", "service", serviceId, 7],
     queryFn: async () => {
       const response = await fetch(`/api/cost/trend?scope=service&id=${serviceId}&days=7`)
@@ -103,28 +118,21 @@ export function ServiceCostTab({ serviceId }: Props) {
   // 경고를 덧붙인다.
   const telemetryPartial = detail?.telemetry?.state === "partial"
 
-  if (detailError) {
-    return (
-      <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-        {t("cost.dataUnavailable")}
-      </div>
-    )
+  if (detailLoading && !detail) {
+    return <DataState state="loading" onRetry={() => { void refetchDetail() }} />
+  }
+  if (detailError && !detail) {
+    return <DataState state="unavailable" onRetry={() => { void refetchDetail() }} />
   }
 
   return (
     <div className="space-y-4">
+      {detailError && <DataState state="stale" onRetry={() => { void refetchDetail() }} />}
       {/* 에러/notice 배너 — portal#64 AC4: unavailable은 "$0"으로 오인될 수 있는
           숫자 카드 대신 명시적 배너로 표시한다 */}
-      {telemetryUnavailable && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {t("cost.telemetryUnavailable")}
-        </div>
-      )}
-      {telemetryPartial && (
-        <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
-          {t("cost.telemetryPartial")}
-        </div>
-      )}
+      {telemetryUnavailable && <DataState state="unavailable" onRetry={() => { void refetchDetail() }} observedAt={detail?.telemetry?.queriedAt} now={now} detailKey="costUnavailable" />}
+      {(telemetryPartial || detail?.telemetry?.state === "ambiguous") && <DataState state="partial" onRetry={() => { void refetchDetail() }} observedAt={detail?.telemetry?.queriedAt} now={now} detailKey="costPartial" />}
+      {detail?.telemetry?.state === "stale" && <DataState state="stale" onRetry={() => { void refetchDetail() }} observedAt={detail.telemetry.queriedAt} now={now} />}
       {detail?.notice && (
         <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
           {detail.notice}
@@ -202,30 +210,27 @@ export function ServiceCostTab({ serviceId }: Props) {
           </CardTitle>
           {/* Codex 리뷰 #3: trend telemetry가 partial이면(예: cpu는 실패, mem은
               성공) 차트는 그려지지만 저평가됐을 수 있다는 경고가 전혀 없었다. */}
-          {trendData?.telemetry?.state === "partial" && (
-            <p className="mt-1 text-xs text-yellow-700 dark:text-yellow-400">
-              {t("cost.telemetryPartial")}
-            </p>
+          {(trendData?.telemetry?.state === "partial" || trendData?.telemetry?.state === "ambiguous") && (
+            <DataState state="partial" onRetry={() => { void refetchTrend() }} observedAt={trendData?.telemetry?.queriedAt} now={now} detailKey="costPartial" />
           )}
         </CardHeader>
         <CardContent className="pt-0">
-          {trendLoading ? (
-            <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">
-              {t("common.loading")}
-            </div>
-          ) : trendError ? (
-            <div className="h-40 flex items-center justify-center text-xs text-destructive">
-              {t("cost.dataUnavailable")}
-            </div>
+          {trendLoading && !trendData ? (
+            <DataState state="loading" onRetry={() => { void refetchTrend() }} />
+          ) : trendError && !trendData ? (
+            <DataState state="unavailable" onRetry={() => { void refetchTrend() }} />
           ) : chartData.length === 0 ? (
-            <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">
+            <div className="space-y-2">
+              {trendError && <DataState state="stale" onRetry={() => { void refetchTrend() }} />}
+              {trendData?.telemetry?.state === "unavailable" ? <DataState state="unavailable" onRetry={() => { void refetchTrend() }} detailKey="costUnavailable" /> : <DataState state="empty" />}
+              <div className="text-center text-xs text-muted-foreground">
               {/* 크리틱 리뷰 #4: trend telemetry가 unavailable이면 빈 차트를 "데이터 없음"으로
                   오인시키지 않고 명시적으로 알린다. */}
-              {trendData?.telemetry?.state === "unavailable"
-                ? t("cost.telemetryUnavailable")
-                : trendData?.notice ?? t("cost.noTrendData")}
+                {trendData?.notice ?? t("cost.noTrendData")}
+              </div>
             </div>
           ) : (
+            <div className="space-y-2">
             <ResponsiveContainer width="100%" height={160}>
               <LineChart
                 data={chartData}
@@ -263,6 +268,7 @@ export function ServiceCostTab({ serviceId }: Props) {
                 />
               </LineChart>
             </ResponsiveContainer>
+            </div>
           )}
         </CardContent>
       </Card>

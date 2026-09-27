@@ -1,17 +1,14 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
-import { Card } from "@/components/ui/card"
-import { useT } from "@/lib/i18n-client"
 import { OverallBanner } from "./overall-banner"
 import { ComponentGrid } from "./component-grid"
 import { IncidentList } from "./incident-list"
 import type { PlatformStatus } from "@/types/api"
+import { DataState } from "@/components/ui/data-state"
 
 export function StatusView({ isOperator }: { isOperator: boolean }) {
-  const t = useT()
-
-  const { data, isLoading, error } = useQuery<PlatformStatus>({
+  const { data, isLoading, isError, refetch } = useQuery<PlatformStatus>({
     queryKey: ["platform-status"],
     queryFn: () => fetch("/api/status").then((r) => {
       if (!r.ok) throw new Error(`status ${r.status}`)
@@ -21,19 +18,15 @@ export function StatusView({ isOperator }: { isOperator: boolean }) {
   })
 
   if (isLoading) {
-    return (
-      <Card className="p-8 flex items-center justify-center">
-        <span className="text-sm text-muted-foreground animate-pulse">{t("status.loading")}</span>
-      </Card>
-    )
+    return <DataState state="loading" onRetry={() => { void refetch() }} />
   }
 
-  if (error || !data) {
-    return (
-      <Card className="p-8 flex items-center justify-center">
-        <span className="text-sm text-narwhal-danger">{t("status.error")}</span>
-      </Card>
-    )
+  if (isError) {
+    return <DataState state="error" onRetry={() => { void refetch() }} />
+  }
+
+  if (!data) {
+    return <DataState state="empty" />
   }
 
   return (

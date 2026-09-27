@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n-client"
 import type { ArchitectureData } from "@/app/api/architecture/route"
+import { DataState } from "@/components/ui/data-state"
 
 const STATUS_COLORS: Record<string, string> = {
   healthy: "var(--narwhal-success)",
@@ -51,7 +52,7 @@ const H = 36
 export function PlatformArchitecture() {
   const t = useT()
 
-  const { data } = useQuery<ArchitectureData>({
+  const { data, isLoading, isError, refetch } = useQuery<ArchitectureData>({
     queryKey: ["architecture"],
     queryFn: () => fetch("/api/architecture").then((r) => r.json()),
     refetchInterval: 30_000,
@@ -78,6 +79,15 @@ export function PlatformArchitecture() {
         </div>
       </CardHeader>
       <CardContent>
+        {isLoading && !data ? (
+          <DataState state="loading" onRetry={() => { void refetch() }} />
+        ) : isError && !data ? (
+          <DataState state="unavailable" onRetry={() => { void refetch() }} />
+        ) : !data ? (
+          <DataState state="empty" />
+        ) : (
+          <>
+          {isError && <div className="mb-3"><DataState state="stale" onRetry={() => { void refetch() }} /></div>}
         <svg
           viewBox="0 0 920 560"
           className="w-full max-w-3xl mx-auto"
@@ -132,6 +142,8 @@ export function PlatformArchitecture() {
             </div>
           ))}
         </div>
+          </>
+        )}
       </CardContent>
     </Card>
   )

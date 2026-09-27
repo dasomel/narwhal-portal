@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface Route {
   id: string
@@ -17,7 +18,7 @@ interface Route {
 export function RoutesTable() {
   const qc = useQueryClient()
   const t = useT()
-  const { data: routes = [], isLoading } = useQuery<Route[]>({
+  const { data: routes, isLoading, isError, refetch } = useQuery<Route[]>({
     queryKey: ["apisix-routes"],
     queryFn: () => fetch("/api/settings/routes").then((r) => r.json()),
   })
@@ -35,11 +36,9 @@ export function RoutesTable() {
   return (
     <Card className="p-5">
       <h2 className="font-semibold text-foreground mb-4">{t("routes.title")}</h2>
-      {isLoading ? (
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-        </div>
-      ) : (
+      {isLoading ? <DataState state="loading" onRetry={() => { void refetch() }} />
+        : isError ? <DataState state="error" onRetry={() => { void refetch() }} />
+        : !routes?.length ? <DataState state="empty" /> : (
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-muted-foreground">

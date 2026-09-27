@@ -3,6 +3,7 @@ import { useState, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Card } from "@/components/ui/card"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { ResourceDetailDrawer } from "./resource-detail-drawer"
 
 interface ScorecardItem {
@@ -125,7 +126,7 @@ export function ScorecardTable() {
   const [sortDir, setSortDir] = useState<SortDir>("asc")
   const [selectedRow, setSelectedRow] = useState<{ namespace: string; service: string } | null>(null)
 
-  const { data, isLoading, isError } = useQuery<ScorecardItem[]>({
+  const { data, isLoading, isError, refetch } = useQuery<ScorecardItem[]>({
     queryKey: ["governance-scorecard"],
     queryFn: async () => {
       const r = await fetch("/api/governance/scorecard")
@@ -203,17 +204,11 @@ export function ScorecardTable() {
       )}
 
       {isLoading ? (
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-        </div>
+        <DataState state="loading" onRetry={() => { void refetch() }} />
       ) : isError ? (
-        <div className="h-32 bg-red-50 rounded flex items-center justify-center">
-          <span className="text-sm text-red-500">{t("scorecard.error")}</span>
-        </div>
+        <DataState state="unavailable" onRetry={() => { void refetch() }} />
       ) : items.length === 0 ? (
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground">{t("scorecard.empty")}</span>
-        </div>
+        <DataState state="empty" />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

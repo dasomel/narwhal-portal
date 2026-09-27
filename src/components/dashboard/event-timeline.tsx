@@ -5,6 +5,7 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { DataState } from "@/components/ui/data-state"
 import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useT, useLocale } from "@/lib/i18n-client"
@@ -66,7 +67,7 @@ export function EventTimeline() {
   const locale = useLocale()
   const [selected, setSelected] = useState<TimelineEvent | null>(null)
 
-  const { data: events, isLoading } = useQuery<TimelineEvent[]>({
+  const { data: events, isLoading, isError, refetch } = useQuery<TimelineEvent[]>({
     queryKey: ["events"],
     queryFn: () => fetch("/api/events").then((r) => r.json()),
     refetchInterval: 15_000,
@@ -79,14 +80,16 @@ export function EventTimeline() {
           <CardTitle className="text-sm font-medium text-foreground">{t("events.title")}</CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          {isLoading ? (
-            <div className="h-32 flex items-center justify-center text-xs text-muted-foreground">
-              {t("common.loading")}
-            </div>
+          {isLoading && !events ? (
+            <DataState state="loading" onRetry={() => { void refetch() }} />
+          ) : isError && !events ? (
+            <DataState state="unavailable" onRetry={() => { void refetch() }} />
           ) : !events || events.length === 0 ? (
-            <p className="text-xs text-muted-foreground py-4 text-center">{t("events.empty")}</p>
+            isError ? <DataState state="unavailable" onRetry={() => { void refetch() }} /> : <DataState state="empty" />
           ) : (
-            <div className="space-y-0 max-h-[400px] overflow-y-auto">
+            <div className="space-y-2">
+              {isError && <DataState state="stale" onRetry={() => { void refetch() }} />}
+              <div className="space-y-0 max-h-[400px] overflow-y-auto">
               {events.slice(0, 20).map((evt) => (
                 <button
                   key={evt.id}
@@ -115,6 +118,7 @@ export function EventTimeline() {
                   </div>
                 </button>
               ))}
+              </div>
             </div>
           )}
         </CardContent>

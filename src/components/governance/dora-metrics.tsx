@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
 import type { DoraMetrics } from "./types"
 
@@ -57,44 +58,10 @@ function StatCard({
   )
 }
 
-function DoraSkeleton() {
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="bg-card border rounded-xl p-5 space-y-3">
-            <div className="h-3 w-24 bg-muted animate-pulse rounded-md" />
-            <div className="h-8 w-16 bg-muted animate-pulse rounded-md" />
-            <div className="h-3 w-36 bg-muted animate-pulse rounded-md" />
-          </div>
-        ))}
-      </div>
-
-      <div className="bg-card border rounded-xl p-5 space-y-4">
-        <div className="h-4 w-32 bg-muted animate-pulse rounded-md" />
-        <div className="h-56 bg-muted/30 animate-pulse rounded-md" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {[...Array(2)].map((_, i) => (
-          <div key={i} className="bg-card border rounded-xl p-5 space-y-4">
-            <div className="h-4 w-36 bg-muted animate-pulse rounded-md" />
-            <div className="space-y-2">
-              {[...Array(5)].map((_, j) => (
-                <div key={j} className="h-8 bg-muted animate-pulse rounded-md" />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 export function DoraMetricsWidget() {
   const t = useT()
 
-  const { data, isLoading, isError } = useQuery<DoraMetrics>({
+  const { data, isLoading, isError, refetch } = useQuery<DoraMetrics>({
     queryKey: ["governance-dora"],
     queryFn: () =>
       fetch("/api/governance/dora").then((r) => {
@@ -104,19 +71,9 @@ export function DoraMetricsWidget() {
     refetchInterval: 30_000,
   })
 
-  if (isLoading) {
-    return <DoraSkeleton />
-  }
-
-  if (isError || !data) {
-    return (
-      <Card className="p-6">
-        <div className="h-24 flex items-center justify-center text-sm text-rose-500 font-medium">
-          {t("common.loadError")}
-        </div>
-      </Card>
-    )
-  }
+  if (isLoading && !data) return <DataState state="loading" onRetry={() => { void refetch() }} />
+  if (isError && !data) return <DataState state="unavailable" onRetry={() => { void refetch() }} />
+  if (!data) return <DataState state="empty" />
 
   // Determine statuses for DORA metrics based on industry benchmarks
   // Deploy Frequency: Elite/High >= 1 per day
@@ -150,6 +107,7 @@ export function DoraMetricsWidget() {
 
   return (
     <div className="space-y-6">
+      {isError && <DataState state="stale" onRetry={() => { void refetch() }} />}
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-foreground text-base">{t("dora.title")}</h2>
         <span className="text-xs text-muted-foreground">{t("dora.period")}</span>
@@ -189,9 +147,7 @@ export function DoraMetricsWidget() {
 
       {!hasData ? (
         <Card className="p-6">
-          <div className="h-48 border border-dashed rounded-xl flex flex-col items-center justify-center bg-card p-6">
-            <span className="text-sm font-semibold text-muted-foreground">{t("dora.emptyDeploys")}</span>
-          </div>
+          <DataState state="empty" reason={t("dora.emptyDeploys")} />
         </Card>
       ) : (
         <>

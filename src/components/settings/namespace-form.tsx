@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface Namespace {
   name: string
@@ -25,7 +26,7 @@ export function NamespaceForm() {
   // somewhere to go.
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string; prUrl?: string } | null>(null)
 
-  const { data: namespaces = [], isLoading } = useQuery<Namespace[]>({
+  const { data: namespaces = [], isLoading, isError, refetch } = useQuery<Namespace[]>({
     queryKey: ["namespaces"],
     queryFn: () => fetch("/api/namespaces").then((r) => r.json()).then((d) => Array.isArray(d) ? d : []),
   })
@@ -126,11 +127,9 @@ export function NamespaceForm() {
 
       <div>
         <h3 className="font-medium text-foreground mb-2">{t("ns.existing")}</h3>
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</p>
-        ) : namespaces.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("ns.empty")}</p>
-        ) : (
+        {isLoading ? <DataState state="loading" onRetry={() => { void refetch() }} />
+          : isError ? <DataState state="error" onRetry={() => { void refetch() }} />
+          : namespaces.length === 0 ? <DataState state="empty" /> : (
           <ul className="space-y-1.5">
             {namespaces.map((ns) => (
               <li key={ns.name} className="flex items-center gap-2 text-sm">

@@ -2,6 +2,7 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useT, useLocale } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { translateTitle } from "@/lib/check-translations"
 import { Badge } from "@/components/ui/badge"
 import type { ComplianceFramework, ComplianceFrameworkDetail, Severity } from "@/types/compliance"
@@ -85,26 +86,17 @@ export function FrameworksGrid() {
   const t = useT()
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  const { data: frameworks = [], isLoading } = useQuery<ComplianceFramework[]>({
+  const { data: frameworks = [], isLoading, isError, refetch } = useQuery<ComplianceFramework[]>({
     queryKey: ["compliance-frameworks"],
     queryFn: () => fetch("/api/compliance/frameworks").then((r) => r.json()),
     staleTime: 60_000,
   })
 
-  if (isLoading) {
-    return (
-      <div className="h-40 flex items-center justify-center">
-        <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-      </div>
-    )
-  }
+  if (isLoading) return <DataState state="loading" onRetry={() => { void refetch() }} />
+  if (isError) return <DataState state="unavailable" onRetry={() => { void refetch() }} />
 
   if (frameworks.length === 0) {
-    return (
-      <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">
-        {t("compliance.empty")}
-      </div>
-    )
+    return <DataState state="empty" />
   }
 
   return (

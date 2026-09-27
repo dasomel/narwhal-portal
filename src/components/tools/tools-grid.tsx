@@ -5,12 +5,13 @@ import { ServiceCard } from "./service-card"
 import { PlatformTool } from "@/lib/tools"
 import { useT } from "@/lib/i18n-client"
 import type { TranslationKey } from "@/lib/i18n"
+import { DataState } from "@/components/ui/data-state"
 
 export function ToolsGrid() {
   const { data: session } = useSession()
   const t = useT()
 
-  const { data: tools = [], isLoading: isToolsLoading } = useQuery<PlatformTool[]>({
+  const { data: tools, isLoading: isToolsLoading, isError: isToolsError, refetch } = useQuery<PlatformTool[]>({
     queryKey: ["tools"],
     queryFn: () => fetch("/api/tools").then((r) => r.json()),
   })
@@ -21,23 +22,16 @@ export function ToolsGrid() {
     refetchInterval: 60_000,
   })
 
-  if (isToolsLoading) {
-    return (
-      <div className="h-64 flex flex-col items-center justify-center gap-4 text-muted-foreground">
-        <div className="w-8 h-8 border-2 border-border border-t-narwhal-danger rounded-full animate-spin" />
-        <span className="text-sm">{t("common.loading")}</span>
-      </div>
-    )
-  }
+  if (isToolsLoading) return <DataState state="loading" onRetry={() => { void refetch() }} />
+  if (isToolsError) return <DataState state="error" onRetry={() => { void refetch() }} />
 
-  const categories = [...new Set(tools.map((t) => t.category))]
+  const availableTools = tools ?? []
+  const categories = [...new Set(availableTools.map((t) => t.category))]
 
   return (
     <div className="space-y-8">
       {categories.length === 0 ? (
-        <div className="text-center py-20 border-2 border-dashed rounded-xl border-border/50 italic text-muted-foreground">
-          No tools mapped to your current roles/groups.
-        </div>
+        <DataState state="empty" />
       ) : (
         <>
           <div className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -61,7 +55,7 @@ export function ToolsGrid() {
                   {t(`category.${cat}` as TranslationKey)}
                 </h2>
                 <div className="grid grid-cols-3 gap-3">
-                  {tools
+                  {availableTools
                     .filter((t) => t.category === cat)
                     .map((tool) => (
                       <ServiceCard

@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useT } from "@/lib/i18n-client"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { DataState } from "@/components/ui/data-state"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import type { ServiceGraphDetailResponse } from "@/app/api/service-graph/[svc]/route"
 
@@ -64,13 +65,7 @@ function InboundTable({
   rows: ServiceGraphDetailResponse["inbound"]
 }) {
   const t = useT()
-  if (rows.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground py-4 text-center">
-        {t("svcDep.noInbound")}
-      </p>
-    )
-  }
+  if (rows.length === 0) return <DataState state="empty" reason={t("svcDep.noInbound")} />
 
   return (
     <Table>
@@ -115,13 +110,7 @@ function OutboundTable({
   rows: ServiceGraphDetailResponse["outbound"]
 }) {
   const t = useT()
-  if (rows.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground py-4 text-center">
-        {t("svcDep.noOutbound")}
-      </p>
-    )
-  }
+  if (rows.length === 0) return <DataState state="empty" reason={t("svcDep.noOutbound")} />
 
   return (
     <Table>
@@ -166,7 +155,7 @@ function OutboundTable({
 
 export function ServiceDependenciesTab({ serviceName }: Props) {
   const t = useT()
-  const { data, isLoading, error } = useQuery<ServiceGraphDetailResponse>({
+  const { data, isLoading, error, refetch } = useQuery<ServiceGraphDetailResponse>({
     queryKey: ["service-dependencies", serviceName],
     queryFn: () =>
       fetch(`/api/service-graph/${encodeURIComponent(serviceName)}?window=7d`).then((r) => {
@@ -177,45 +166,19 @@ export function ServiceDependenciesTab({ serviceName }: Props) {
     refetchInterval: 60_000,
   })
 
-  if (isLoading) {
-    return (
-      <div className="space-y-4">
-        {[1, 2].map((i) => (
-          <Card key={i}>
-            <CardHeader>
-              <div className="h-4 bg-muted rounded animate-pulse w-32" />
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {[1, 2, 3].map((j) => (
-                  <div key={j} className="h-8 bg-muted rounded animate-pulse" />
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    )
+  if (isLoading && !data) {
+    return <DataState state="loading" onRetry={() => { void refetch() }} />
   }
 
-  if (error) {
-    return (
-      <Card>
-        <CardContent className="py-6 text-center">
-          <p className="text-sm text-red-500">{t("svcDep.loadError")}</p>
-        </CardContent>
-      </Card>
-    )
+  if (error && !data) {
+    return <DataState state="unavailable" onRetry={() => { void refetch() }} />
   }
 
   return (
     <div className="space-y-4">
+      {error && <DataState state="stale" onRetry={() => { void refetch() }} />}
       {/* notice 배너 */}
-      {data?.notice && (
-        <div className="rounded border border-yellow-400/30 bg-yellow-400/10 px-4 py-2 text-xs text-yellow-600 dark:text-yellow-400">
-          {data.notice}
-        </div>
-      )}
+      {data?.notice && <DataState state="partial" reason={data.notice} onRetry={() => { void refetch() }} />}
 
       {/* Istio 미적용 안내 */}
       {data && data.inbound.length === 0 && data.outbound.length === 0 && !data.notice && (

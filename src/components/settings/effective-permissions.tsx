@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n-client"
 import type { EffectivePermissions as Data } from "@/app/api/settings/effective-permissions/route"
+import { DataState } from "@/components/ui/data-state"
 
 // Answers "why can I see what I see" for the signed-in user.
 //
@@ -15,21 +16,16 @@ import type { EffectivePermissions as Data } from "@/app/api/settings/effective-
 // broken" rather than "the group name is wrong".
 export function EffectivePermissions() {
   const t = useT()
-  const { data, isLoading } = useQuery<Data>({
+  const { data, isLoading, isError, refetch } = useQuery<Data>({
     queryKey: ["settings-effective-permissions"],
     queryFn: () => fetch("/api/settings/effective-permissions").then((r) => r.json()),
   })
 
   if (isLoading) {
-    return (
-      <Card className="p-5">
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-        </div>
-      </Card>
-    )
+    return <DataState state="loading" onRetry={() => { void refetch() }} />
   }
-  if (!data) return null
+  if (isError) return <DataState state="error" onRetry={() => { void refetch() }} />
+  if (!data) return <DataState state="empty" />
 
   const rejectedRoleClaim = data.claims.groupClaimStatus === "unknown_groups"
   const hasProblem = data.claims.unmappedClaims.length > 0 || data.claims.fellBackToGuest || rejectedRoleClaim

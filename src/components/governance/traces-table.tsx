@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface TraceEntry {
   traceID: string
@@ -61,7 +62,7 @@ export function TracesTable() {
   const [sortKey, setSortKey] = useState<SortKey>("startTime")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
-  const { data = [], isLoading } = useQuery<TraceEntry[]>({
+  const { data = [], isLoading, isError, refetch } = useQuery<TraceEntry[]>({
     queryKey: ["governance-traces", service],
     queryFn: () =>
       fetch(`/api/traces${service ? `?service=${encodeURIComponent(service)}` : ""}`).then((r) =>
@@ -111,13 +112,11 @@ export function TracesTable() {
         </form>
       </div>
       {isLoading ? (
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-        </div>
+        <DataState state="loading" onRetry={() => { void refetch() }} />
+      ) : isError ? (
+        <DataState state="unavailable" onRetry={() => { void refetch() }} />
       ) : data.length === 0 ? (
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground">{t("traces.empty")}</span>
-        </div>
+        <DataState state="empty" />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

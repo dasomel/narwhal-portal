@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useT, useLocale } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface UserGroup {
   pk: string
@@ -35,7 +36,7 @@ export function UsersTable() {
   const qc = useQueryClient()
   const t = useT()
   const locale = useLocale()
-  const { data: users = [], isLoading } = useQuery<User[]>({
+  const { data: users, isLoading, isError, refetch } = useQuery<User[]>({
     queryKey: ["settings-users"],
     queryFn: () => fetch("/api/settings/users").then((r) => r.json()),
   })
@@ -51,7 +52,7 @@ export function UsersTable() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings-users"] }),
   })
 
-  const filtered = users.filter(
+  const filtered = (users ?? []).filter(
     (u) => u.username.includes(search) || u.email.includes(search)
   )
 
@@ -66,11 +67,9 @@ export function UsersTable() {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
-      {isLoading ? (
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-        </div>
-      ) : (
+      {isLoading ? <DataState state="loading" onRetry={() => { void refetch() }} />
+        : isError ? <DataState state="error" onRetry={() => { void refetch() }} />
+        : !users?.length ? <DataState state="empty" /> : (
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-muted-foreground">

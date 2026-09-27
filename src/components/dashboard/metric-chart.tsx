@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface RangeResponse {
   metric: string
@@ -25,7 +26,7 @@ function formatTime(ts: number): string {
 
 export function MetricChart({ metric, minutes = 60, node }: { metric: string; minutes?: number; node?: string }) {
   const t = useT()
-  const { data, isLoading } = useQuery<RangeResponse>({
+  const { data, isLoading, isError, refetch } = useQuery<RangeResponse>({
     queryKey: ["metrics-range", metric, minutes, node],
     queryFn: () => {
       const url = new URL(`/api/metrics/range`, window.location.origin)
@@ -61,15 +62,15 @@ export function MetricChart({ metric, minutes = 60, node }: { metric: string; mi
         </div>
       </CardHeader>
       <CardContent className="pt-0">
-        {isLoading ? (
-          <div className="h-[160px] flex items-center justify-center text-xs text-muted-foreground">
-            {t("common.loading")}
-          </div>
+        {isLoading && !data ? (
+          <DataState state="loading" onRetry={() => { void refetch() }} />
+        ) : isError && !data ? (
+          <DataState state="unavailable" onRetry={() => { void refetch() }} />
         ) : chartData.length === 0 ? (
-          <div className="h-[160px] flex items-center justify-center text-xs text-muted-foreground">
-            {t("chart.noData")}
-          </div>
+          <DataState state={isError ? "stale" : "empty"} onRetry={() => { void refetch() }} />
         ) : (
+          <>
+          {isError && <div className="mb-2"><DataState state="stale" onRetry={() => { void refetch() }} /></div>}
           <ResponsiveContainer width="100%" height={160}>
             <AreaChart syncId="dashboard-metrics" data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <defs>
@@ -120,6 +121,7 @@ export function MetricChart({ metric, minutes = 60, node }: { metric: string; mi
               />
             </AreaChart>
           </ResponsiveContainer>
+          </>
         )}
       </CardContent>
     </Card>

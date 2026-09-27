@@ -8,6 +8,20 @@ import { useT } from "@/lib/i18n-client"
 import { Badge } from "@/components/ui/badge"
 import { ReactFlow, Background, Controls, MiniMap } from "reactflow"
 import "reactflow/dist/style.css"
+import { DataState } from "@/components/ui/data-state"
+
+function EmptyState({ t }: { t: ReturnType<typeof useT> }) {
+  return (
+    <div className="space-y-3 rounded-lg border border-dashed border-border bg-muted/20 p-10 text-center">
+      <p className="text-sm font-medium text-foreground">{t("svcMap.empty.title")}</p>
+      <p className="text-xs text-muted-foreground">{t("svcMap.empty.desc1")}</p>
+      <p className="text-xs text-muted-foreground">{t("svcMap.empty.desc2")}</p>
+      <a href="/onboarding" className="inline-block text-xs text-blue-500 hover:underline">
+        {t("svcMap.empty.guide")}
+      </a>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // 타입
@@ -508,30 +522,6 @@ function NodeDetailPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Empty state
-// ---------------------------------------------------------------------------
-
-function EmptyState({ t }: { t: ReturnType<typeof useT> }) {
-  return (
-    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-10 text-center space-y-3">
-      <p className="text-sm font-medium text-foreground">{t("svcMap.empty.title")}</p>
-      <p className="text-xs text-muted-foreground">
-        {t("svcMap.empty.desc1")}
-      </p>
-      <p className="text-xs text-muted-foreground">
-        {t("svcMap.empty.desc2")}
-      </p>
-      <a
-        href="/onboarding"
-        className="inline-block text-xs text-blue-500 hover:underline"
-      >
-        {t("svcMap.empty.guide")}
-      </a>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // 메인 컴포넌트
 // ---------------------------------------------------------------------------
 
@@ -567,7 +557,7 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
   }, [live])
 
   const queryKey = ["service-graph", effWindow, namespace]
-  const { data, isLoading, error } = useQuery<ServiceGraphResponse>({
+  const { data, isLoading, isError, refetch } = useQuery<ServiceGraphResponse>({
     queryKey,
     queryFn: () => {
       const params = new URLSearchParams({ window: effWindow })
@@ -606,7 +596,7 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
     if (namespaces.length > 0) setNsOptions(namespaces)
   }, [namespaces])
 
-  const isEmpty = !isLoading && !error && filteredData && filteredData.nodes.length === 0
+  const isEmpty = !isLoading && !isError && filteredData && filteredData.nodes.length === 0
 
   return (
     <div className="space-y-4">
@@ -707,11 +697,9 @@ export function ServiceMapView({ initialNamespace, focusService }: Props) {
 
       {/* 그래프 영역 */}
       {isLoading ? (
-        <div className="h-[500px] rounded border border-border bg-muted/20 animate-pulse" />
-      ) : error ? (
-        <div className="rounded border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-          {t("svcMap.loadError")}
-        </div>
+        <DataState state="loading" onRetry={() => { void refetch() }} />
+      ) : isError ? (
+        <DataState state="error" onRetry={() => { void refetch() }} />
       ) : isEmpty ? (
         <EmptyState t={t} />
       ) : filteredData ? (

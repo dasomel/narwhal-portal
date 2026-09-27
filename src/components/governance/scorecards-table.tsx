@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "next/navigation"
 import { useT, useLocale } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -198,7 +199,7 @@ export function ScorecardsTable() {
   const [sortBy, setSortBy] = useState<"score-desc" | "score-asc" | "name">("score-desc")
 
   const queryKey = ["scorecards", tierFilter, ownerFilter]
-  const { data, isLoading, error } = useQuery<ScorecardListResponse>({
+  const { data, isLoading, isError, refetch } = useQuery<ScorecardListResponse>({
     queryKey,
     queryFn: () => {
       const params = new URLSearchParams()
@@ -209,28 +210,13 @@ export function ScorecardsTable() {
     refetchInterval: 60_000,
   })
 
-  if (isLoading) {
-    return (
-      <div className="h-48 flex items-center justify-center">
-        <span className="text-sm text-muted-foreground animate-pulse">{t("scorecard.evaluating")}</span>
-      </div>
-    )
+  if (isLoading) return <DataState state="loading" onRetry={() => { void refetch() }} />
+
+  if (isError || !data || "error" in data) {
+    const apiMessage = data && "message" in data && typeof data.message === "string" ? data.message : undefined
+    return <DataState state="unavailable" reason={apiMessage ?? t("scorecard.loadErrorConfigMap")} onRetry={() => { void refetch() }} />
   }
 
-  if (error || (data && "error" in data)) {
-    const msg = (data as { message?: string })?.message
-    return (
-      <Card className="border-destructive">
-        <CardContent className="pt-4">
-          <p className="text-sm text-destructive">
-            {msg ?? t("scorecard.loadErrorConfigMap")}
-          </p>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  if (!data) return null
 
   // Unique owners for filter
   const owners = Array.from(new Set(data.services.map((s) => s.owner).filter(Boolean))) as string[]

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useT, useLocale } from "@/lib/i18n-client"
 import { translateTitle } from "@/lib/check-translations"
 import { Card } from "@/components/ui/card"
+import { DataState } from "@/components/ui/data-state"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -56,11 +57,12 @@ export function RuntimeEventsFeed() {
   })
   if (priority !== "all") params.set("priority", priority)
 
-  const { data: events = [], isLoading } = useQuery<FalcoEvent[]>({
+  const { data: eventData, isLoading, isError, refetch } = useQuery<FalcoEvent[]>({
     queryKey: ["security-runtime-events", priority, timeRange],
     queryFn: () => fetch(`/api/security/runtime-events?${params}`).then((r) => r.json()),
     refetchInterval: autoRefresh ? 15_000 : false,
   })
+  const events = useMemo(() => eventData ?? [], [eventData])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return events
@@ -140,15 +142,15 @@ export function RuntimeEventsFeed() {
       </div>
 
       <Card className="p-0 overflow-hidden">
-        {isLoading ? (
-          <div className="h-40 flex items-center justify-center">
-            <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-          </div>
+        {isLoading && !eventData ? (
+          <div className="p-4"><DataState state="loading" onRetry={() => { void refetch() }} /></div>
+        ) : isError && !eventData ? (
+          <div className="p-4"><DataState state="unavailable" onRetry={() => { void refetch() }} /></div>
         ) : filtered.length === 0 ? (
-          <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">
-            {t("security.runtime.empty")}
-          </div>
+          <div className="p-4">{isError ? <DataState state="unavailable" onRetry={() => { void refetch() }} /> : <DataState state="empty" />}</div>
         ) : (
+          <>
+          {isError && <div className="p-4 pb-0"><DataState state="stale" onRetry={() => { void refetch() }} /></div>}
           <ul className="divide-y max-h-[600px] overflow-y-auto">
             {filtered.map((ev) => (
               <li key={ev.id} className="px-4 py-3 hover:bg-muted/20 transition-colors">
@@ -186,6 +188,7 @@ export function RuntimeEventsFeed() {
               </li>
             ))}
           </ul>
+          </>
         )}
       </Card>
     </div>

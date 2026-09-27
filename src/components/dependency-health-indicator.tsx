@@ -12,7 +12,7 @@ interface HealthSummary {
 
 export function DependencyHealthIndicator() {
   const t = useT()
-  const { data } = useQuery<HealthSummary>({
+  const { data, isLoading, isError } = useQuery<HealthSummary>({
     queryKey: ["health-summary"],
     queryFn: async () => {
       const response = await fetch("/api/health/summary")
@@ -22,7 +22,7 @@ export function DependencyHealthIndicator() {
     refetchInterval: 60_000,
   })
 
-  if (!data) return null
+  if (isLoading || isError || !data) return null
 
   let Icon = CheckCircle2
   let label = t("healthSummary.ok")

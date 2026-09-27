@@ -9,6 +9,7 @@ import {
   TooltipContent as InfoTooltipContent,
 } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { ResourceDetailDrawer } from "./resource-detail-drawer"
 import type { ResourcesResponseV2, NamespaceUsageV2 } from "./types"
 import {
@@ -49,11 +50,14 @@ export function ResourceChart() {
   const [noRequestDialogOpen, setNoRequestDialogOpen] = useState(false)
   const [filterNamespace, setFilterNamespace] = useState<string>("all")
 
-  const { data, isLoading } = useQuery<ResourcesResponseV2>({
+  const { data, isLoading, isError, refetch } = useQuery<ResourcesResponseV2>({
     queryKey: ["governance-resources"],
     queryFn: () => fetch("/api/governance/resources").then((r) => r.json()),
     refetchInterval: 30_000,
   })
+
+  if (isLoading) return <DataState state="loading" onRetry={() => { void refetch() }} />
+  if (isError || !data) return <DataState state="unavailable" onRetry={() => { void refetch() }} />
 
   const namespaces = data?.namespaces ?? []
   const topCpuPods = data?.topCpuPods ?? []
@@ -193,14 +197,8 @@ export function ResourceChart() {
           <CardTitle className="text-sm font-medium text-foreground">{t("resources.title")}</CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          {isLoading ? (
-            <div className="h-64 flex items-center justify-center text-xs text-muted-foreground">
-              {t("common.loading")}
-            </div>
-          ) : namespaces.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-xs text-muted-foreground">
-              {t("resources.empty")}
-            </div>
+          {namespaces.length === 0 ? (
+            <DataState state="empty" />
           ) : (
             <ResponsiveContainer width="100%" height={300}>
               <BarChart
@@ -300,17 +298,9 @@ export function ResourceChart() {
                 </tr>
               </thead>
               <tbody>
-                {isLoading ? (
+                {topCpuPods.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="py-4 text-center text-muted-foreground animate-pulse">
-                      {t("common.loading")}
-                    </td>
-                  </tr>
-                ) : topCpuPods.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="py-4 text-center text-muted-foreground italic">
-                      {t("common.notFound")}
-                    </td>
+                    <td colSpan={3}><DataState state="empty" /></td>
                   </tr>
                 ) : (
                   topCpuPods.map((pod, idx) => (
@@ -344,17 +334,9 @@ export function ResourceChart() {
                 </tr>
               </thead>
               <tbody>
-                {isLoading ? (
+                {topMemPods.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="py-4 text-center text-muted-foreground animate-pulse">
-                      {t("common.loading")}
-                    </td>
-                  </tr>
-                ) : topMemPods.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="py-4 text-center text-muted-foreground italic">
-                      {t("common.notFound")}
-                    </td>
+                    <td colSpan={3}><DataState state="empty" /></td>
                   </tr>
                 ) : (
                   topMemPods.map((pod, idx) => (

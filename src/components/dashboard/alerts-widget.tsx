@@ -5,6 +5,7 @@ import { useState } from "react"
 import { useQuery, useMutation } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
 import { Card } from "@/components/ui/card"
+import { DataState } from "@/components/ui/data-state"
 import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
@@ -101,13 +102,14 @@ export function AlertsWidget() {
 
   const [selected, setSelected] = useState<Alert | null>(null)
 
-  const { data: alerts = [], isLoading } = useQuery<Alert[]>({
+  const { data: alertsData, isLoading, isError, refetch } = useQuery<Alert[]>({
     queryKey: ["alerts"],
     queryFn: () => fetch("/api/alerts").then((r) => r.json()).then((d) => Array.isArray(d) ? d : []),
     refetchInterval: 15_000,
   })
+  const alerts = alertsData ?? []
 
-  if (isLoading) return <Card className="p-5 h-36 flex items-center justify-center"><span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span></Card>
+  if (isLoading && !alertsData) return <Card className="p-5"><DataState state="loading" onRetry={() => { void refetch() }} /></Card>
 
   const selectedAlertname = selected?.labels.alertname ?? ""
   const selectedSeverity = selected?.labels.severity ?? ""
@@ -126,8 +128,11 @@ export function AlertsWidget() {
             <Badge className="bg-narwhal-danger/15 text-narwhal-danger">{alerts.length}</Badge>
           )}
         </h3>
-        {alerts.length === 0 ? (
-          <p className="text-sm text-narwhal-success">{t("alerts.none")}</p>
+        {isError && alerts.length > 0 && <div className="mb-3"><DataState state="stale" onRetry={() => { void refetch() }} /></div>}
+        {isError && alerts.length === 0 ? (
+          <DataState state="unavailable" onRetry={() => { void refetch() }} />
+        ) : alerts.length === 0 ? (
+          <DataState state="empty" reason={t("alerts.none")} />
         ) : (
           <ul className="space-y-1.5">
             {alerts.slice(0, 5).map((a, i) => (

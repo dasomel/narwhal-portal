@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { useT, useLocale } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -38,7 +39,7 @@ const TIER_ICONS: Record<string, string> = {
 
 function RulesModal() {
   const t = useT()
-  const { data, isLoading } = useQuery<ScorecardRulesResponse>({
+  const { data, isLoading, isError, refetch } = useQuery<ScorecardRulesResponse>({
     queryKey: ["scorecard-rules"],
     queryFn: () => fetch("/api/scorecards/rules").then((r) => r.json()),
     staleTime: 5 * 60 * 1000,
@@ -53,9 +54,7 @@ function RulesModal() {
         <DialogHeader>
           <DialogTitle>{t("scorecard.rulesTitle")}</DialogTitle>
         </DialogHeader>
-        {isLoading && (
-          <p className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</p>
-        )}
+        {isLoading && !data && <DataState state="loading" onRetry={() => { void refetch() }} />}
         {data?.rawYaml && (
           <pre className="text-xs bg-muted p-4 rounded overflow-x-auto whitespace-pre-wrap">
             {data.rawYaml}
@@ -71,9 +70,9 @@ function RulesModal() {
             ))}
           </div>
         )}
-        {!isLoading && !data && (
-          <p className="text-sm text-destructive">{t("scorecard.noConfigMap")}</p>
-        )}
+        {isError && data && <DataState state="stale" onRetry={() => { void refetch() }} />}
+        {isError && !data && <DataState state="unavailable" onRetry={() => { void refetch() }} />}
+        {!isLoading && !isError && !data && <DataState state="empty" />}
       </DialogContent>
     </Dialog>
   )
@@ -90,43 +89,33 @@ interface ServiceQualityTabProps {
 export function ServiceQualityTab({ serviceName }: ServiceQualityTabProps) {
   const t = useT()
   const locale = useLocale()
-  const { data, isLoading, error } = useQuery<ScorecardDetailResponse>({
+  const { data, isLoading, refetch } = useQuery<ScorecardDetailResponse>({
     queryKey: ["scorecard-detail", serviceName],
     queryFn: () => fetch(`/api/scorecards/${encodeURIComponent(serviceName)}`).then((r) => r.json()),
     staleTime: 5 * 60 * 1000,
   })
 
-  if (isLoading) {
-    return (
-      <div className="h-40 flex items-center justify-center">
-        <span className="text-sm text-muted-foreground animate-pulse">{t("scorecard.evaluating")}</span>
-      </div>
-    )
+  if (isLoading && !data) {
+    return <DataState state="loading" onRetry={() => { void refetch() }} />
   }
 
-  if (error || (data && "error" in data)) {
+  if (data && "error" in data) {
     const errData = data as { error?: string; message?: string } | undefined
     const isConfigMapMissing = errData?.message?.includes("ConfigMap")
     return (
-      <Card className="border-destructive/50">
-        <CardContent className="pt-4">
-          <p className="text-sm text-destructive">
-            {isConfigMapMissing
-              ? t("scorecard.rulesMissing")
-              : (errData?.message ?? t("scorecard.loadError"))}
-          </p>
-        </CardContent>
-      </Card>
+      <DataState state="unavailable" onRetry={() => { void refetch() }} reason={isConfigMapMissing ? t("scorecard.rulesMissing") : (errData?.message ?? t("scorecard.loadError"))} />
     )
   }
 
-  if (!data) return null
+  if (!data) return <DataState state="empty" />
 
   const passed = data.rules.filter((r) => r.status === "pass")
   const failed = data.rules.filter((r) => r.status === "fail")
+  const hasUnavailableRules = data.rules.some((rule) => rule.status === "unavailable")
 
   return (
     <div className="space-y-4">
+      {hasUnavailableRules && <DataState state="partial" reason={t("scorecard.loadError")} />}
       {/* Score header card */}
       <Card>
         <CardContent className="pt-4">

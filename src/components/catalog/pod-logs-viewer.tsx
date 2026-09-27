@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { DataState } from "@/components/ui/data-state"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useT } from "@/lib/i18n-client"
@@ -24,7 +25,7 @@ export function PodLogsViewer({ namespace, appName }: PodLogsViewerProps) {
   const [tailLines, setTailLines] = useState<TailLines>(200)
   const [previous, setPrevious] = useState(false)
 
-  const { data: podsData, isLoading: podsLoading } = useQuery<PodsResponse>({
+  const { data: podsData, isLoading: podsLoading, isError: podsError, refetch: refetchPods } = useQuery<PodsResponse>({
     queryKey: ["pods", namespace, appName],
     queryFn: () =>
       fetch(
@@ -46,6 +47,7 @@ export function PodLogsViewer({ namespace, appName }: PodLogsViewerProps) {
     data: logsData,
     isLoading: logsLoading,
     error: logsError,
+    refetch: refetchLogs,
   } = useQuery<PodLogsResponse>({
     queryKey: ["pods-logs", namespace, selectedPod, effectiveContainer, tailLines, previous],
     queryFn: () => {
@@ -165,25 +167,26 @@ export function PodLogsViewer({ namespace, appName }: PodLogsViewerProps) {
       </CardHeader>
 
       <CardContent className="pt-0">
-        {!selectedPod ? (
-          <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">
-            {pods.length === 0 && !podsLoading
-              ? `${appName}: No pods in namespace "${namespace}"`
-              : t("logs.selectPod")}
+        {!selectedPod ? podsLoading && !podsData ? (
+          <DataState state="loading" onRetry={() => { void refetchPods() }} />
+        ) : podsError && !podsData ? (
+          <DataState state="unavailable" onRetry={() => { void refetchPods() }} />
+        ) : (
+          <div className="space-y-2">
+            {podsError && <DataState state="stale" onRetry={() => { void refetchPods() }} />}
+          {pods.length === 0 ? <DataState state="empty" reason={`${appName}: No pods in namespace "${namespace}"`} /> : <p className="text-center text-xs text-muted-foreground">{t("logs.selectPod")}</p>}
           </div>
         ) : logsLoading ? (
-          <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">
-            {t("common.loading")}
-          </div>
+          <DataState state="loading" onRetry={() => { void refetchLogs() }} />
         ) : logsError ? (
-          <div className="flex items-center justify-center h-32 text-xs text-red-400">
-            {t("common.loadError")}
-          </div>
+          <DataState state="unavailable" onRetry={() => { void refetchLogs() }} />
+        ) : !logsData?.logs ? (
+          <DataState state="empty" reason={t("logs.noLogs")} />
         ) : (
           <pre
             className="bg-foreground/95 text-background rounded-md p-3 text-xs font-mono leading-relaxed overflow-auto max-h-[500px] whitespace-pre-wrap break-all"
           >
-            {logsData?.logs || t("logs.noLogs")}
+            {logsData.logs}
           </pre>
         )}
       </CardContent>

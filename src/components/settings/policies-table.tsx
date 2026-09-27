@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n-client"
+import { DataState } from "@/components/ui/data-state"
 
 interface KyvernoPolicy {
   name: string
@@ -17,7 +18,7 @@ interface KyvernoPolicy {
 
 export function PoliciesTable() {
   const t = useT()
-  const { data: policies = [], isLoading } = useQuery<KyvernoPolicy[]>({
+  const { data: policies, isLoading, isError, refetch } = useQuery<KyvernoPolicy[]>({
     queryKey: ["settings-policies"],
     queryFn: () => fetch("/api/settings/policies").then((r) => r.json()),
   })
@@ -25,13 +26,9 @@ export function PoliciesTable() {
   return (
     <Card className="p-5">
       <h2 className="font-semibold text-foreground mb-4">{t("policies.title")}</h2>
-      {isLoading ? (
-        <div className="h-32 bg-muted/50 rounded flex items-center justify-center">
-          <span className="text-sm text-muted-foreground animate-pulse">{t("common.loading")}</span>
-        </div>
-      ) : policies.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("policies.empty")}</p>
-      ) : (
+      {isLoading ? <DataState state="loading" onRetry={() => { void refetch() }} />
+        : isError ? <DataState state="error" onRetry={() => { void refetch() }} />
+        : !policies?.length ? <DataState state="empty" /> : (
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-muted-foreground">
