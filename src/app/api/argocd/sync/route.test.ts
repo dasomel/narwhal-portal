@@ -28,8 +28,10 @@ vi.mock("@/lib/valkey", () => ({
     throw new Error("Valkey unavailable in test environment")
   }),
 }))
+vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
 
 const { requireRole } = await import("@/lib/auth")
+const { invalidateFor } = await import("@/lib/cache-invalidation")
 const { assertAppAccessible, syncArgoApp, getArgoAppFresh, ArgoCDCredentialError } = await import("@/lib/argocd")
 const { POST } = await import("./route")
 
@@ -64,6 +66,7 @@ function req(body: unknown) {
 
 describe("POST /api/argocd/sync", () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.mocked(requireRole).mockResolvedValue({ session: devSession } as never)
     vi.mocked(assertAppAccessible).mockResolvedValue(mockApp)
     vi.mocked(syncArgoApp).mockResolvedValue({ name: "checkout-api", syncStatus: "Synced", revision: "rev-100" })
@@ -95,6 +98,7 @@ describe("POST /api/argocd/sync", () => {
   it("syncs and reports ok on convergence", async () => {
     const res = await POST(req({ appName: "checkout-api" }))
     expect(res.status).toBe(200)
+    expect(invalidateFor).toHaveBeenCalledWith("argocd.app.changed", { appName: "checkout-api" })
     const body = await res.json()
     expect(body.ok).toBe(true)
   })
@@ -129,6 +133,7 @@ describe("POST /api/argocd/sync", () => {
     )
     const res = await POST(req({ appName: "checkout-api" }))
     expect(res.status).toBe(503)
+    expect(invalidateFor).not.toHaveBeenCalled()
     const body = await res.json()
     expect(body.ok).toBe(false)
     expect(body.error).toContain("ArgoCD sync is unavailable")

@@ -10,6 +10,7 @@ import {
 } from "@/lib/tuning-approval"
 import { assertK8sNodeName, ValidationError, toValidationErrorBody } from "@/lib/validation"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
+import { invalidateFor } from "@/lib/cache-invalidation"
 
 export const dynamic = "force-dynamic"
 
@@ -168,6 +169,7 @@ export async function POST(
     const verification = parseVerification(result.logs, parsed.items)
     const verifiedOk = result.ok && verification.every((v) => v.ok)
     if (verifiedOk) {
+      await invalidateFor("node.tuning.changed", { nodeName })
       await completeOperation(
         ctx,
         `Node tuning apply completed: ${nodeName}`,

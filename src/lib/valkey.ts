@@ -157,7 +157,8 @@ export async function cacheDel(key: string): Promise<void> {
   if (!isValkeyConnected) return
   try {
     await getValkey().del(key, `${key}:meta`)
-  } catch {
+  } catch (error) {
+    console.error("[Valkey] Cache key deletion failed.", error instanceof Error ? error.message : error)
     isValkeyConnected = false
   }
 }

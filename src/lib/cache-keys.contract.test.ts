@@ -1,8 +1,9 @@
 import fs from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
-import { BUILDER_CHECKS, CACHE_NAMESPACES, cacheKeys, cacheTtl, type CacheDimension } from "./cache-keys"
+import { BUILDER_CHECKS, CACHE_NAMESPACES, cacheKeys, cacheTtl, type CacheDimension, type CacheInvalidationEvent } from "./cache-keys"
 import { clusterCacheKey } from "./cluster-registry"
+import { invalidationPatternsFor } from "./cache-invalidation"
 
 const SCOPE_LIKE_DIMENSIONS: CacheDimension[] = ["scope", "user", "role", "cluster"]
 
@@ -34,6 +35,34 @@ describe("cache-keys contract (#53)", () => {
       expect(spec.ttlSeconds !== undefined, `${name} must declare a TTL`).toBe(true)
       expect(typeof spec.invalidation, `${name} must document its invalidation trigger`).toBe("string")
       expect(spec.invalidation.length > 0, `${name} invalidation note must not be empty`).toBe(true)
+    }
+  })
+
+  it("every registered invalidation trigger has a namespace mapping and purge pattern", () => {
+    const mappings = new Map<string, string[]>()
+    for (const [name, spec] of Object.entries(CACHE_NAMESPACES)) {
+      for (const trigger of spec.invalidationTriggers ?? []) {
+        const patterns = spec.invalidationPatterns ?? []
+        expect(patterns.length, `${name} registers ${trigger} without purge patterns`).toBeGreaterThan(0)
+        mappings.set(trigger, [...(mappings.get(trigger) ?? []), ...patterns])
+      }
+    }
+    for (const [name, spec] of Object.entries(CACHE_NAMESPACES)) {
+      for (const trigger of spec.invalidationTriggers ?? []) {
+        expect(mappings.get(trigger), `${name}'s ${trigger} trigger has no mapping`).toBeDefined()
+      }
+    }
+    for (const [trigger, patterns] of mappings) {
+      expect(invalidationPatternsFor(trigger as CacheInvalidationEvent), `${trigger} helper mapping differs from registry`)
+        .toEqual([...new Set(patterns)])
+    }
+  })
+
+  it("high-frequency event types are never mapped to glob invalidation patterns", () => {
+    const highFrequencyEvents: CacheInvalidationEvent[] = ["event.ingested"]
+    for (const event of highFrequencyEvents) {
+      expect(invalidationPatternsFor(event).filter((pattern) => pattern.includes("*") || pattern.includes("?") || pattern.includes("[")), event)
+        .toEqual([])
     }
   })
 

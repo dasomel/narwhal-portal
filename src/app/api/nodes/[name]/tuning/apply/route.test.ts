@@ -17,11 +17,13 @@ vi.mock("@/lib/tuning-approval", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/tuning-approval")>()
   return { ...actual, consumeTuningApproval: vi.fn() }
 })
+vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
 
 const { requireRole } = await import("@/lib/auth")
 const { runHostJob } = await import("@/lib/k8s-job-runner")
 const { getNodeDetail } = await import("@/lib/k8s-client")
 const { consumeTuningApproval } = await import("@/lib/tuning-approval")
+const { invalidateFor } = await import("@/lib/cache-invalidation")
 const { POST } = await import("./route")
 
 const adminSession = { user: { role: "cluster-admin", email: "admin@example.com" } }
@@ -193,6 +195,7 @@ describe("POST /api/nodes/[name]/tuning/apply — positive control", () => {
     vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     const res = await POST(req({ items: [{ kind: "swap-off" }] }), ctx("node-1"))
     expect(res.status).toBe(200)
+    expect(invalidateFor).toHaveBeenCalledWith("node.tuning.changed", { nodeName: "node-1" })
     expect(consumeTuningApproval).toHaveBeenCalled()
     expect(runHostJob).toHaveBeenCalledWith({
       nodeName: "node-1",
@@ -262,6 +265,7 @@ describe("POST /api/nodes/[name]/tuning/apply — job execution failure", () => 
     vi.mocked(runHostJob).mockRejectedValue(new Error("job timeout"))
     const res = await POST(req({ items: [{ kind: "swap-off" }] }), ctx())
     expect(res.status).toBe(500)
+    expect(invalidateFor).not.toHaveBeenCalled()
     const body = await res.json()
     expect(body.error).toMatch(/job timeout/)
     expect(body.evidence.approvalId).toBe("approval-1")

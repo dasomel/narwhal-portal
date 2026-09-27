@@ -6,6 +6,7 @@ const valkeyStore = new Map<string, unknown>()
 vi.mock("@/lib/auth", () => ({
   requireAdmin: vi.fn(),
 }))
+vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
 
 vi.mock("@/lib/valkey", () => ({
   cacheGet: vi.fn(async (key: string) => (valkeyStore.has(key) ? valkeyStore.get(key) : null)),
@@ -38,6 +39,7 @@ vi.mock("@/lib/keycloak-client", async (importOriginal) => {
 })
 
 const { requireAdmin } = await import("@/lib/auth")
+const { invalidateFor } = await import("@/lib/cache-invalidation")
 const {
   getGroupsDetailed,
   getUsers,
@@ -226,6 +228,7 @@ describe("PATCH /api/settings/groups", () => {
   it("400s an invalid action", async () => {
     const res = await PATCH(patchReq({ action: "invalid-action", groupPk: "grp-1" }))
     expect(res.status).toBe(400)
+    expect(invalidateFor).not.toHaveBeenCalled()
   })
 
   it("400s when groupPk is missing", async () => {
@@ -249,8 +252,16 @@ describe("PATCH /api/settings/groups", () => {
     valkeyStore.set(KEYCLOAK_CACHE_KEYS.groupsEnriched, [{ pk: "grp-1" }])
     const res = await PATCH(patchReq({ action: "add", groupPk: "grp-1", userPk: "user-2" }))
     expect(res.status).toBe(200)
+    expect(invalidateFor).toHaveBeenCalledWith("iam.changed", { groupPk: "grp-1" })
     expect(addUserToGroup).toHaveBeenCalledWith("grp-1", "user-2")
     expect(valkeyStore.has(KEYCLOAK_CACHE_KEYS.groupsEnriched)).toBe(false)
+  })
+
+  it("does not invalidate unified projections when membership mutation fails", async () => {
+    vi.mocked(addUserToGroup).mockRejectedValue(new Error("Keycloak unavailable"))
+    const res = await PATCH(patchReq({ groupPk: "grp-1", userPk: "user-1", action: "add" }))
+    expect(res.status).toBe(500)
+    expect(invalidateFor).not.toHaveBeenCalled()
   })
 
   it("executes remove action and invalidates the enriched cache", async () => {

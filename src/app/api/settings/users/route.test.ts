@@ -17,8 +17,10 @@ vi.mock("@/lib/operation-context", () => ({
   completeOperation: vi.fn().mockResolvedValue(undefined),
   failOperation: vi.fn().mockResolvedValue(undefined),
 }))
+vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
 
 const { requireAdmin } = await import("@/lib/auth")
+const { invalidateFor } = await import("@/lib/cache-invalidation")
 const { getUsers, createUser, getGroups, addUserToGroup } = await import("@/lib/keycloak-client")
 const { beginOperation, completeOperation, failOperation } = await import("@/lib/operation-context")
 const { getIdempotencyStore, fulfillIdempotencyKey } = await import("@/lib/idempotency")
@@ -206,6 +208,7 @@ describe("POST /api/settings/users — role groups handling", () => {
   it("creates bare user when no groups are provided (unchanged behavior)", async () => {
     const res = await POST(req(validBody) as never)
     expect(res.status).toBe(201)
+    expect(invalidateFor).toHaveBeenCalledWith("iam.changed", { userPk: newUser.pk })
     expect(createUser).toHaveBeenCalledTimes(1)
     expect(getGroups).not.toHaveBeenCalled()
     expect(addUserToGroup).not.toHaveBeenCalled()
@@ -299,6 +302,7 @@ describe("POST /api/settings/users — audit/event emission", () => {
     vi.mocked(createUser).mockRejectedValue(new Error("Keycloak unavailable"))
     const res = await POST(req(validBody) as never)
     expect(res.status).toBe(500)
+    expect(invalidateFor).not.toHaveBeenCalled()
     expect(failOperation).toHaveBeenCalled()
   })
 })

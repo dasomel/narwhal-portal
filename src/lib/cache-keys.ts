@@ -44,10 +44,9 @@
  * Out of scope for this module (left as-is, not duplicated):
  * - `KEYCLOAK_CACHE_KEYS` / `invalidateKeycloakCaches` (src/lib/keycloak-client.ts)
  *   already centralize the `keycloak:*` / `api:groups-enriched` keys per #49.
- * - `src/lib/argocd.ts`, `src/lib/gitea.ts`, `src/lib/http-client.ts` are
- *   excluded from this slice (open PR #143 / other in-flight work); their
- *   `argocd:*` and `dora:commit:*` keys are documented in the registry below
- *   for completeness but are not built through this module.
+ * - `src/lib/argocd.ts`, `src/lib/gitea.ts`, `src/lib/http-client.ts` retain
+ *   their existing key shapes; ArgoCD mutation routes still participate in
+ *   the registry-driven invalidation contract below.
  */
 
 /** Named dimensions a cache key may legitimately depend on. */
@@ -112,6 +111,10 @@ export interface CacheNamespaceSpec {
   ownerPath?: string
   /** What mutation/event invalidates or expires this entry. */
   invalidation: string
+  /** Mutation events that make this projection stale. */
+  invalidationTriggers?: CacheInvalidationEvent[]
+  /** Valkey glob patterns used to purge every key in this namespace. */
+  invalidationPatterns?: string[]
   /** Whether a failed or partial provider response is ever cached under this namespace. */
   cachesPartial: boolean
   /**
@@ -133,6 +136,17 @@ export interface CacheNamespaceSpec {
   unscopedReason?: UnscopedReason
   note?: string
 }
+
+export type CacheInvalidationEvent =
+  | "iam.changed"
+  | "namespace.changed"
+  | "cluster.changed"
+  | "argocd.app.changed"
+  | "apisix.route.changed"
+  | "alert.silence.changed"
+  | "certificate.renewed"
+  | "node.tuning.changed"
+  | "event.ingested"
 
 function join(...parts: Array<string | number | boolean | undefined | null>): string {
   return parts.filter((p) => p !== undefined && p !== null && p !== "").join(":")
@@ -273,7 +287,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["user", "scope"],
     ttlSeconds: 15,
     owner: "src/app/api/my-apps/route.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on IAM, namespace, cluster, or ArgoCD app changes",
+    invalidationTriggers: ["iam.changed", "namespace.changed", "cluster.changed", "argocd.app.changed"],
+    invalidationPatterns: ["my-apps:*"],
     cachesPartial: false,
     securitySensitive: true,
     note: "Response is the caller's own apps/deploys/alerts — must not be served to a different user or scope.",
@@ -285,6 +301,8 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     owner: "src/app/api/settings/routes/route.ts",
     ownerPath: "src/app/api/settings/routes/route.ts",
     invalidation: "cacheDel on POST (route create/update)",
+    invalidationTriggers: ["apisix.route.changed"],
+    invalidationPatterns: ["api:routes-list"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "admin-only-route", detail: "requireAdmin()-gated; identical route list for every admin." },
@@ -325,7 +343,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     ttlSeconds: 10,
     owner: "src/app/api/k8s/pods/route.ts",
     ownerPath: "src/app/api/k8s/pods/route.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on namespace changes",
+    invalidationTriggers: ["namespace.changed"],
+    invalidationPatterns: ["k8s:pods:*"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: {
@@ -339,7 +359,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     ttlSeconds: 10,
     owner: "src/app/api/k8s/events/route.ts",
     ownerPath: "src/app/api/k8s/events/route.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on namespace changes",
+    invalidationTriggers: ["namespace.changed"],
+    invalidationPatterns: ["k8s:events:*"],
     cachesPartial: false,
     securitySensitive: false,
     // #145 fixed the gap this entry used to describe: namespaceVisible() is
@@ -356,7 +378,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     ttlSeconds: 10,
     owner: "src/app/api/k8s/resource/route.ts",
     ownerPath: "src/app/api/k8s/resource/route.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on namespace changes",
+    invalidationTriggers: ["namespace.changed"],
+    invalidationPatterns: ["k8s:resource:*"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "gate-then-serve", detail: "Gate-then-serve, same as k8s:pods." },
@@ -367,7 +391,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     ttlSeconds: 15,
     owner: "src/app/api/pods/route.ts",
     ownerPath: "src/app/api/pods/route.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on namespace changes",
+    invalidationTriggers: ["namespace.changed"],
+    invalidationPatterns: ["pods:list:*"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "gate-then-serve", detail: "Gate-then-serve (portal#33): namespaceVisible() checked before every cache lookup." },
@@ -378,7 +404,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     ttlSeconds: 5,
     owner: "src/app/api/pods/[namespace]/[pod]/logs/route.ts",
     ownerPath: "src/app/api/pods/[namespace]/[pod]/logs/route.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on namespace changes",
+    invalidationTriggers: ["namespace.changed"],
+    invalidationPatterns: ["pods:logs:*"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "gate-then-serve", detail: "Gate-then-serve, same as pods:list." },
@@ -399,7 +427,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["scope"],
     ttlSeconds: 30,
     owner: "src/app/api/governance/resources/route.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on IAM or namespace changes",
+    invalidationTriggers: ["iam.changed", "namespace.changed"],
+    invalidationPatterns: ["governance:resources:v3:*"],
     cachesPartial: false,
     securitySensitive: true,
     note: "#147: scoped per caller — non-admins reach this route too (nav gates to cluster-admin/developer/viewer, not admin-only), so the response is filtered to the caller's effective scope and the key carries scope.fingerprint.",
@@ -431,7 +461,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["scope"],
     ttlSeconds: 120,
     owner: "src/app/api/governance/dora/route.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on IAM or namespace changes",
+    invalidationTriggers: ["iam.changed", "namespace.changed"],
+    invalidationPatterns: ["governance:dora:v2:*"],
     cachesPartial: false,
     securitySensitive: true,
   },
@@ -440,7 +472,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["scope"],
     ttlSeconds: 30,
     owner: "src/app/api/governance/scorecard/route.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on IAM or namespace changes",
+    invalidationTriggers: ["iam.changed", "namespace.changed"],
+    invalidationPatterns: ["governance:scorecard:*"],
     cachesPartial: false,
     securitySensitive: true,
   },
@@ -449,7 +483,10 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["scope"],
     ttlSeconds: 15,
     owner: "src/app/api/events/route.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on IAM changes; event data expires after 15 seconds",
+    // High-frequency producers must not trigger pattern invalidation; TTL covers it.
+    invalidationTriggers: ["iam.changed"],
+    invalidationPatterns: ["events:timeline:*"],
     cachesPartial: false,
     securitySensitive: true,
   },
@@ -459,7 +496,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     ttlSeconds: 30,
     owner:
       "src/app/api/cluster/route.ts (writer) + src/app/(dashboard)/security/page.tsx (reader) — both via clusterCacheKey, src/lib/cluster-registry.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on cluster registry changes",
+    invalidationTriggers: ["cluster.changed"],
+    invalidationPatterns: ["cluster:*:infra"],
     cachesPartial: false,
     securitySensitive: true,
     note:
@@ -470,7 +509,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["cluster"],
     ttlSeconds: 30,
     owner: "src/app/api/domain/clusters/route.ts (key via clusterCacheKey)",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on cluster registry changes",
+    invalidationTriggers: ["cluster.changed"],
+    invalidationPatterns: ["cluster:*:domain"],
     cachesPartial: false,
     securitySensitive: true,
   },
@@ -519,7 +560,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["scope", "query"],
     ttlSeconds: 300,
     owner: "src/lib/cost.ts",
-    invalidation: "TTL only; only telemetry.state==='ok' results are cached",
+    invalidation: "prefix purge on IAM or namespace changes; TTL otherwise",
+    invalidationTriggers: ["iam.changed", "namespace.changed"],
+    invalidationPatterns: ["cost:v2:*"],
     cachesPartial: false,
     securitySensitive: true,
   },
@@ -528,7 +571,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["scope", "query"],
     ttlSeconds: 300,
     owner: "src/lib/cost.ts",
-    invalidation: "TTL only; only telemetry.state==='ok' results are cached",
+    invalidation: "prefix purge on IAM or namespace changes; TTL otherwise",
+    invalidationTriggers: ["iam.changed", "namespace.changed"],
+    invalidationPatterns: ["cost:service:v2:*"],
     cachesPartial: false,
     securitySensitive: true,
   },
@@ -537,7 +582,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["scope", "query"],
     ttlSeconds: 3600,
     owner: "src/lib/cost.ts",
-    invalidation: "TTL only; only telemetry.state==='ok' (incl. the deterministic 'empty' case) results are cached",
+    invalidation: "prefix purge on IAM or namespace changes; TTL otherwise",
+    invalidationTriggers: ["iam.changed", "namespace.changed"],
+    invalidationPatterns: ["cost:trend:v2:*"],
     cachesPartial: false,
     securitySensitive: true,
   },
@@ -547,6 +594,8 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     ttlSeconds: 30,
     owner: "src/lib/apisix-client.ts",
     invalidation: "cacheDel on route mutation",
+    invalidationTriggers: ["apisix.route.changed"],
+    invalidationPatterns: ["apisix:routes"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: {
@@ -701,7 +750,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: [],
     ttlSeconds: 15,
     owner: "src/lib/alertmanager.ts",
-    invalidation: "TTL only",
+    invalidation: "cacheDel on silence create/delete",
+    invalidationTriggers: ["alert.silence.changed"],
+    invalidationPatterns: ["alerts:active"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: {
@@ -804,7 +855,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["query"],
     ttlSeconds: 60,
     owner: "src/lib/service-graph.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on namespace changes",
+    invalidationTriggers: ["namespace.changed"],
+    invalidationPatterns: ["graph:cluster:*"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide service dependency graph, not per-caller." },
@@ -815,7 +868,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: ["query"],
     ttlSeconds: 60,
     owner: "src/lib/service-graph.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on namespace changes",
+    invalidationTriggers: ["namespace.changed"],
+    invalidationPatterns: ["graph:svc:*"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "cluster-wide-state", detail: "Cluster-wide service dependency graph, not per-caller." },
@@ -845,7 +900,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: [],
     ttlSeconds: 30,
     owner: "src/lib/k8s-client.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on namespace or cluster changes",
+    invalidationTriggers: ["namespace.changed", "cluster.changed"],
+    invalidationPatterns: ["k8s:namespaces"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller; namespace visibility filtering happens downstream in role-filter.ts/scope.ts." },
@@ -855,7 +912,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: [],
     ttlSeconds: 30,
     owner: "src/lib/k8s-client.ts",
-    invalidation: "TTL only",
+    invalidation: "prefix purge on IAM or cluster changes",
+    invalidationTriggers: ["iam.changed", "cluster.changed"],
+    invalidationPatterns: ["k8s:rbac"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state; this is a cluster-admin surface gated at the route level, not in this cache." },
@@ -876,7 +935,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: [],
     ttlSeconds: 60,
     owner: "src/lib/k8s-client.ts",
-    invalidation: "cacheDel(k8s:certs) on cert rotation; TTL only otherwise",
+    invalidation: "cache purge on certificate renewal",
+    invalidationTriggers: ["certificate.renewed"],
+    invalidationPatterns: ["k8s:certs"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
@@ -906,7 +967,9 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: [],
     ttlSeconds: 30,
     owner: "src/lib/k8s-client.ts",
-    invalidation: "TTL only",
+    invalidation: "cache purge on node tuning",
+    invalidationTriggers: ["node.tuning.changed"],
+    invalidationPatterns: ["k8s:node-readiness", "k8s:node:*"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "cluster-wide-state", detail: "Cluster infrastructure state, not per-caller." },
@@ -997,14 +1060,16 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     dimensions: [],
     ttlSeconds: 10,
     owner: "src/lib/argocd.ts (excluded from this slice)",
-    invalidation: "cacheDel on sync",
+    invalidation: "prefix purge on ArgoCD app or namespace changes",
+    invalidationTriggers: ["argocd.app.changed", "namespace.changed"],
+    invalidationPatterns: ["argocd:apps", "argocd:app:*"],
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: {
       code: "downstream-filtered",
       detail: "Cluster-wide ArgoCD application state; per-caller filtering (appVisible) happens downstream at the route level, not in this cache.",
     },
-    note: "Out of scope for #53 per task instructions (src/lib/argocd.ts and its route caller are excluded — open PR #143 dependency).",
+    note: "Existing argocd.ts key shapes are retained; sync and rollback routes call the registry-driven invalidator.",
   },
   "dora:commit:{sha}": {
     example: "dora:commit:{sha}",

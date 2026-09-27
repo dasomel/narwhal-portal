@@ -10,6 +10,7 @@ import {
 import type { KeycloakUser } from "@/lib/keycloak-client"
 import { requireAdmin } from "@/lib/auth"
 import { cacheGet, cacheSet } from "@/lib/valkey"
+import { invalidateFor } from "@/lib/cache-invalidation"
 
 export const dynamic = "force-dynamic"
 
@@ -68,6 +69,7 @@ export async function PATCH(req: NextRequest) {
       if (!attributes) return NextResponse.json({ error: "attributes required" }, { status: 400 })
       await updateGroupAttributes(groupPk, attributes)
     }
+    await invalidateFor("iam.changed", { groupPk })
     // Portal #49: each keycloak-client mutation above already invalidates
     // KEYCLOAK_CACHE_KEYS.groupsEnriched itself — keep invalidation
     // single-owner there instead of duplicating it in this route.

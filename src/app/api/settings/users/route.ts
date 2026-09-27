@@ -4,6 +4,7 @@ import type { KeycloakUser } from "@/lib/keycloak-client"
 import { requireAdmin, getActorId, ALLOWED_GROUPS, type UserRole } from "@/lib/auth"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 import { claimIdempotencyKey, fulfillIdempotencyKey, getIdempotencyStore } from "@/lib/idempotency"
+import { invalidateFor } from "@/lib/cache-invalidation"
 
 export const dynamic = "force-dynamic"
 
@@ -218,6 +219,7 @@ export async function POST(req: NextRequest) {
     // cache on success — no separate invalidation needed here now that GET
     // reads from that same cache.
     created = await createUser(payload)
+    await invalidateFor("iam.changed", { userPk: created.pk })
   } catch (err) {
     await failOperation(ctx, `User create failed: ${payload.username}`, (err as Error).message)
     console.error("POST /api/settings/users error:", err)

@@ -11,6 +11,7 @@ import {
 } from "@/lib/argocd"
 import { assertK8sName, ValidationError, toValidationErrorBody } from "@/lib/validation"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
+import { invalidateFor } from "@/lib/cache-invalidation"
 
 export const dynamic = "force-dynamic"
 
@@ -81,6 +82,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
       )
       return NextResponse.json({ error: "Rollback failed" }, { status: 500 })
     }
+
+    await invalidateFor("argocd.app.changed", { appName: name })
 
     // portal#59: rollbackArgoApp only tells us ArgoCD accepted the rollback
     // request (HTTP 2xx), not that reconciliation to the target revision

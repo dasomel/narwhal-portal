@@ -27,8 +27,10 @@ vi.mock("@/lib/valkey", () => ({
     throw new Error("Valkey unavailable in test environment")
   }),
 }))
+vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
 
 const { requireRole } = await import("@/lib/auth")
+const { invalidateFor } = await import("@/lib/cache-invalidation")
 const { assertAppAccessible, rollbackArgoApp, getArgoAppFresh, ArgoCDCredentialError } = await import("@/lib/argocd")
 const { POST } = await import("./route")
 const { getRecentEvents } = await import("@/lib/live-stream")
@@ -68,6 +70,7 @@ function params(name: string) {
 
 describe("POST /api/catalog/[name]/rollback", () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     vi.mocked(assertAppAccessible).mockResolvedValue(mockApp)
     vi.mocked(rollbackArgoApp).mockResolvedValue(true)
@@ -111,6 +114,7 @@ describe("POST /api/catalog/[name]/rollback", () => {
 
     const res = await POST(req, params("checkout-api"))
     expect(res.status).toBe(200)
+    expect(invalidateFor).toHaveBeenCalledWith("argocd.app.changed", { appName: "checkout-api" })
     const body = await res.json()
     expect(body.success).toBe(true)
 
@@ -174,6 +178,7 @@ describe("POST /api/catalog/[name]/rollback", () => {
     })
     const res = await POST(req, params("checkout-api"))
     expect(res.status).toBe(503)
+    expect(invalidateFor).not.toHaveBeenCalled()
     const body = await res.json()
     expect(body.error).toContain("Catalog rollback is unavailable")
   })

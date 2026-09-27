@@ -5,6 +5,7 @@ import { beginOperation, completeOperation, failOperation } from "@/lib/operatio
 import { claimIdempotencyKey, fulfillIdempotencyKey, getIdempotencyStore } from "@/lib/idempotency"
 import { checkSilenceScope, type SilenceMatcher } from "@/lib/alert-silence-scope"
 import { getEffectiveScope } from "@/lib/scope"
+import { invalidateFor } from "@/lib/cache-invalidation"
 
 export const dynamic = "force-dynamic"
 
@@ -135,6 +136,7 @@ export async function POST(req: Request) {
     await failOperation(ctx, "Alert silence create failed", "Alertmanager did not return a silence ID")
     return NextResponse.json({ error: "Failed to create silence" }, { status: 500 })
   }
+  await invalidateFor("alert.silence.changed", { silenceId })
 
   if (idempotencyStoreKey) {
     await fulfillIdempotencyKey(getIdempotencyStore(), idempotencyStoreKey, silenceId)
@@ -194,6 +196,8 @@ export async function DELETE(req: Request) {
     await failOperation(ctx, `Alert silence delete failed: ${silenceId}`)
     return NextResponse.json({ error: "Failed to delete silence" }, { status: 500 })
   }
+
+  await invalidateFor("alert.silence.changed", { silenceId })
 
   await completeOperation(ctx, `Alert silence deleted: ${silenceId}`)
 
