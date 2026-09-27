@@ -27,6 +27,7 @@
  * change that must bump a namespace's shape does so by adding a version
  * segment to that one builder — deliberately, and noted in
  * `CACHE_NAMESPACES` — never by editing the join order silently.
+ * Valkey freshness metadata uses a derived `:meta` sibling key, not a separately registered namespace.
  *
  * Registry granularity: every `cacheKeys` builder has its OWN `CACHE_NAMESPACES`
  * entry — even builders that share a common key prefix (e.g. the twelve

@@ -8,14 +8,14 @@ import type { NamespaceInfo, PodSummary } from "@/lib/k8s-client"
 // src/app/api/catalog/route.test.ts for the mocking rationale (auth mocked
 // wholesale; scope.ts left real).
 vi.mock("@/lib/auth", () => ({ auth: vi.fn() }))
-vi.mock("@/lib/valkey", () => ({ cacheGet: vi.fn(), cacheSet: vi.fn() }))
+vi.mock("@/lib/valkey", () => ({ cacheGet: vi.fn(), cacheGetWithMeta: vi.fn(), cacheSet: vi.fn() }))
 vi.mock("@/lib/k8s-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/k8s-client")>()
   return { ...actual, getNamespaces: vi.fn(), getPodsList: vi.fn() }
 })
 
 const { auth } = await import("@/lib/auth")
-const { cacheGet, cacheSet } = await import("@/lib/valkey")
+const { cacheGet, cacheGetWithMeta, cacheSet } = await import("@/lib/valkey")
 const { getNamespaces, getPodsList } = await import("@/lib/k8s-client")
 const { GET } = await import("./route")
 
@@ -44,6 +44,7 @@ beforeEach(() => {
   vi.mocked(getNamespaces).mockResolvedValue(namespaces)
   vi.mocked(getPodsList).mockResolvedValue(pods)
   vi.mocked(cacheGet).mockResolvedValue(null)
+  vi.mocked(cacheGetWithMeta).mockResolvedValue(null)
   vi.mocked(cacheSet).mockResolvedValue(undefined)
 })
 
@@ -61,6 +62,7 @@ describe("GET /api/k8s/pods — scope enforcement", () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.pods).toEqual(pods)
+    expect(body.freshness.source).toBe("live")
     expect(getPodsList).toHaveBeenCalledWith("platform-system", undefined)
   })
 
@@ -88,9 +90,9 @@ describe("GET /api/k8s/pods — scope enforcement", () => {
     const frontendPods: PodSummary[] = [
       { name: "pod-2", namespace: "frontend-app", phase: "Running", ready: "1/1", restarts: 0, node: "node-2", age: "2d", images: ["nginx:2"] },
     ]
-    vi.mocked(cacheGet).mockImplementation(async (key: string) => {
-      if (key === "k8s:pods:platform-system:all") return pods
-      if (key === "k8s:pods:frontend-app:all") return frontendPods
+    vi.mocked(cacheGetWithMeta).mockImplementation(async (key: string) => {
+      if (key === "k8s:pods:platform-system:all") return { value: pods, cachedAt: "2026-09-28T00:00:00.000Z", ageSeconds: 0 }
+      if (key === "k8s:pods:frontend-app:all") return { value: frontendPods, cachedAt: "2026-09-28T00:00:00.000Z", ageSeconds: 0 }
       return null
     })
     vi.mocked(auth).mockResolvedValue(adminSession as never)
@@ -98,8 +100,11 @@ describe("GET /api/k8s/pods — scope enforcement", () => {
     const platformRes = await GET(req("platform-system"))
     const frontendRes = await GET(req("frontend-app"))
 
-    expect((await platformRes.json()).pods).toEqual(pods)
-    expect((await frontendRes.json()).pods).toEqual(frontendPods)
+    const platformBody = await platformRes.json()
+    const frontendBody = await frontendRes.json()
+    expect(platformBody.pods).toEqual(pods)
+    expect(frontendBody.pods).toEqual(frontendPods)
+    expect(platformBody.freshness).toEqual({ source: "cache", observedAt: "2026-09-28T00:00:00.000Z" })
     // Both served from cache — the upstream list call never ran for either namespace.
     expect(getPodsList).not.toHaveBeenCalled()
   })

@@ -95,6 +95,40 @@ export function getLiveValkey(): Redis {
   return liveClient
 }
 
+export interface CachedValue<T> {
+  value: T
+  cachedAt: string | null
+  ageSeconds: number | null
+}
+
+interface CacheMetadata {
+  cachedAt: string
+}
+
+export async function cacheGetWithMeta<T>(key: string): Promise<CachedValue<T> | null> {
+  if (!isValkeyConnected) return null
+  try {
+    const [val, meta] = await getValkey().mget(key, `${key}:meta`)
+    if (val === null) return null
+    const parsed: unknown = JSON.parse(val)
+    if (parsed === null) return null
+    const metadata: unknown = meta === null ? null : JSON.parse(meta)
+    const cachedAt =
+      typeof metadata === "object" && metadata !== null &&
+      "cachedAt" in metadata && typeof (metadata as CacheMetadata).cachedAt === "string" &&
+      Number.isFinite(Date.parse((metadata as CacheMetadata).cachedAt))
+        ? (metadata as CacheMetadata).cachedAt
+        : null
+    if (cachedAt !== null) {
+      return { value: parsed as T, cachedAt, ageSeconds: Math.max(0, (Date.now() - Date.parse(cachedAt)) / 1000) }
+    }
+    return { value: parsed as T, cachedAt: null, ageSeconds: null }
+  } catch {
+    isValkeyConnected = false
+    return null
+  }
+}
+
 export async function cacheGet<T>(key: string): Promise<T | null> {
   if (!isValkeyConnected) return null
   try {
@@ -109,7 +143,11 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
 export async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promise<void> {
   if (!isValkeyConnected) return
   try {
-    await getValkey().set(key, JSON.stringify(value), "EX", ttlSeconds)
+    const cachedAt = new Date().toISOString()
+    await getValkey().multi()
+      .set(key, JSON.stringify(value), "EX", ttlSeconds)
+      .set(`${key}:meta`, JSON.stringify({ cachedAt }), "EX", ttlSeconds)
+      .exec()
   } catch {
     isValkeyConnected = false
   }
@@ -118,7 +156,7 @@ export async function cacheSet(key: string, value: unknown, ttlSeconds: number):
 export async function cacheDel(key: string): Promise<void> {
   if (!isValkeyConnected) return
   try {
-    await getValkey().del(key)
+    await getValkey().del(key, `${key}:meta`)
   } catch {
     isValkeyConnected = false
   }

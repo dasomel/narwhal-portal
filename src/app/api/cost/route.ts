@@ -27,6 +27,7 @@ export interface CostResponse {
   // (so consumers don't parse the Korean `notice` prose).
   telemetry: Awaited<ReturnType<typeof getCost>>["telemetry"]
   exclusions?: Awaited<ReturnType<typeof getCost>>["exclusions"]
+  freshness: { source: "cache" | "live"; observedAt: string | null }
 }
 
 export async function GET(req: NextRequest) {
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
     // effective scope the other scoped routes apply, before any aggregation happens.
     const effScope = await getEffectiveScope(gate.session)
     const pricing = getCostPricing()
-    const { items, notice, telemetry, exclusions } = await getCost(
+    const { items, notice, telemetry, exclusions, freshnessSource } = await getCost(
       scope as "cluster" | "namespace" | "service",
       effScope
     )
@@ -64,6 +65,7 @@ export async function GET(req: NextRequest) {
       pricing: pricing.metadata,
       items,
       telemetry,
+      freshness: { source: freshnessSource ?? "live", observedAt: telemetry.queriedAt ?? null },
     }
     if (notice) body.notice = notice
     if (exclusions) body.exclusions = exclusions

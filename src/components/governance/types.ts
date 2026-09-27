@@ -142,6 +142,7 @@ export interface NoRequestPod {
   containers: string[]
 }
 export interface ResourcesResponseV2 {
+  freshness?: { source: "cache" | "live"; observedAt: string | null }
   namespaces: NamespaceUsageV2[]
   topCpuPods: TopPod[]        // top 10 by cpu usage, cluster-wide (exclude kube-*)
   topMemPods: TopPod[]        // top 10 by memory
@@ -219,4 +220,3 @@ export interface DistributionResponse {
   recommendations: DistributionRecommendation[]
   controlPlanePods: ControlPlanePod[]
 }
-

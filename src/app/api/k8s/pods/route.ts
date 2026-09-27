@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { getPodsList, PodSummary } from "@/lib/k8s-client"
-import { cacheGet, cacheSet } from "@/lib/valkey"
+import { cacheGetWithMeta, cacheSet } from "@/lib/valkey"
 import { cacheKeys, cacheTtl } from "@/lib/cache-keys"
 import { ValidationError, toValidationErrorBody, assertK8sNamespace } from "@/lib/validation"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic"
 
 export interface PodListResponse {
   pods: PodSummary[]
+  freshness: { source: "cache" | "live"; observedAt: string | null }
 }
 
 export async function GET(req: NextRequest) {
@@ -61,9 +62,9 @@ export async function GET(req: NextRequest) {
 
   const cacheKey = cacheKeys.k8sPods(namespace, app)
   try {
-    const cached = await cacheGet<PodSummary[]>(cacheKey)
+    const cached = await cacheGetWithMeta<PodSummary[]>(cacheKey)
     if (cached) {
-      return NextResponse.json<PodListResponse>({ pods: cached })
+      return NextResponse.json<PodListResponse>({ pods: cached.value, freshness: { source: "cache", observedAt: cached.cachedAt } })
     }
   } catch (err) {
     console.warn("[k8s-pods-api] Cache lookup failed:", err)
@@ -78,7 +79,7 @@ export async function GET(req: NextRequest) {
       console.warn("[k8s-pods-api] Cache save failed:", err)
     }
 
-    return NextResponse.json<PodListResponse>({ pods })
+    return NextResponse.json<PodListResponse>({ pods, freshness: { source: "live", observedAt: new Date().toISOString() } })
   } catch (err) {
     if (err instanceof ValidationError) {
       return NextResponse.json(toValidationErrorBody(err), { status: 400 })

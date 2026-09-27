@@ -10,14 +10,14 @@ import type { EffectiveScope } from "@/lib/scope"
 // namespaceVisible resolution against config/role-filter.json, not a stand-in for it.
 // @/lib/valkey is a no-op mock so getCost's cache is exercised without a real Valkey.
 vi.mock("@/lib/auth", () => ({ requireRole: vi.fn() }))
-vi.mock("@/lib/valkey", () => ({ cacheGet: vi.fn(), cacheSet: vi.fn() }))
+vi.mock("@/lib/valkey", () => ({ cacheGet: vi.fn(), cacheGetWithMeta: vi.fn(), cacheSet: vi.fn() }))
 vi.mock("@/lib/k8s-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/k8s-client")>()
   return { ...actual, getNamespaces: vi.fn() }
 })
 
 const { requireRole } = await import("@/lib/auth")
-const { cacheGet, cacheSet } = await import("@/lib/valkey")
+const { cacheGet, cacheGetWithMeta, cacheSet } = await import("@/lib/valkey")
 const { getNamespaces } = await import("@/lib/k8s-client")
 const { getEffectiveScope } = await import("@/lib/scope")
 const { getCost, getCostByService, getCostTrend } = await import("@/lib/cost")
@@ -102,6 +102,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(getNamespaces).mockResolvedValue(namespaces)
   vi.mocked(cacheGet).mockResolvedValue(null)
+  vi.mocked(cacheGetWithMeta).mockResolvedValue(null)
   vi.mocked(cacheSet).mockResolvedValue(undefined)
   vi.stubGlobal("fetch", vi.fn((url: string) => Promise.resolve(fakeFetch(url))))
 })
@@ -121,6 +122,7 @@ describe("GET /api/cost — scope enforcement", () => {
     const res = await GET(requestUrl("namespace"))
     expect(res.status).toBe(200)
     const body = await res.json()
+    expect(body.freshness.source).toBe("live")
     const storageOnly = body.items.find((item: { id: string }) => item.id === "storage-only")
     expect(storageOnly).toMatchObject({
       id: "storage-only",
@@ -256,6 +258,19 @@ describe("GET /api/cost — scope enforcement", () => {
       configured: true,
     })
     expect(body.unitPrices).toEqual({ cpuHourly: 6.82, memGbHourly: 1.22, storageGbHourly: 0.0037 })
+  })
+
+  it("reports cache freshness using the original cost capture time", async () => {
+    configurePricing()
+    vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
+    vi.mocked(cacheGetWithMeta).mockResolvedValueOnce({
+      value: { items: [], telemetry: { source: "prometheus", queriedAt: "2026-09-26T00:00:00.000Z", state: "ok" } } as never,
+      cachedAt: "2026-09-27T00:00:00.000Z", ageSeconds: 86_400,
+    })
+
+    const body = await (await GET(requestUrl())).json()
+    expect(body.freshness).toEqual({ source: "cache", observedAt: "2026-09-27T00:00:00.000Z" })
+    expect(body.telemetry.queriedAt).toBe("2026-09-27T00:00:00.000Z")
   })
 
   it("rejects missing production pricing instead of using development placeholders", async () => {

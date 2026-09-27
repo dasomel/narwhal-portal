@@ -5,7 +5,7 @@
  * spec §4.5: 캐시 TTL cost:{scope}:{id} = 5min, cost:trend:{scope}:{id}:{days} = 1hour
  */
 
-import { cacheGet, cacheSet } from "./valkey"
+import { cacheGet, cacheGetWithMeta, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
 import { namespaceVisible, type EffectiveScope } from "./scope"
 import { getDependencyUrl, isProduction } from "./config"
@@ -381,6 +381,7 @@ export interface CostResult {
   notice?: string
   telemetry: CostTelemetry
   exclusions?: CostExclusions
+  freshnessSource?: "cache"
 }
 
 export interface CostUnavailableResult {
@@ -517,8 +518,17 @@ export async function getCost(
   // v2: 캐시에 telemetry/exclusions가 없던 이전 배포분의 항목을 그대로 반환하지
   // 않도록 키 네임스페이스를 분리한다 (크리틱 리뷰 #7).
   const cacheKey = cacheKeys.costV2(scope, effScope.fingerprint, pricingCacheKey(pricing))
-  const cached = await cacheGet<CostResult>(cacheKey)
-  if (cached !== null) return cached
+  const cached = await cacheGetWithMeta<CostResult>(cacheKey)
+  if (cached !== null) {
+    return {
+      ...cached.value,
+      telemetry: {
+        ...cached.value.telemetry,
+        queriedAt: cached.cachedAt ?? cached.value.telemetry.queriedAt,
+      },
+      freshnessSource: "cache",
+    }
+  }
 
   const queriedAt = new Date().toISOString()
 

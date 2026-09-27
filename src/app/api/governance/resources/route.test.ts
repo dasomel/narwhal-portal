@@ -9,7 +9,7 @@ import type { VectorMetricResult, ClusterMetricsProjection } from "@/lib/prometh
 // admin-only. See src/app/api/catalog/route.test.ts for the mocking rationale (auth
 // mocked wholesale; @/lib/scope left real so this exercises real scope resolution).
 vi.mock("@/lib/auth", () => ({ auth: vi.fn() }))
-vi.mock("@/lib/valkey", () => ({ cacheGet: vi.fn(), cacheSet: vi.fn() }))
+vi.mock("@/lib/valkey", () => ({ cacheGet: vi.fn(), cacheGetWithMeta: vi.fn(), cacheSet: vi.fn() }))
 vi.mock("@/lib/prometheus", () => ({ queryVector: vi.fn(), getClusterMetrics: vi.fn() }))
 vi.mock("@/lib/k8s-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/k8s-client")>()
@@ -17,6 +17,7 @@ vi.mock("@/lib/k8s-client", async (importOriginal) => {
 })
 
 const { auth } = await import("@/lib/auth")
+const { cacheGetWithMeta } = await import("@/lib/valkey")
 const { queryVector, getClusterMetrics } = await import("@/lib/prometheus")
 const { getNamespaces, getAllPodsMinimal } = await import("@/lib/k8s-client")
 const { GET } = await import("./route")
@@ -96,6 +97,7 @@ describe("GET /api/governance/resources — scope enforcement", () => {
     const res = await GET()
     expect(res.status).toBe(200)
     const body = await res.json()
+    expect(body.freshness.source).toBe("live")
 
     const nsNames = body.namespaces.map((n: { namespace: string }) => n.namespace)
     expect(nsNames).toEqual(["frontend-app"])
@@ -135,6 +137,23 @@ describe("GET /api/governance/resources — scope enforcement", () => {
     expect(body.cluster.cpuPercent).toBe(42)
     expect(body.cluster.noRequestPods).toBe(2)
     expect(body.cluster.basis).toBe("cluster-capacity")
+  })
+
+  it("reports the original capture time on a cached response", async () => {
+    vi.mocked(auth).mockResolvedValue(adminSession as never)
+    const cachedValue = {
+      namespaces: [], topCpuPods: [], topMemPods: [],
+      cluster: { cpuPercent: 1, memPercent: 2, totalPods: 3, noRequestPods: 0, basis: "cluster-capacity" },
+      noRequestPodsList: [], freshness: { source: "live", observedAt: "2026-09-27T00:00:00.000Z" },
+    }
+    vi.mocked(cacheGetWithMeta).mockResolvedValueOnce({
+      value: cachedValue as never, cachedAt: "2026-09-27T00:00:00.000Z", ageSeconds: 86_400,
+    })
+
+    const res = await GET()
+    const body = await res.json()
+    expect(body.freshness).toEqual({ source: "cache", observedAt: "2026-09-27T00:00:00.000Z" })
+    expect(body.namespaces).toEqual(cachedValue.namespaces)
   })
 
   it("401s an unauthenticated caller", async () => {
