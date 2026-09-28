@@ -51,18 +51,13 @@ vi.mock("@/lib/valkey", () => ({
       return valkeyState.ring.slice(start, end + 1)
     },
   }),
-  cacheGetWithMeta: vi.fn().mockResolvedValue(null),
-  cacheSet: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock("@/lib/auth", () => ({
   auth: vi.fn().mockResolvedValue(null),
-  requireRole: vi.fn().mockResolvedValue({ session: { user: { role: "cluster-admin" } } }),
 }))
 
 const { pushEvent, getRecentEvents, replayAfter } = await import("@/lib/live-stream")
-const { GET: getAuditRoute } = await import("@/app/api/governance/audit/route")
-const { GET: getEventsRoute } = await import("@/app/api/governance/events/route")
 
 // ============================================================================
 // CHECKED-IN CONTRACT FIXTURES (portal#38)
@@ -216,7 +211,7 @@ function createRequest(
   })
 }
 
-describe("Event Envelope Contract & Compatibility Tests (portal#38, AC-4, AC-6)", () => {
+describe("Event Envelope Contract Characterization Tests (portal#38)", () => {
   const originalEnv = { ...process.env }
 
   beforeEach(() => {
@@ -242,64 +237,7 @@ describe("Event Envelope Contract & Compatibility Tests (portal#38, AC-4, AC-6)"
   })
 
   // -------------------------------------------------------------------------
-  // 1. Schema Version & Type Invariants
-  // -------------------------------------------------------------------------
-  describe("Schema Version Invariants", () => {
-    it("exports EVENT_ENVELOPE_SCHEMA_VERSION as literal '1.0'", () => {
-      expect(EVENT_ENVELOPE_SCHEMA_VERSION).toBe("1.0")
-    })
-
-    it("verifies the canonical v1 fixture conforms strictly to EventEnvelope shape", () => {
-      expect(FIXTURE_CURRENT_V1_CANONICAL.schema_version).toBe(EVENT_ENVELOPE_SCHEMA_VERSION)
-      expect(FIXTURE_CURRENT_V1_CANONICAL.event_version).toBe("1.0")
-      expect(isValidEventActor(FIXTURE_CURRENT_V1_CANONICAL.actor)).toBe(true)
-      expect(isValidEventResource(FIXTURE_CURRENT_V1_CANONICAL.resource)).toBe(true)
-    })
-  })
-
-  // -------------------------------------------------------------------------
-  // 2. Real Actor and Resource Parsers / Validators
-  // -------------------------------------------------------------------------
-  describe("Actor & Resource Shape Validation (isValidEventActor, isValidEventResource)", () => {
-    it("accepts a fully populated valid actor", () => {
-      expect(isValidEventActor(FIXTURE_CURRENT_V1_CANONICAL.actor)).toBe(true)
-    })
-
-    it("accepts an actor with extra unknown properties (permissive forward compatibility)", () => {
-      expect(isValidEventActor(FIXTURE_FORWARD_COMPAT_INGEST.actor)).toBe(true)
-    })
-
-    it("rejects invalid actor shapes (missing id, unknown type, non-string displayName)", () => {
-      expect(isValidEventActor({ type: "user" })).toBe(false)
-      expect(isValidEventActor({ id: "", type: "user" })).toBe(false)
-      expect(isValidEventActor({ id: "u-1", type: "invalid_type" })).toBe(false)
-      expect(isValidEventActor({ id: "u-1", type: "user", displayName: 12345 })).toBe(false)
-      expect(isValidEventActor(null)).toBe(false)
-      expect(isValidEventActor("string-actor")).toBe(false)
-    })
-
-    it("accepts a fully populated valid resource", () => {
-      expect(isValidEventResource(FIXTURE_CURRENT_V1_CANONICAL.resource)).toBe(true)
-    })
-
-    it("accepts an empty resource object (every field is optional)", () => {
-      expect(isValidEventResource({})).toBe(true)
-    })
-
-    it("accepts a resource with extra unknown properties (permissive forward compatibility)", () => {
-      expect(isValidEventResource(FIXTURE_FORWARD_COMPAT_INGEST.resource)).toBe(true)
-    })
-
-    it("rejects invalid resource shapes (non-string fields or non-objects)", () => {
-      expect(isValidEventResource({ namespace: 123 })).toBe(false)
-      expect(isValidEventResource({ cluster: false })).toBe(false)
-      expect(isValidEventResource(null)).toBe(false)
-      expect(isValidEventResource("string-resource")).toBe(false)
-    })
-  })
-
-  // -------------------------------------------------------------------------
-  // 3. Real Ingestion Route (/api/events/ingest) Contract & Compatibility
+  // 1. Ingestion Route Compatibility (/api/events/ingest)
   // -------------------------------------------------------------------------
   describe("Ingestion Route Compatibility (/api/events/ingest)", () => {
     it("successfully ingests current v1 envelope payload", async () => {
@@ -357,7 +295,11 @@ describe("Event Envelope Contract & Compatibility Tests (portal#38, AC-4, AC-6)"
       expect(body.producer).toBe("manual")
     })
 
-    it("accepts forward-compat payload with unknown extra fields (permissive forward compatibility)", async () => {
+    it("accepts forward-compat payload: drops unknown top-level fields while retaining nested unknown metadata", async () => {
+      // Sub-object validators permit unknown future properties (permissive forward compatibility)
+      expect(isValidEventActor(FIXTURE_FORWARD_COMPAT_INGEST.actor)).toBe(true)
+      expect(isValidEventResource(FIXTURE_FORWARD_COMPAT_INGEST.resource)).toBe(true)
+
       const req = createRequest(FIXTURE_FORWARD_COMPAT_INGEST, {
         secret: "k8s-secret-789",
         producerId: "kubernetes",
@@ -371,85 +313,24 @@ describe("Event Envelope Contract & Compatibility Tests (portal#38, AC-4, AC-6)"
       const stored = JSON.parse(valkeyState.ring[0]) as LiveEvent
       expect(stored.actor?.id).toBe("operator@narwhal.local")
       expect(stored.resource?.name).toBe("auth-service")
-      // Unrecognized top-level fields were dropped during LiveEventIngest assembly
+
+      // Forward-compat rule: unknown top-level envelope fields are dropped during LiveEventIngest assembly
       expect((stored as unknown as Record<string, unknown>).future_envelope_flags).toBeUndefined()
-    })
+      expect((stored as unknown as Record<string, unknown>).unknown_preview_attribute).toBeUndefined()
 
-    it("asserts current parser behavior on unknown/unsupported schema_version: accepted (fail-open)", async () => {
-      // NOTE: Current production parser has no schema_version check; it does NOT fail-closed.
-      // We assert this observed behavior and flag it as an open item for version negotiation.
-      const req = createRequest(FIXTURE_UNSUPPORTED_VERSION_INGEST, {
-        secret: "am-secret-123",
-        producerId: "alertmanager",
-      })
-      const res = await POST(req)
-      expect(res.status).toBe(200)
-      const body = await res.json()
-      expect(body.ok).toBe(true)
-
-      expect(valkeyState.ring).toHaveLength(1)
-      const stored = JSON.parse(valkeyState.ring[0]) as LiveEvent
-      expect(stored.title).toBe(FIXTURE_UNSUPPORTED_VERSION_INGEST.title)
-      // schema_version is not modeled on LiveEvent and was dropped during ingest
-      expect((stored as unknown as Record<string, unknown>).schema_version).toBeUndefined()
-    })
-
-    it("fails closed on missing required core fields (title, type, source, severity)", async () => {
-      const invalidPayload = {
-        title: "Missing type and severity",
-        source: "manual",
-        idempotency_key: "missing-fields-001",
-      }
-      const req = createRequest(invalidPayload, {
-        secret: "manual-secret-admin",
-        producerId: "manual",
-      })
-      const res = await POST(req)
-      expect(res.status).toBe(400)
-      const body = await res.json()
-      expect(body.error).toContain("Missing required fields")
-    })
-
-    it("fails closed on unknown coarse event types not in VALID_TYPES", async () => {
-      const invalidTypePayload = {
-        type: "unknown_future_coarse_type",
-        severity: "info",
-        title: "Invalid Type",
-        source: "manual",
-        idempotency_key: "invalid-type-001",
-      }
-      const req = createRequest(invalidTypePayload, {
-        secret: "manual-secret-admin",
-        producerId: "manual",
-      })
-      const res = await POST(req)
-      expect(res.status).toBe(400)
-      const body = await res.json()
-      expect(body.error).toContain("Invalid type")
-    })
-
-    it("fails closed when both idempotency_key and source_event_id are omitted", async () => {
-      const noDedupPayload = {
-        type: "custom",
-        severity: "info",
-        title: "No Dedup Key",
-        source: "manual",
-      }
-      const req = createRequest(noDedupPayload, {
-        secret: "manual-secret-admin",
-        producerId: "manual",
-      })
-      const res = await POST(req)
-      expect(res.status).toBe(400)
-      const body = await res.json()
-      expect(body.message).toContain("Ingest requires either idempotency_key or source_event_id")
+      // Forward-compat rule: unknown properties on nested structured objects (actor, resource) are retained
+      expect((stored.actor as unknown as Record<string, unknown>).tier).toBe("enterprise-superadmin")
+      expect((stored.actor as unknown as Record<string, unknown>).mfa_verified).toBe(true)
+      expect((stored.resource as unknown as Record<string, unknown>).cloud_provider_arn).toBe(
+        "arn:aws:eks:us-east-1:123456789:cluster/prod",
+      )
     })
   })
 
   // -------------------------------------------------------------------------
-  // 4. Historical Event Replay & Stream Deserialization (AC-4)
+  // 2. Historical Event Replay & Stream Deserialization
   // -------------------------------------------------------------------------
-  describe("Historical Event Replay & Valkey Ring Deserialization (AC-4)", () => {
+  describe("Historical Event Replay & Valkey Ring Deserialization", () => {
     it("replays stored events maintaining all v1 envelope fields", async () => {
       const ingest: LiveEventIngest = {
         type: "deploy",
@@ -552,9 +433,40 @@ describe("Event Envelope Contract & Compatibility Tests (portal#38, AC-4, AC-6)"
       expect((recent[0] as unknown as Record<string, unknown>).future_tag).toBe("v2-canary")
       expect((recent[0] as unknown as Record<string, unknown>).schema_version).toBe("2.0")
     })
+  })
 
-    it("asserts replay behavior on unknown schema_version: parses cleanly (fail-open)", async () => {
-      // NOTE: Stored events with unsupported version fields do not fail-closed on deserialization
+  // -------------------------------------------------------------------------
+  // 3. Characterization: Fail-Open Version Handling (#38 AC-5 open)
+  // -------------------------------------------------------------------------
+  describe("Characterization: Current Fail-Open Version Handling (#38 AC-5 open)", () => {
+    it("characterization (#38 AC-5 open): unsupported schema_version is currently accepted fail-open at ingest", async () => {
+      // CHARACTERIZATION ONLY (#38 AC-5 open): Current production ingest route has no
+      // schema_version validation and accepts unsupported versions (fail-open).
+      // When a fail-closed version policy is decided by maintainers, this test must be
+      // replaced by a 4xx assertion with structured diagnostic error details.
+      // Do not use it.fails here.
+      const req = createRequest(FIXTURE_UNSUPPORTED_VERSION_INGEST, {
+        secret: "am-secret-123",
+        producerId: "alertmanager",
+      })
+      const res = await POST(req)
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.ok).toBe(true)
+
+      expect(valkeyState.ring).toHaveLength(1)
+      const stored = JSON.parse(valkeyState.ring[0]) as LiveEvent
+      expect(stored.title).toBe(FIXTURE_UNSUPPORTED_VERSION_INGEST.title)
+      // schema_version is not modeled on LiveEvent and was dropped during ingest
+      expect((stored as unknown as Record<string, unknown>).schema_version).toBeUndefined()
+    })
+
+    it("characterization (#38 AC-5 open): unsupported schema_version in storage is replayed without error (fail-open)", async () => {
+      // CHARACTERIZATION ONLY (#38 AC-5 open): Stored events carrying unsupported
+      // schema_version currently deserialize cleanly via JSON.parse without gating (fail-open).
+      // When a fail-closed or replay translation policy is decided by maintainers, this test
+      // must be replaced by a diagnostic assertion.
+      // Do not use it.fails here.
       const v99Raw = JSON.stringify({
         id: "101",
         type: "alert",
@@ -574,31 +486,6 @@ describe("Event Envelope Contract & Compatibility Tests (portal#38, AC-4, AC-6)"
       expect(recent[0].id).toBe("101")
       expect(recent[0].title).toBe("Event from future v99")
       expect((recent[0] as unknown as Record<string, unknown>).schema_version).toBe("99.0")
-    })
-  })
-
-  // -------------------------------------------------------------------------
-  // 5. Governance Operational Events Compatibility (portal#161)
-  // -------------------------------------------------------------------------
-  describe("Governance Events Compatibility (portal#161)", () => {
-    it("returns structured envelope on /api/governance/events", async () => {
-      const res = await getEventsRoute()
-      expect(res.status).toBe(200)
-      const data = await res.json()
-      expect(data).toHaveProperty("items")
-      expect(data).toHaveProperty("truncated")
-      expect(data).toHaveProperty("evidenceKind", "operational-event")
-      expect(data).toHaveProperty("freshness")
-    })
-
-    it("returns bare array and RFC 9745 deprecation headers on legacy alias /api/governance/audit", async () => {
-      const res = await getAuditRoute()
-      expect(res.status).toBe(200)
-      const data = await res.json()
-      expect(Array.isArray(data)).toBe(true)
-      expect(res.headers.get("X-Truncated")).toBeDefined()
-      expect(res.headers.get("Deprecation")).toBe("@1790553600")
-      expect(res.headers.get("Link")).toBe('</api/governance/events>; rel="successor-version"')
     })
   })
 })

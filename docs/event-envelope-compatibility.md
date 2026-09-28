@@ -1,6 +1,26 @@
 # Event Envelope Schema Compatibility Matrix & Rolling Upgrade Contract
 
-> Scope Note: Documents only the contracts supported by current Portal code (portal#11, portal#12, portal#161). Narwhal cluster-side producer contracts remain undefined (`narwhal#140` unstarted).
+> Scope Note: Documents the current envelope contract and provides characterization tests for existing behavior (portal#11, portal#12). Fail-closed version enforcement, skew windows, and replay translation are not yet implemented; defining supported versions and upgrade skew remains an open maintainer decision. Narwhal cluster-side producer contracts remain undefined (`narwhal#140` unstarted).
+
+## Status against #38 Acceptance Criteria
+
+This document and associated test suite characterize the current codebase as implemented. They document existing wire contracts and characterize observed behavior, rather than claiming implementation of criteria that require maintainer policy decisions:
+
+- **Documented & Tested (Current Contract Characterization)**:
+  - Canonical envelope schema structure and field definitions ([Section 1](#1-schema-version-fields-as-implemented)).
+  - Producer and consumer format matrix across Portal subsystems ([Section 2](#2-producer--consumer-version--format-matrix)).
+  - Forward compatibility: unrecognized top-level fields dropped during ingest, while permissive sub-object validators (`actor`, `resource`) accept unknown properties ([Section 3.1](#31-unknown-fields-forward-compatibility)).
+  - Backward compatibility: older/minimal shapes omitting optional envelope fields normalize cleanly to `null` and deserialize safely during replay ([Section 3.2](#32-missing-optional-fields-backward-compatibility)).
+  - Legacy header alias: `X-Ingest-Producer` supported alongside canonical `X-Producer-Id` ([Section 2](#2-producer--consumer-version--format-matrix)).
+  - Fail-open characterization: characterization tests verify that unsupported `schema_version` is currently accepted at ingest and during replay pending a fail-closed policy decision ([Section 3.4](#34-unknown-versions-observed-code-behavior)).
+- **Open Pending Maintainer Decision**:
+  - **Supported Version Set**: Formal declaration of supported `schema_version` and `event_version` combinations.
+  - **Defined Skew Window**: Specification of allowable version skew across rolling pod upgrades.
+  - **Fail-Closed Policy with Diagnostics**: Rejecting unsupported or unknown `schema_version` with HTTP 4xx and diagnostic error details (current code is fail-open).
+  - **Replay Translation Layer**: Transforming or up-casting older historical event shapes to current schemas upon replay.
+  - **Breaking-Change Detection Before Release**: Automated schema diff or breaking-change detection gate prior to release.
+
+---
 
 ## 1. Schema Version Fields as Implemented
 
@@ -23,7 +43,7 @@ In the dashboard-facing event pipeline, [`LiveEvent`](file:///Users/m/Documents/
 | **Operation Lifecycle** | Producer | Emits `LiveEventIngest` via `pushEvent` | Emits `event_type` (`"operation.started"`, `"operation.completed"`, `"operation.failed"`), `actor`, `resource`, `correlation_id`, `causation_id`, `operation_id`, `request_id`, `visibility`. Does **not** emit `schema_version` or `event_version`. | [`src/lib/operation-context.ts:105-123`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/lib/operation-context.ts#L105-L123) |
 | **K8s Informer** | Producer | Emits `LiveEventIngest` via `pushEvent` | Emits coarse `type`, `severity`, `source: "kubernetes"`, `title`, `description`, `resource` (`{ kind, name, namespace }`), `visibility`, and `source_event_id` (`uid:resourceVersion`). Does **not** emit `schema_version` or `event_version`. | [`src/lib/live-k8s-informer.ts:87-134, 194-209`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/lib/live-k8s-informer.ts#L87-L134) |
 | **HTTP Ingestion Route** | Producer / Ingest Boundary | Accepts external HTTP JSON; emits `LiveEventIngest` | Ingests webhook payloads from `alertmanager`, `argocd`, `kubernetes`, `manual`. Validates `actor` and `resource`. Does **not** require or validate `schema_version` or `event_version`. Supported legacy producer header `X-Ingest-Producer` alongside `X-Producer-Id`. | [`src/app/api/events/ingest/route.ts:47-391`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/app/api/events/ingest/route.ts#L47-L391) |
-| **Live Stream Engine** | Normalizer / Storage | Normalizes `LiveEventIngest` to `LiveEvent`; stores in Valkey list | Normalizes absent optional fields to `null`; assigns monotonic stream ID (`<epoch>-<seq>` or Valkey counter) and ISO timestamp. Serializes `LiveEvent` to JSON. Does **not** stamp or require `schema_version`. | [`src/lib/live-stream.ts:88-123`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/lib/live-stream.ts#L88-L123) |
+| **Live Stream Engine** | Normalizer / Storage | Normalizes `LiveEventIngest` to `LiveEvent`; stores in Valkey list | Normalizes absent optional fields to `null`; assigns monotonic stream ID — either Valkey counter (`String(await valkey.incr(ID_KEY))`, e.g. `"101"`) when healthy, or in-memory degraded fallback `d-<epoch>-<seq>` (`d-${Date.now()}-${sequence}`) — and ISO timestamp. Serializes `LiveEvent` to JSON. Does **not** stamp or require `schema_version`. | [`src/lib/live-stream.ts:78-123`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/lib/live-stream.ts#L78-L123) |
 | **Live Stream Replay** | Consumer | Reads from Valkey `RING_KEY` or memory ring | `getRecentEvents` and `replayAfter` deserialize stored strings via `JSON.parse(item) as LiveEvent`. Replays events in monotonic ID sequence without version gating. | [`src/lib/live-stream.ts:125-170`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/lib/live-stream.ts#L125-L170) |
 | **SSE Stream Route** | Consumer / Distributor | Consumes from Valkey Pub/Sub; emits SSE | Serializes `LiveEvent` as `id: <id>\nevent: live\ndata: <json>\n\n`. Applies RBAC namespace/visibility filtering via `isEventFiltered`. Does not inspect version fields. | [`src/app/api/events/stream/route.ts:12-14, 107-119`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/app/api/events/stream/route.ts#L12-L14) |
 | **Dashboard UI** | Consumer | Reads SSE stream; renders UI | Deserializes SSE event payload via `JSON.parse(e.data) as LiveEvent`. Renders severity, title, actor, and links. Unknown coarse types fall back to default badge/icon rendering. | [`src/hooks/use-live-stream.ts:31`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/hooks/use-live-stream.ts#L31), [`src/components/live/live-stream.tsx:42-120`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/components/live/live-stream.tsx#L42-L120) |
@@ -77,10 +97,13 @@ The following capabilities are not currently implemented or specified in the cod
 4. **Historical Event Replay Translation Layer**:
    - No transformer or adapter pipeline exists to up-cast or deterministically translate older historical event shapes into newer schema versions upon replay.
 
+5. **Breaking-Change Detection Before Release**:
+   - There is no automated schema diff or breaking-change detection check in the CI pipeline prior to release.
+
 ---
 
-## 5. CI Compatibility Test Gate
+## 5. CI Characterization Test Gate
 
-Contract compatibility fixtures and parser assertions are checked in at [`src/types/event-envelope.compat.test.ts`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/types/event-envelope.compat.test.ts).
+Contract compatibility fixtures and parser characterization assertions are checked in at [`src/types/event-envelope.compat.test.ts`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/src/types/event-envelope.compat.test.ts).
 
 Automated verification is enforced on every commit and pull request touching `src/**` via the `Unit Test Gate` workflow in [`.github/workflows/test.yml:45-84`](file:///Users/m/Documents/IdeaProjects/20.dasomel/narwhal-portal-38/.github/workflows/test.yml#L45-L84) using `pnpm test`.
