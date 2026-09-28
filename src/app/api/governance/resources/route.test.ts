@@ -17,12 +17,13 @@ vi.mock("@/lib/k8s-client", async (importOriginal) => {
 })
 
 const { auth } = await import("@/lib/auth")
-const { cacheGetWithMeta } = await import("@/lib/valkey")
+const { cacheGetWithMeta, cacheSet } = await import("@/lib/valkey")
 const { queryVector, getClusterMetrics } = await import("@/lib/prometheus")
 const { getNamespaces, getAllPodsMinimal } = await import("@/lib/k8s-client")
 const { GET } = await import("./route")
 
 const adminSession = { groups: ["cluster-admin"], teams: [], user: { role: "cluster-admin" } }
+const platformTeamSession = { groups: ["developer"], teams: ["platform-team"], user: { role: "developer" } }
 const frontendTeamSession = { groups: ["developer"], teams: ["frontend-team"], user: { role: "developer" } }
 
 const namespaces: NamespaceInfo[] = [
@@ -47,6 +48,14 @@ function vec(namespace: string, value: number, pod?: string): VectorMetricResult
 
 beforeEach(() => {
   vi.clearAllMocks()
+  const cache = new Map<string, unknown>()
+  vi.mocked(cacheGetWithMeta).mockImplementation(async (key: string) => {
+    const value = cache.get(key)
+    return value === undefined ? null : { value, cachedAt: "2026-09-27T00:00:00.000Z", ageSeconds: 0 }
+  })
+  vi.mocked(cacheSet).mockImplementation(async (key: string, value: unknown) => {
+    cache.set(key, value)
+  })
   vi.mocked(getNamespaces).mockResolvedValue(namespaces)
   vi.mocked(getAllPodsMinimal).mockResolvedValue({ items: pods, truncated: false, pages: 1 })
   vi.mocked(getClusterMetrics).mockResolvedValue({
@@ -161,6 +170,33 @@ describe("GET /api/governance/resources — scope enforcement", () => {
     const res = await GET()
     expect(res.status).toBe(401)
     expect(getNamespaces).not.toHaveBeenCalled()
+  })
+
+  // portal#53 AC-4: the tests above prove the response is filtered by scope, but not
+  // that a real cache entry for one scope can't be served to another — cacheGetWithMeta
+  // is now backed by a real in-memory store (see beforeEach), so a key collision would
+  // show up here as frontend-team receiving platform-team's cached namespace list.
+  it("keys the cache by scope fingerprint and never serves platform-team's cached entry to frontend-team", async () => {
+    vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
+    const platformRes = await GET()
+    const platformBody = await platformRes.json()
+    expect(platformBody.namespaces.map((n: { namespace: string }) => n.namespace)).toEqual(["platform-system"])
+
+    vi.mocked(auth).mockResolvedValue(frontendTeamSession as never)
+    const frontendRes = await GET()
+    const frontendBody = await frontendRes.json()
+    expect(frontendBody.freshness.source).toBe("live")
+    expect(frontendBody.namespaces.map((n: { namespace: string }) => n.namespace)).toEqual(["frontend-app"])
+
+    const setKeys = vi.mocked(cacheSet).mock.calls.map((c) => c[0] as string)
+    expect(new Set(setKeys).size).toBe(2)
+
+    // Re-request platform-team: must hit its own cache entry, not a fresh/shared one.
+    vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
+    const cachedPlatformRes = await GET()
+    const cachedPlatformBody = await cachedPlatformRes.json()
+    expect(cachedPlatformBody.freshness.source).toBe("cache")
+    expect(cachedPlatformBody.namespaces.map((n: { namespace: string }) => n.namespace)).toEqual(["platform-system"])
   })
 })
 

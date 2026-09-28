@@ -70,11 +70,15 @@ function req() {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
+  const cache = new Map<string, unknown>()
   vi.mocked(getNamespaces).mockResolvedValue(namespaces)
   vi.mocked(getArgoApps).mockResolvedValue([platformApp, frontendApp])
   vi.mocked(getAlerts).mockResolvedValue([])
-  vi.mocked(cacheGet).mockResolvedValue(null)
-  vi.mocked(cacheSet).mockResolvedValue(undefined)
+  vi.mocked(cacheGet).mockImplementation(async (key: string) => cache.get(key) ?? null)
+  vi.mocked(cacheSet).mockImplementation(async (key: string, value: unknown) => {
+    cache.set(key, value)
+  })
 })
 
 describe("GET /api/events — scope enforcement", () => {
@@ -98,13 +102,24 @@ describe("GET /api/events — scope enforcement", () => {
     expect(titles).not.toContain("frontend-app")
   })
 
-  it("keys the cache by scope fingerprint, not one shared literal key", async () => {
+  it("keys the cache by scope fingerprint and never serves platform-team's cached timeline to frontend-team", async () => {
     vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
-    await GET(req())
+    const platformBody = await (await GET(req())).json()
+    expect(platformBody.map((e: { title: string }) => e.title)).toEqual(["platform-app"])
+
     vi.mocked(auth).mockResolvedValue(frontendTeamSession as never)
-    await GET(req())
+    const frontendBody = await (await GET(req())).json()
+    // If the two scopes collided on one cache key, this would come back as
+    // platform-team's already-cached timeline instead of frontend-team's own.
+    expect(frontendBody.map((e: { title: string }) => e.title)).toEqual(["frontend-app"])
+
     const setKeys = vi.mocked(cacheSet).mock.calls.map((c) => c[0])
     expect(new Set(setKeys).size).toBe(2)
+
+    // Re-request platform-team: must hit its own cache entry, not frontend-team's.
+    vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
+    const cachedPlatformBody = await (await GET(req())).json()
+    expect(cachedPlatformBody.map((e: { title: string }) => e.title)).toEqual(["platform-app"])
   })
 
   it("401s an unauthenticated caller", async () => {
