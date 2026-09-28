@@ -184,6 +184,7 @@ export const cacheKeys = {
   // #144: this endpoint moved from a literal audit trail to an explicitly-labeled
   // "operational events" feed (portal#16) — new key, new response shape (no `actor`).
   governanceOperationalEventsV2: () => "governance:operational-events:v2",
+  governanceOperationalEventsV3: () => "governance:operational-events:v3",
   governanceDoraV2: (scopeFingerprint: string) => join("governance", "dora", "v2", scopeFingerprint),
   governanceScorecard: (scopeFingerprint: string) => join("governance", "scorecard", scopeFingerprint),
 
@@ -448,13 +449,25 @@ export const CACHE_NAMESPACES: Record<string, CacheNamespaceSpec> = {
     example: "governance:operational-events:v2",
     dimensions: [],
     ttlSeconds: 15,
-    owner: "src/app/api/governance/audit/route.ts",
-    ownerPath: "src/app/api/governance/audit/route.ts",
+    owner: "src/lib/governance-operational-events.ts",
+    ownerPath: "src/lib/governance-operational-events.ts",
     invalidation: "TTL only",
     cachesPartial: false,
     securitySensitive: false,
     unscopedReason: { code: "admin-only-route", detail: "requireRole('cluster-admin') gate; identical value for every cluster-admin." },
     note: "#144 (portal#16): renamed from governance:audit — this is an operational-events feed, not an audit trail.",
+  },
+  "governance:operational-events:v3": {
+    example: "governance:operational-events:v3",
+    dimensions: [],
+    ttlSeconds: 15,
+    owner: "src/lib/governance-operational-events.ts",
+    ownerPath: "src/lib/governance-operational-events.ts",
+    invalidation: "TTL only",
+    cachesPartial: false,
+    securitySensitive: false,
+    unscopedReason: { code: "admin-only-route", detail: "requireRole('cluster-admin') gate; identical value for every cluster-admin." },
+    note: "Operational Kubernetes Events include bounded-list truncation metadata; shared by the deprecated audit alias.",
   },
   "governance:dora:v2": {
     example: "governance:dora:v2:{scopeFingerprint}",
@@ -1133,6 +1146,7 @@ export const BUILDER_CHECKS: Record<keyof typeof cacheKeys, BuilderCheck> = {
   governanceResourcesV3: { registryKey: "governance:resources:v3", ttlSeconds: 30, args: ["fp-1"], dimensionArgIndex: { scope: 0 } },
   governanceDistributionV2: { registryKey: "governance:distribution:v2", ttlSeconds: 15, args: [], dimensionArgIndex: {} },
   governanceOperationalEventsV2: { registryKey: "governance:operational-events:v2", ttlSeconds: 15, args: [], dimensionArgIndex: {} },
+  governanceOperationalEventsV3: { registryKey: "governance:operational-events:v3", ttlSeconds: 15, args: [], dimensionArgIndex: {} },
   governanceDoraV2: { registryKey: "governance:dora:v2", ttlSeconds: 120, args: ["fp-1"], dimensionArgIndex: { scope: 0 } },
   governanceScorecard: { registryKey: "governance:scorecard", ttlSeconds: 30, args: ["fp-1"], dimensionArgIndex: { scope: 0 } },
 

@@ -552,6 +552,28 @@ export async function getEvents(namespace?: string): Promise<K8sEvent[]> {
   }
 }
 
+export async function getEventsBounded(): Promise<{ items: K8sEvent[]; truncated: boolean }> {
+  try {
+    const { items, truncated } = await listBounded<RawEvent>("/api/v1/events", { maxPages: 10 })
+    return {
+      items: items.map((i) => ({
+        type: i.type,
+        reason: i.reason,
+        message: i.message,
+        namespace: i.metadata.namespace,
+        involvedObject: i.involvedObject,
+        lastTimestamp: i.lastTimestamp,
+        firstTimestamp: i.firstTimestamp,
+        reportingComponent: i.reportingComponent,
+        source: i.source,
+      })),
+      truncated,
+    }
+  } catch {
+    return { items: [], truncated: false }
+  }
+}
+
 export interface Certificate {
   name: string
   namespace: string

@@ -29,6 +29,13 @@ interface OperationalEventEntry {
   source: string
 }
 
+interface OperationalEventsResponse {
+  items: OperationalEventEntry[]
+  truncated: boolean
+  evidenceKind: "operational-event"
+  freshness: { source: "cache" | "live"; observedAt: string | null }
+}
+
 type SortKey = "timestamp" | "action" | "resource" | "namespace"
 type SortDir = "asc" | "desc"
 
@@ -102,21 +109,22 @@ export function AuditTable() {
   const [sortKey, setSortKey] = useState<SortKey>("timestamp")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
-  const { data = [], isLoading, isError, refetch } = useQuery<OperationalEventEntry[]>({
-    queryKey: ["governance-audit"],
-    queryFn: () => fetch("/api/governance/audit").then((r) => r.json()),
+  const { data, isLoading, isError, refetch } = useQuery<OperationalEventsResponse>({
+    queryKey: ["governance-events"],
+    queryFn: () => fetch("/api/governance/events").then((r) => r.json()),
     refetchInterval: 30_000,
     enabled: role === "cluster-admin",
   })
+  const entries = data?.items ?? []
 
   const namespaces = useMemo(() => {
-    const set = new Set(data.map((e) => e.namespace).filter(Boolean))
+    const set = new Set(entries.map((e) => e.namespace).filter(Boolean))
     return Array.from(set).sort()
-  }, [data])
+  }, [entries])
 
   const filtered = useMemo(
-    () => (nsFilter === "all" ? data : data.filter((e) => e.namespace === nsFilter)),
-    [data, nsFilter]
+    () => (nsFilter === "all" ? entries : entries.filter((e) => e.namespace === nsFilter)),
+    [entries, nsFilter]
   )
 
   const sorted = useMemo(() => {
@@ -171,6 +179,7 @@ export function AuditTable() {
             ))}
           </select>
         </div>
+        {data?.truncated && <div className="mb-3"><DataState state="partial" reason={t("opEvents.truncatedNotice")} /></div>}
         {isLoading ? (
           <DataState state="loading" onRetry={() => { void refetch() }} />
         ) : isError ? (
