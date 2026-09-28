@@ -10,7 +10,7 @@
 #      (gitea-admin/narwhal-portal repo 없으면 Gitea API로 생성)
 #   4. Kaniko Job manifest 적용 (domain placeholder sed 치환)
 #   5. Job 완료 대기 (최대 20분)
-#   6. Job 결과 출력 — 성공/실패 반환
+#   6. Job 결과 출력 + build-evidence(JSON) 기록 — 성공/실패 반환
 #
 # 재실행 안전 (idempotent):
 #   - Gitea repo 이미 있으면 create 무시 (|| true)
@@ -28,12 +28,13 @@
 #   GITEA_ADMIN_USER=gitea-admin
 #   GITEA_PORTAL_REPO=narwhal-portal
 #   JOB_TIMEOUT=1200   # seconds (default 20 min)
+#   BUILD_EVIDENCE_PATH  # portal#23 AC; default <repo>/build-evidence/<HARBOR_TAG>.json
 #   SCRIPT_DIR        # auto-detected; override only for testing
 #
 # 의존:
 #   - harbor-kaniko-setup.sh (Kaniko Secret + CA 복제)
 #   - narwhal-portal/deploy/kaniko-build-job.yaml (Job template)
-#   - kubectl, curl, git, jq
+#   - kubectl, curl, git, jq, shasum
 
 set -euo pipefail
 
@@ -47,6 +48,7 @@ GITEA_ADMIN_USER="${GITEA_ADMIN_USER:-gitea-admin}"
 GITEA_PORTAL_REPO="${GITEA_PORTAL_REPO:-narwhal-portal}"
 JOB_TIMEOUT="${JOB_TIMEOUT:-1200}"
 JOB_NAME="kaniko-build-narwhal-portal"
+BUILD_EVIDENCE_PATH_OVERRIDE="${BUILD_EVIDENCE_PATH:-}"
 
 SKIP_PUSH="false"
 for arg in "$@"; do
@@ -205,6 +207,21 @@ if [[ -n "${HARBOR_TAG_OVERRIDE}" && ! "${HARBOR_TAG_OVERRIDE}" =~ ^v?[0-9]+\.[0
   red "HARBOR_TAG는 SemVer 형식이어야 합니다 (예: v1.2.3)."
   exit 1
 fi
+BUILD_EVIDENCE_PATH="${BUILD_EVIDENCE_PATH_OVERRIDE:-${REPO_ROOT}/build-evidence/${HARBOR_TAG}.json}"
+
+# portal#23 build-evidence: lockfile hash must match the exact revision the Job builds,
+# never the (possibly dirty) working tree — read the blob via `git show <sha>:path`.
+# WORK_DIR (the throwaway push commit) is still on disk at this point in the script;
+# --skip-push has no WORK_DIR and reuses the already-pushed REPO_ROOT revision instead.
+if [[ -n "${WORK_DIR:-}" ]]; then
+  LOCKFILE_SHA256="$(git -C "${WORK_DIR}" show "${BUILD_GIT_SHA}:pnpm-lock.yaml" | shasum -a 256 | awk '{print $1}')"
+else
+  LOCKFILE_SHA256="$(git -C "${REPO_ROOT}" show "${BUILD_GIT_SHA}:pnpm-lock.yaml" | shasum -a 256 | awk '{print $1}')"
+fi
+if [[ ! "${LOCKFILE_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+  red "pnpm-lock.yaml sha256 계산 실패 (revision ${BUILD_GIT_SHA})"
+  exit 1
+fi
 
 cleanup_pf
 trap - EXIT
@@ -246,12 +263,15 @@ HARBOR_DESTINATION_PREFIX="${HARBOR_HOST}/${HARBOR_PROJECT}/${HARBOR_REPO}"
 HARBOR_DESTINATION="${HARBOR_DESTINATION_PREFIX}:${HARBOR_TAG}"
 info "Kaniko Job 적용: destination=${HARBOR_DESTINATION}"
 
-sed \
+# Kept in a variable (not just piped) so build-evidence below can read the builder /
+# git-helper image refs actually applied, not re-parse the un-rendered template.
+RENDERED_JOB_YAML="$(sed \
   -e "s|__HARBOR_DESTINATION_PREFIX__|${HARBOR_DESTINATION_PREFIX}|g" \
   -e "s|__HARBOR_HOST__|${HARBOR_HOST}|g" \
   -e "s|__GIT_SHA__|${BUILD_GIT_SHA}|g" \
   -e "s|__HARBOR_TAG__|${HARBOR_TAG}|g" \
-  "${JOB_TEMPLATE}" | kubectl apply -f -
+  "${JOB_TEMPLATE}")"
+printf '%s\n' "${RENDERED_JOB_YAML}" | kubectl apply -f -
 
 # ---- 10. Job 완료 대기 -------------------------------------------------------
 info "Kaniko 빌드 대기 중 (최대 ${JOB_TIMEOUT}초)..."
@@ -283,9 +303,47 @@ if kubectl wait \
     -l "job-name=${JOB_NAME}" \
     --field-selector=status.phase=Succeeded \
     -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="kaniko")].state.terminated.message}' 2>/dev/null || true)"
-  if [[ -n "${IMAGE_DIGEST}" ]]; then
-    green "  다이제스트: ${IMAGE_DIGEST}"
+  # portal#23: the digest is the pushed image's identity — an empty/malformed value
+  # here means the evidence record below would be lying, so fail instead of recording it.
+  if [[ ! "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    red "이미지 다이제스트 형식이 올바르지 않습니다: ${IMAGE_DIGEST:-empty}"
+    exit 1
   fi
+  green "  다이제스트: ${IMAGE_DIGEST}"
+
+  # ---- 11. build-evidence(JSON) 기록 (portal#23 AC) -------------------------
+  # Builder/git-helper image refs come from RENDERED_JOB_YAML (the manifest actually
+  # applied above), not the un-rendered template, so the record reflects the real build.
+  # Only `image:` lines count: the pin comments above them name the same image and would
+  # otherwise match first ("alpine/git:v2.54.0." — no digest, trailing full stop).
+  BUILDER_IMAGE="$(printf '%s\n' "${RENDERED_JOB_YAML}" | grep -E '^[[:space:]]*image:' | grep -oE 'gcr\.io/kaniko-project/executor:[^[:space:]"]+' | head -1)"
+  GIT_HELPER_IMAGE="$(printf '%s\n' "${RENDERED_JOB_YAML}" | grep -E '^[[:space:]]*image:' | grep -oE 'alpine/git:[^[:space:]"]+' | head -1)"
+  if [[ -z "${BUILDER_IMAGE}" || -z "${GIT_HELPER_IMAGE}" ]]; then
+    red "렌더링된 Job YAML에서 builder/git-helper 이미지 참조를 찾을 수 없습니다."
+    exit 1
+  fi
+
+  mkdir -p "$(dirname "${BUILD_EVIDENCE_PATH}")"
+  jq -n \
+    --argjson schemaVersion 1 \
+    --arg sourceRevision "${BUILD_GIT_SHA}" \
+    --arg lockfileSha256 "${LOCKFILE_SHA256}" \
+    --arg builderImage "${BUILDER_IMAGE}" \
+    --arg gitHelperImage "${GIT_HELPER_IMAGE}" \
+    --arg imageRef "${HARBOR_DESTINATION}" \
+    --arg imageDigest "${IMAGE_DIGEST}" \
+    '{
+      schemaVersion: $schemaVersion,
+      sourceRevision: $sourceRevision,
+      lockfileSha256: $lockfileSha256,
+      builderImage: $builderImage,
+      gitHelperImage: $gitHelperImage,
+      imageRef: $imageRef,
+      imageDigest: $imageDigest,
+      sbom: {status: "not-generated"},
+      signature: {status: "not-signed"}
+    }' > "${BUILD_EVIDENCE_PATH}"
+  green "  Build evidence: ${BUILD_EVIDENCE_PATH}"
   exit 0
 else
   # 실패 또는 타임아웃 — 로그 출력
