@@ -183,22 +183,24 @@ describe("build-credential-guard: Portal #23 AC1 credential-safe build", () => {
     });
   });
 
-  describe("requirement 3: transient .netrc created with chmod 600 and removed after clone", () => {
-    it("deploy/kaniko-build-job.yaml secures .netrc with chmod 600 and removes it after git clone", () => {
-      // Assert exact presence of chmod 600 and rm -f commands on .netrc
+  describe("requirement 3: secret-safe clone cleanup", () => {
+    it("deploy/kaniko-build-job.yaml secures .netrc and removes it with an EXIT trap", () => {
       expect(jobYaml).toContain('chmod 600 "${HOME}/.netrc"');
-      expect(jobYaml).toContain('rm -f "${HOME}/.netrc"');
+      expect(jobYaml).toMatch(/trap\s+'rm -f "\$\{HOME\}\/\.netrc"'\s+EXIT/);
 
-      // Verify command execution order: creation -> chmod 600 -> git clone -> rm -f
+      // Verify command execution order: trap -> creation -> chmod -> clone -> SHA capture.
+      const trapPos = jobYaml.indexOf("trap 'rm -f \"${HOME}/.netrc\"' EXIT");
       const netrcCreatePos = jobYaml.indexOf('cat > "${HOME}/.netrc"');
       const chmodPos = jobYaml.indexOf('chmod 600 "${HOME}/.netrc"');
       const gitClonePos = jobYaml.indexOf("git clone");
-      const rmNetrcPos = jobYaml.indexOf('rm -f "${HOME}/.netrc"');
+      const shaCapturePos = jobYaml.indexOf('git -C /workspace rev-parse HEAD');
 
+      expect(trapPos, "EXIT trap must be installed before credentials are written").toBeGreaterThan(-1);
       expect(netrcCreatePos, "cat > .netrc must be present").toBeGreaterThan(-1);
+      expect(netrcCreatePos).toBeGreaterThan(trapPos);
       expect(chmodPos, "chmod 600 must appear after .netrc creation").toBeGreaterThan(netrcCreatePos);
       expect(gitClonePos, "git clone must appear after chmod 600").toBeGreaterThan(chmodPos);
-      expect(rmNetrcPos, "rm -f .netrc must appear after git clone").toBeGreaterThan(gitClonePos);
+      expect(shaCapturePos, "source SHA must be resolved after clone").toBeGreaterThan(gitClonePos);
     });
 
     it("scripts/kaniko-build.sh secures ASKPASS_SCRIPT with chmod 700 and removes it on EXIT trap", () => {
@@ -210,6 +212,30 @@ describe("build-credential-guard: Portal #23 AC1 credential-safe build", () => {
 
       expect(chmodPos, "chmod 700 must appear before git push").toBeGreaterThan(-1);
       expect(gitPushPos, "git push must appear after chmod 700").toBeGreaterThan(chmodPos);
+    });
+  });
+
+  describe("requirement 4: immutable Kaniko build identity", () => {
+    it("defaults the destination tag to the full cloned source SHA, with a SemVer override", () => {
+      expect(buildScript).not.toMatch(/HARBOR_TAG=.*latest/);
+      expect(buildScript).toContain('HARBOR_TAG="${HARBOR_TAG_OVERRIDE:-${BUILD_GIT_SHA}}"');
+      expect(buildScript).toContain('[[ -n "${HARBOR_TAG_OVERRIDE}" && ! "${HARBOR_TAG_OVERRIDE}" =~ ^v?[0-9]+\\.[0-9]+\\.[0-9]+');
+      expect(jobYaml).toContain('value: "__GIT_SHA__"');
+      expect(jobYaml).toContain('value: "__HARBOR_TAG__"');
+      expect(jobYaml).toContain('test "$source_sha" = "__GIT_SHA__"');
+      expect(jobYaml).toContain('--destination=__HARBOR_DESTINATION_PREFIX__:$(HARBOR_TAG)');
+    });
+
+    it("writes and prints the pushed digest and adds OCI source revision labels", () => {
+      expect(jobYaml).toContain("--digest-file=/build-metadata/image-digest");
+      expect(jobYaml).toContain('terminationMessagePath: /build-metadata/image-digest');
+      expect(jobYaml).toContain('terminationMessagePolicy: File');
+      expect(jobYaml).toContain('org.opencontainers.image.revision=$(GIT_SHA)');
+      expect(jobYaml).toContain("org.opencontainers.image.source=https://github.com/dasomel/narwhal-portal");
+      expect(buildScript).toContain('green "  다이제스트: ${IMAGE_DIGEST}"');
+      expect(jobYaml).toContain('name: build-metadata');
+      // --reproducible raises Kaniko peak memory; D8 keeps it off (OOM history at 4 Gi).
+      expect(jobYaml).not.toContain('- "--reproducible"');
     });
   });
 });
