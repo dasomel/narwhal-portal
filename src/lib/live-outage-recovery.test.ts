@@ -11,31 +11,12 @@ import type { LiveEvent } from "@/types/live"
  * ./k8s-token and ./valkey are mocked, the same way live-k8s-informer.test.ts
  * and live-stream.test.ts already do.
  *
- * Two real behaviors fall out of this that were not previously pinned by a
- * test or precisely documented — both are pre-existing, unchanged by this
- * commit, and now made explicit instead of silent:
- *
- *  1. An event minted entirely during a same-process Valkey outage (a `d-`
- *     degraded id, never written to the shared ring — see live-stream.ts:112-121)
- *     is invisible to a client that reconnects with a real numeric
- *     Last-Event-ID from before the outage: replayAfter() only ever reads
- *     the shared Valkey ring once Valkey is healthy again (live-stream.ts:125-134,
- *     157-158), so it has no way to know a degraded-only event ever existed —
- *     `gap`/`unknown` stay false. The event is NOT lost from the process — the
- *     exact-degraded-id replay branch (live-stream.ts:151-156) still finds it —
- *     but a numeric cursor never learns to ask for it. docs/architecture.md's
- *     "Live event pipeline" table already documents Valkey-unavailable delivery
- *     as best-effort; this test pins the precise boundary of that guarantee.
- *  2. An idempotency claim recorded only in the in-memory fallback during a
- *     Valkey outage (idempotency.ts:119-122) is not consulted once Valkey
- *     recovers: ValkeyIdempotencyStore.claim() (idempotency.ts:107-123) only
- *     checks Valkey's own key when Valkey answers, so a redelivery of the same
- *     event after recovery is treated as new and re-ingested. This means
- *     idempotency is not guaranteed to survive an outage/recovery cycle for a
- *     key whose only successful claim happened while degraded.
- *
- * Neither is fixed here (scope: prove and document, not patch production
- * code). See the report for this task for the follow-up recommendation.
+ * The main test below asserts only what the current code actually guarantees.
+ * Three real gaps found while writing it are tracked as
+ * dasomel/narwhal-portal#178 and pinned as separate `it.fails` cases further
+ * down — each asserts the CORRECT behavior (so it starts failing loudly once
+ * #178 is fixed, which is the signal to flip it back to `it`), not the
+ * current buggy one. Production code is unchanged here.
  */
 
 const state = vi.hoisted(() => ({
@@ -142,7 +123,7 @@ describe("live outage / recovery durability (portal#13)", () => {
     vi.resetModules()
   })
 
-  it("keeps producing through a store outage and a watch disconnect, recovers, and every event is either replayable, exact-cursor-replayable, or a known (documented) blind spot — never silently gone", async () => {
+  it("keeps producing through a store outage and a watch disconnect, then recovers — ingestion, degraded ids, 410 resync, and exact-cursor replay all behave as documented", async () => {
     let watchCalls = 0
     let listCalls = 0
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
@@ -159,10 +140,9 @@ describe("live outage / recovery durability (portal#13)", () => {
           return { ok: true, status: 200, body: makeStream([k8sEvent("uid-b", "11", "pod-b"), k8sEvent("uid-c", "12", "pod-c")]) } as unknown as Response
         case 3: // watch disconnect while still degraded (410 Gone -> resync)
           return { ok: false, status: 410 } as Response
-        case 4: // recovery: the store is back before this stream is processed;
-          // uid-b is redelivered (same uid/resourceVersion) after the relist
+        case 4: // recovery: the store is back before this stream is processed
           state.down = false
-          return { ok: true, status: 200, body: makeStream([k8sEvent("uid-b", "11", "pod-b"), k8sEvent("uid-d", "13", "pod-d")]) } as unknown as Response
+          return { ok: true, status: 200, body: makeStream([k8sEvent("uid-d", "13", "pod-d")]) } as unknown as Response
         default:
           return { ok: true, status: 200, body: makePendingStream() } as unknown as Response
       }
@@ -175,55 +155,32 @@ describe("live outage / recovery durability (portal#13)", () => {
 
     startLiveK8sInformer()
     await vi.waitFor(() => expect(watchCalls).toBeGreaterThanOrEqual(5), { timeout: 3000 })
-    await vi.waitFor(() => expect(pushSpy).toHaveBeenCalledTimes(5), { timeout: 3000 })
+    await vi.waitFor(() => expect(pushSpy).toHaveBeenCalledTimes(4), { timeout: 3000 })
 
-    const pushedEvents = await Promise.all(pushSpy.mock.results.map((r) => r.value as Promise<LiveEvent>))
-    const [a, b1, c, b2, d] = pushedEvents
-    const titles = pushedEvents.map((e) => e.title)
-    expect(titles).toEqual([
-      "Pod pod-a — Failed", "Pod pod-b — Failed", "Pod pod-c — Failed",
-      "Pod pod-b — Failed", "Pod pod-d — Failed",
+    const [a, b, c, d] = await Promise.all(pushSpy.mock.results.map((r) => r.value as Promise<LiveEvent>))
+    expect([a, b, c, d].map((e) => e.title)).toEqual([
+      "Pod pod-a — Failed", "Pod pod-b — Failed", "Pod pod-c — Failed", "Pod pod-d — Failed",
     ])
 
-    // Ingested during the outage: no comparable id was ever minted for these.
+    // Ingested while healthy: a real, shared-counter id.
     expect(a.id).toMatch(/^\d+$/)
-    expect(b1.id).toMatch(/^d-/)
+    // Ingested during the outage: INCR was unreachable, so a process-local
+    // `d-` id was minted instead of dropping the event (live-stream.ts:88-96).
+    expect(b.id).toMatch(/^d-/)
     expect(c.id).toMatch(/^d-/)
-    // Recovery resumed the shared counter cleanly for both the (buggy) uid-b
-    // redelivery and the genuinely new uid-d event.
-    expect(b2.id).toMatch(/^\d+$/)
+    // Recovery resumed the shared counter cleanly.
     expect(d.id).toMatch(/^\d+$/)
 
-    // --- Bug 2 (idempotency does not survive outage/recovery): uid-b was
-    // claimed once, successfully, during the outage (in-memory fallback only)
-    // and should have short-circuited its redelivery after recovery. Instead
-    // it ingested a second time. This is the documented gap in
-    // idempotency.ts's ValkeyIdempotencyStore.claim() — proven, not fixed.
-    expect(pushSpy).toHaveBeenCalledTimes(5) // would be 4 if idempotency survived recovery
-
-    // --- Bug 1 (numeric-cursor blind spot): a client that saw uid-a live and
-    // reconnects with Last-Event-ID = a.id after the outage gets a *complete
-    // looking* replay (gap: false, unknown: false) that silently omits uid-c
-    // (and the original degraded uid-b delivery) — they only ever existed in
-    // this process's local ring, which replayAfter() does not consult once
-    // Valkey answers again.
-    const numericReplay = await liveStream.replayAfter(a.id)
-    expect(numericReplay.gap).toBe(false)
-    expect(numericReplay.unknown).toBe(false)
-    expect(numericReplay.events.map((e) => e.title)).toEqual(["Pod pod-b — Failed", "Pod pod-d — Failed"])
-    expect(numericReplay.events.some((e) => e.id === c.id)).toBe(false) // uid-c: gone from this view, no flag raised
-
-    // Nothing is actually deleted, though: the same process's exact-degraded-
-    // id replay branch (live-stream.ts:151-156) still has uid-c and both
-    // uid-b deliveries — reachable only by a client that already held the
-    // exact `d-` cursor (e.g. one that stayed connected through the outage).
-    const exactCursorReplay = await liveStream.replayAfter(b1.id)
+    // Guaranteed fallback: a client that already holds the exact degraded
+    // cursor (e.g. one that stayed connected through the outage) still finds
+    // every subsequent event, in order, once Valkey recovers
+    // (live-stream.ts:151-156).
+    const exactCursorReplay = await liveStream.replayAfter(b.id)
     expect(exactCursorReplay).toMatchObject({ gap: false, unknown: false })
-    expect(exactCursorReplay.events.map((e) => e.title)).toEqual([
-      "Pod pod-c — Failed", "Pod pod-b — Failed", "Pod pod-d — Failed",
-    ])
+    expect(exactCursorReplay.events.map((e) => e.title)).toEqual(["Pod pod-c — Failed", "Pod pod-d — Failed"])
 
-    // Metrics observed the outage and the recovery, matching the admin health view.
+    // Metrics observed the outage, the 410 resync, and the recovery, matching
+    // the admin health view.
     const informerStatus = getLiveK8sInformerStatus()
     expect(informerStatus.resyncs410).toBe(1)
     const streamMetrics = liveStream.getLiveStreamMetrics()
@@ -231,7 +188,24 @@ describe("live outage / recovery durability (portal#13)", () => {
     expect(streamMetrics.recoveries).toBeGreaterThanOrEqual(1)
   }, 10_000)
 
-  it("an idempotency key claimed only during a Valkey outage is not honored once Valkey recovers (idempotency.ts:107-123)", async () => {
+  // --- dasomel/narwhal-portal#178 — three known gaps, pinned as expected
+  // failures. Each asserts the CORRECT behavior; flip to `it` once #178 is
+  // fixed and the assertion starts passing for real.
+
+  it.fails("#178 gap 1: a numeric-cursor replay after recovery should not silently omit an event that only ever lived in the process-local ring — it should either return the event or report a gap", async () => {
+    const { pushEvent, replayAfter } = await import("./live-stream")
+    const before = await pushEvent({ type: "custom", severity: "info", title: "before-outage", description: "before-outage", source: "manual" })
+    state.down = true
+    const lost = await pushEvent({ type: "custom", severity: "info", title: "during-outage", description: "during-outage", source: "manual" })
+    state.down = false
+    await pushEvent({ type: "custom", severity: "info", title: "after-recovery", description: "after-recovery", source: "manual" })
+
+    const result = await replayAfter(before.id)
+    const sawLostEvent = result.events.some((e) => e.id === lost.id)
+    expect(sawLostEvent || result.gap || result.unknown).toBe(true)
+  })
+
+  it.fails("#178 gap 2: an idempotency key claimed only during a Valkey outage should still be honored once Valkey recovers — a redelivery must not re-ingest", async () => {
     const { ValkeyIdempotencyStore, claimIdempotencyKey } = await import("./idempotency")
     const store = new ValkeyIdempotencyStore()
 
@@ -241,9 +215,48 @@ describe("live outage / recovery durability (portal#13)", () => {
 
     state.down = false
     const redeliveredAfterRecovery = await claimIdempotencyKey(store, "source-event:kubernetes:uid-x:1", "event-2", 3600)
-    // Documented gap: Valkey has no record of the in-memory-only claim, so it
-    // answers as if this key had never been claimed. A correctly-surviving
-    // dedup would return "event-1" here.
-    expect(redeliveredAfterRecovery).toBeNull()
+    expect(redeliveredAfterRecovery).toBe("event-1") // correct: dedup should survive the recovery
+  })
+
+  it.fails("#178 gap 3: after a 410, the informer should account for events between the expired cursor and the fresh resourceVersion instead of silently skipping them (live-k8s-informer.ts ~L136, ~L302)", async () => {
+    let watchCalls = 0
+    let listCalls = 0
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("limit=1")) {
+        listCalls++
+        // A real `GET /api/v1/events?limit=1` list response carries `items`
+        // (here: the one event that happened during the gap window) even
+        // though getLatestResourceVersion() only ever reads
+        // `metadata.resourceVersion` (live-k8s-informer.ts:136-146) and
+        // silently discards `items` — so a resync after 410 never learns
+        // about, replays, or flags the events it skipped.
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            metadata: { resourceVersion: "5" },
+            items: listCalls === 1 ? [] : [{ metadata: { uid: "uid-missed", resourceVersion: "5" }, reason: "Failed", type: "Warning", involvedObject: { kind: "Pod", name: "pod-missed", namespace: "default" } }],
+          }),
+        } as unknown as Response
+      }
+      watchCalls++
+      if (watchCalls === 1) return { ok: true, status: 200, body: makeStream([k8sEvent("uid-e1", "2", "pod-e1")]) } as unknown as Response
+      if (watchCalls === 2) return { ok: false, status: 410 } as Response
+      return { ok: true, status: 200, body: makePendingStream() } as unknown as Response
+    }))
+
+    const liveStream = await import("./live-stream")
+    const pushSpy = vi.spyOn(liveStream, "pushEvent")
+    const { startLiveK8sInformer, stopLiveK8sInformerForTesting, getLiveK8sInformerStatus } = await import("./live-k8s-informer")
+    stopInformer = stopLiveK8sInformerForTesting
+
+    startLiveK8sInformer()
+    await vi.waitFor(() => expect(getLiveK8sInformerStatus().resyncs410).toBe(1), { timeout: 3000 })
+    await vi.waitFor(() => expect(watchCalls).toBeGreaterThanOrEqual(3), { timeout: 3000 })
+
+    // Correct: the event the post-410 relist already knows about (uid-missed,
+    // resourceVersion "5") should be ingested, not silently dropped between
+    // the expired watch (last seen rv "2") and the fresh one.
+    expect(pushSpy).toHaveBeenCalledWith(expect.objectContaining({ title: "Pod pod-missed — Failed" }))
   })
 })

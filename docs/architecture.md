@@ -119,38 +119,49 @@ disconnect with no network:
 
 | Unreachable dependency | What happens | Bound |
 |---|---|---|
-| Kubernetes API (list or watch) | `startLiveK8sInformer` disables at startup with no throw if no bearer token is obtainable ([`live-k8s-informer.ts:25-32`](../src/lib/live-k8s-informer.ts#L25-L32)); a running watch retries with exponential backoff, capped, and resets on a clean cycle ([`live-k8s-informer.ts:307-321`](../src/lib/live-k8s-informer.ts#L307-L321)); a `410 Gone` triggers an immediate resync from the latest resourceVersion instead of a backoff sleep ([`live-k8s-informer.ts:312-317`](../src/lib/live-k8s-informer.ts#L312-L317)); `401`/`403` invalidate the cached token and retry ([`live-k8s-informer.ts:141-143`](../src/lib/live-k8s-informer.ts#L141-L143), [`156-158`](../src/lib/live-k8s-informer.ts#L156-L158)) | Backoff caps at 30s ([`live-k8s-informer.ts:321`](../src/lib/live-k8s-informer.ts#L321)); an oversized partial watch line is discarded, not buffered without limit ([`live-k8s-informer.ts:39`](../src/lib/live-k8s-informer.ts#L39), [`216-222`](../src/lib/live-k8s-informer.ts#L216-L222)) |
+| Kubernetes API (list or watch) | `startLiveK8sInformer` disables at startup with no throw if no bearer token is obtainable ([`live-k8s-informer.ts:25-32`](../src/lib/live-k8s-informer.ts#L25-L32)); a running watch retries with exponential backoff, capped, and resets on a clean cycle ([`live-k8s-informer.ts:307-321`](../src/lib/live-k8s-informer.ts#L307-L321)); a `410 Gone` triggers an immediate resync instead of a backoff sleep ([`live-k8s-informer.ts:312-317`](../src/lib/live-k8s-informer.ts#L312-L317)) by only re-reading the *current* resourceVersion, not relisting what changed since the expired one ([`live-k8s-informer.ts:136-146`](../src/lib/live-k8s-informer.ts#L136-L146), call site [`302`](../src/lib/live-k8s-informer.ts#L302) — see gap 3 below); on a `401` the cached token is invalidated before the retry, on a `403` it is not (a `403` is a permissions problem, not a stale token) — both raise `K8sCredentialError` ([`live-k8s-informer.ts:141`](../src/lib/live-k8s-informer.ts#L141) 401-only invalidation, [`142`](../src/lib/live-k8s-informer.ts#L142) shared throw for 401/403, mirrored in `watchOnce` at [`156`](../src/lib/live-k8s-informer.ts#L156)/[`157`](../src/lib/live-k8s-informer.ts#L157)) | Backoff caps at 30s ([`live-k8s-informer.ts:321`](../src/lib/live-k8s-informer.ts#L321)); an oversized partial watch line is discarded, not buffered without limit ([`live-k8s-informer.ts:39`](../src/lib/live-k8s-informer.ts#L39), [`216-222`](../src/lib/live-k8s-informer.ts#L216-L222)) |
 | Valkey — informer lease | Acquiring the lease throws → this replica watches locally without exclusivity (`ownerState: "local-fallback"`) instead of stopping ([`live-k8s-informer.ts:259-266`](../src/lib/live-k8s-informer.ts#L259-L266)) | Lease TTL 15s, renewed every 5s while healthy ([`live-k8s-informer.ts:36-37`](../src/lib/live-k8s-informer.ts#L36-L37)) |
-| Valkey — event ring / pub-sub (`pushEvent`) | `INCR` failing mints a process-local `d-<epoch-ms>-<seq>` id instead of dropping the event; the LPUSH/LTRIM/PUBLISH pipeline failing still keeps the event in the process-local ring | Local ring bounded to the newest 1,000 events, same as the shared ring ([`live-stream.ts:7`](../src/lib/live-stream.ts#L7), [`109-110`](../src/lib/live-stream.ts#L109-L110)) |
-| Valkey — idempotency store | `ValkeyIdempotencyStore.claim`/`fulfill` fall back to an in-memory store instead of failing the ingest ([`idempotency.ts:107-123`](../src/lib/idempotency.ts#L107-L123)) | In-memory fallback capped at 5,000 keys with TTL sweep ([`idempotency.ts:40-70`](../src/lib/idempotency.ts#L40-L70)) |
+| Valkey — event ring / pub-sub (`pushEvent`) | `INCR` failing mints a process-local `d-<epoch-ms>-<seq>` id instead of dropping the event; the LPUSH/LTRIM/PUBLISH pipeline failing still keeps the event in the process-local ring ([`live-stream.ts:11`](../src/lib/live-stream.ts#L11), [`88-96`](../src/lib/live-stream.ts#L88-L96)) | Local ring bounded to the newest 1,000 events, same as the shared ring ([`live-stream.ts:7`](../src/lib/live-stream.ts#L7), [`109-110`](../src/lib/live-stream.ts#L109-L110)); it is process memory only — lost on process exit or restart, not just "on replica change" |
+| Valkey — idempotency store | `ValkeyIdempotencyStore.claim`/`fulfill` fall back to an in-memory store instead of failing the ingest ([`idempotency.ts:107-123`](../src/lib/idempotency.ts#L107-L123)) | In-memory fallback capped at 5,000 keys with TTL sweep ([`idempotency.ts:44`](../src/lib/idempotency.ts#L44), [`48-70`](../src/lib/idempotency.ts#L48-L70)). TTL itself differs by caller: the shared default is 24h ([`idempotency.ts:12`](../src/lib/idempotency.ts#L12)), but the K8s informer's own dedup claim passes an explicit 1h TTL instead ([`live-k8s-informer.ts:205`](../src/lib/live-k8s-informer.ts#L205)) |
 | Valkey — SSE subscription | A subscriber that can't open pub/sub ends the live tail immediately after reporting degraded status; the connection stays open on heartbeats only, no live events until the client reconnects ([`live-stream.ts:172-176`](../src/lib/live-stream.ts#L172-L176)) | n/a |
 
 What a client sees on reconnect with `Last-Event-ID` (`src/app/api/events/stream/route.ts:33`,
 [`83-86`](../src/app/api/events/stream/route.ts#L83-L86)): events strictly after the cursor when
 it is still in the retained window; a `replay-gap` control event (`state: "gap"`) when the cursor
 predates the ring; `state: "unknown"` when the cursor can't be placed at all (malformed, or a
-degraded id from a different process). None of these three paths silently drops an event without
-signaling it.
+degraded id from a different process). A numeric cursor whose window is still retained can,
+however, return `gap: false` / `unknown: false` while silently missing any `d-` (degraded-id)
+events minted during a same-process outage — see gap 1 below; that specific path is not covered
+by the "none of these three paths silently drops an event" guarantee above.
 
-Two narrower gaps exist beyond that summary, proven by the tests above and **not fixed by this
-commit** (production behavior is unchanged; flagged for a follow-up decision):
+Three gaps exist beyond that summary, proven by [`live-outage-recovery.test.ts`](../src/lib/live-outage-recovery.test.ts)'s
+`it.fails` cases and tracked as [dasomel/narwhal-portal#178](https://github.com/dasomel/narwhal-portal/issues/178).
+**Not fixed by this commit** — production behavior is unchanged; each `it.fails` asserts the
+correct behavior so it starts failing (signaling a fix) once #178 lands:
 
-- **Numeric-cursor blind spot for same-process degraded events.** An event minted while Valkey's
-  event ring was unreachable (a `d-` id) is never retroactively merged into the shared ring once
-  Valkey recovers. A client reconnecting with a real, pre-outage numeric `Last-Event-ID` gets a
-  replay that looks complete (`gap: false`, `unknown: false`) but silently omits any event that
-  only ever lived in the local ring — `replayAfter` only reads the shared Valkey ring once Valkey
-  answers again ([`live-stream.ts:125-134`](../src/lib/live-stream.ts#L125-L134),
+- **Gap 1 — numeric-cursor blind spot for same-process degraded events.** An event minted while
+  Valkey's event ring was unreachable (a `d-` id) is never retroactively merged into the shared
+  ring once Valkey recovers. A client reconnecting with a real, pre-outage numeric `Last-Event-ID`
+  gets a replay that looks complete (`gap: false`, `unknown: false`) but silently omits any event
+  that only ever lived in the local ring — `replayAfter` only reads the shared Valkey ring once
+  Valkey answers again ([`live-stream.ts:125-134`](../src/lib/live-stream.ts#L125-L134),
   [`157-158`](../src/lib/live-stream.ts#L157-L158)). The event is not gone from the process — the
   exact-degraded-id replay branch still finds it ([`live-stream.ts:151-156`](../src/lib/live-stream.ts#L151-L156))
   — but only a client that already holds that exact `d-` cursor (e.g. one that stayed connected
   through the outage) can reach it.
-- **Idempotency does not survive an outage/recovery cycle.** A claim recorded only in the
+- **Gap 2 — idempotency does not survive an outage/recovery cycle.** A claim recorded only in the
   in-memory fallback while Valkey was unreachable is not consulted once Valkey recovers:
   `ValkeyIdempotencyStore.claim` only checks Valkey's own key when Valkey answers
   ([`idempotency.ts:107-123`](../src/lib/idempotency.ts#L107-L123)). A redelivery of the same
   event (e.g. from the K8s informer's post-`410` relist) after recovery is treated as new and
   re-ingested, rather than deduplicated against the outage-time claim.
+- **Gap 3 — a 410 resync skips events instead of relisting them.** After a `410 Gone`, the outer
+  loop resets the cursor and calls `getLatestResourceVersion` ([`live-k8s-informer.ts:302`](../src/lib/live-k8s-informer.ts#L302)),
+  which issues `GET /api/v1/events?limit=1` and reads only `metadata.resourceVersion` from the
+  response — the `items` it returns are never read or forwarded
+  ([`live-k8s-informer.ts:136-146`](../src/lib/live-k8s-informer.ts#L136-L146)). Any events that
+  occurred between the expired watch's last-seen resourceVersion and this fresh one are neither
+  ingested nor flagged anywhere (no metric, no `replay-gap`) — they are simply never looked at.
 
 ## Relationship to Narwhal
 
