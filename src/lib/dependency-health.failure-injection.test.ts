@@ -9,9 +9,6 @@ import {
   type DependencyHealthSnapshot,
 } from "./dependency-health"
 import {
-  fakeCacheStore,
-  resetHealthTestMocks,
-  mockCacheGetWithMeta,
   FIXTURE_TIMEOUT_CORE,
   FIXTURE_TIMEOUT_OPTIONAL,
   FIXTURE_403_CORE,
@@ -23,9 +20,10 @@ import {
   FIXTURE_PARTIAL_MIXED_DEPENDENCIES,
   makeStatus,
 } from "./dependency-health.fixtures"
+import { fakeCacheStore, resetHealthTestMocks, mockCacheGetWithMeta } from "./dependency-health.test-helpers"
 
 vi.mock("./config", async () => {
-  const { mockGetK8sApiServer } = await import("./dependency-health.fixtures")
+  const { mockGetK8sApiServer } = await import("./dependency-health.test-helpers")
   return {
     getK8sApiServer: () => mockGetK8sApiServer(),
     getDependencyUrl: (_env: string, fallback: string) => fallback,
@@ -34,7 +32,7 @@ vi.mock("./config", async () => {
 })
 
 vi.mock("./k8s-token", async () => {
-  const { mockGetK8sBearerToken, mockInvalidateK8sBearerToken } = await import("./dependency-health.fixtures")
+  const { mockGetK8sBearerToken, mockInvalidateK8sBearerToken } = await import("./dependency-health.test-helpers")
   return {
     getK8sBearerToken: () => mockGetK8sBearerToken(),
     invalidateK8sBearerToken: () => mockInvalidateK8sBearerToken(),
@@ -42,7 +40,7 @@ vi.mock("./k8s-token", async () => {
 })
 
 vi.mock("./valkey", async () => {
-  const { mockPing, mockCacheGet, mockCacheGetWithMeta, mockCacheSet } = await import("./dependency-health.fixtures")
+  const { mockPing, mockCacheGet, mockCacheGetWithMeta, mockCacheSet } = await import("./dependency-health.test-helpers")
   return {
     getValkey: () => ({ ping: () => mockPing() }),
     cacheGet: (key: string) => mockCacheGet(key),
@@ -52,7 +50,7 @@ vi.mock("./valkey", async () => {
 })
 
 vi.mock("./live-stream", async () => {
-  const { mockLiveStreamStatus } = await import("./dependency-health.fixtures")
+  const { mockLiveStreamStatus } = await import("./dependency-health.test-helpers")
   return {
     getLiveStreamStatus: () => mockLiveStreamStatus(),
   }
