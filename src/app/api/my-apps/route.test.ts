@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { ArgoApp } from "@/lib/argocd"
+import type { NamespaceInfo } from "@/lib/k8s-client"
 
 // portal#53 AC-4: /api/my-apps keys its cache by `user` AND `scope` (cacheKeys.myApps,
 // dimensions ["user", "scope"] per CACHE_NAMESPACES["my-apps"]) but had no route-level
@@ -8,21 +9,50 @@ import type { ArgoApp } from "@/lib/argocd"
 // src/app/api/governance/dora/route.test.ts) to prove a cached response for one
 // user/team is never served to a different user or team. See src/app/api/catalog/route.test.ts
 // for the wholesale-auth-mock rationale (@/lib/scope is left real).
+//
+// getEffectiveScope (real, via @/lib/scope) calls getNamespaces() (@/lib/k8s-client) to
+// resolve a team's namespace glob into concrete names. Left unmocked, that hits a real
+// network fetch to a hardcoded fallback K8s API address — fine (fast ECONNREFUSED) on a
+// dev box with no local network restrictions, but CI's sandboxed egress lets the
+// connection hang instead of failing fast, past vitest's 5s default test timeout. Every
+// neighbouring scope-aware route test (e.g. governance/resources, governance/dora,
+// events) mocks this same boundary for the same reason.
 vi.mock("@/lib/auth", () => ({ auth: vi.fn() }))
 vi.mock("@/lib/argocd", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/argocd")>()
   return { ...actual, getArgoApps: vi.fn() }
 })
 vi.mock("@/lib/alertmanager", () => ({ getAlerts: vi.fn() }))
-vi.mock("@/lib/valkey", () => ({ cacheGet: vi.fn(), cacheSet: vi.fn() }))
+vi.mock("@/lib/k8s-client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/k8s-client")>()
+  return { ...actual, getNamespaces: vi.fn() }
+})
+// Complete mock: @/lib/argocd and @/lib/k8s-client (both left real above except for one
+// override each) import cacheDel/getValkey/getLiveValkey/cacheGetWithMeta from this
+// module too — omitting them is what let a real, unmocked boundary reach the network
+// unnoticed here in the first place.
+vi.mock("@/lib/valkey", () => ({
+  cacheGet: vi.fn(),
+  cacheSet: vi.fn(),
+  cacheDel: vi.fn(),
+  cacheGetWithMeta: vi.fn(),
+  getValkey: vi.fn(),
+  getLiveValkey: vi.fn(),
+}))
 
 const { auth } = await import("@/lib/auth")
 const { getArgoApps } = await import("@/lib/argocd")
 const { getAlerts } = await import("@/lib/alertmanager")
+const { getNamespaces } = await import("@/lib/k8s-client")
 const { cacheGet, cacheSet } = await import("@/lib/valkey")
 const { cacheKeys } = await import("@/lib/cache-keys")
 const { getEffectiveScope } = await import("@/lib/scope")
 const { GET } = await import("./route")
+
+const namespaces: NamespaceInfo[] = [
+  { name: "platform-system", status: "Active", labels: {}, createdAt: "2026-01-01T00:00:00Z" },
+  { name: "frontend-app", status: "Active", labels: {}, createdAt: "2026-01-01T00:00:00Z" },
+]
 
 const platformUserA = { groups: ["developer"], teams: ["platform-team"], user: { sub: "user-a", role: "developer" } }
 const platformUserB = { groups: ["developer"], teams: ["platform-team"], user: { sub: "user-b", role: "developer" } }
@@ -46,6 +76,7 @@ beforeEach(() => {
   const cache = new Map<string, unknown>()
   vi.mocked(getArgoApps).mockResolvedValue([platformApp, frontendApp])
   vi.mocked(getAlerts).mockResolvedValue([])
+  vi.mocked(getNamespaces).mockResolvedValue(namespaces)
   vi.mocked(cacheGet).mockImplementation(async (key: string) => cache.get(key) ?? null)
   vi.mocked(cacheSet).mockImplementation(async (key: string, value: unknown) => {
     cache.set(key, value)
