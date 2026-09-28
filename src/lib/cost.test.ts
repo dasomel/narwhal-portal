@@ -305,6 +305,132 @@ describe("cost cache multi-cluster and cross-scope isolation (Portal #64)", () =
     expect(cachedTrendA).toEqual(trendA)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
+
+  // The three tests above vary clusterId only. These vary team only (same cluster,
+  // same groups) — a fingerprint that dropped the team/scope dimension would still
+  // pass the cluster-only tests above, since clusterId alone would keep separating
+  // those entries.
+  it("ensures a namespace cost value cached for platform-team is never returned for frontend-team on the same cluster", async () => {
+    const scopePlatform = await getEffectiveScope({ groups: ["developer"], teams: ["platform-team"] }, "cluster-alpha")
+    const scopeFrontend = await getEffectiveScope({ groups: ["developer"], teams: ["frontend-team"] }, "cluster-alpha")
+    expect(scopePlatform.clusterId).toBe(scopeFrontend.clusterId)
+    expect(scopePlatform.fingerprint).not.toBe(scopeFrontend.fingerprint)
+
+    // 1. platform-team queries and populates the cache with platform-system's cost
+    const platformResult = await getCost("namespace", scopePlatform)
+    expect(platformResult.items.map((i) => i.id)).toEqual(["platform-system"])
+
+    // 2. frontend-team queries the SAME cluster, same mocked Prometheus data (which
+    // only reports platform-system). frontend-team cannot see platform-system, so a
+    // correctly-scoped result has no items — anything else (in particular
+    // platform-team's cached platform-system item) would mean the team dimension was
+    // dropped from the cache key.
+    const frontendResult = await getCost("namespace", scopeFrontend)
+    expect(frontendResult.items).toEqual([])
+
+    const setKeys = vi.mocked(cacheSet).mock.calls.map(([key]) => key).filter((k) => k.startsWith("cost:v2:namespace:"))
+    expect(new Set(setKeys).size).toBe(2)
+
+    // 3. Repeated query for platform-team still returns platform-team's cached value.
+    const cachedPlatform = await getCost("namespace", scopePlatform)
+    expect(cachedPlatform.items).toEqual(platformResult.items)
+    expect(cachedPlatform.freshnessSource).toBe("cache")
+  })
+
+  it("ensures a service detail cost value cached for platform-team is never returned for frontend-team on the same cluster", async () => {
+    const scopePlatform = await getEffectiveScope({ groups: ["developer"], teams: ["platform-team"] }, "cluster-alpha")
+    const scopeFrontend = await getEffectiveScope({ groups: ["developer"], teams: ["frontend-team"] }, "cluster-alpha")
+    expect(scopePlatform.fingerprint).not.toBe(scopeFrontend.fingerprint)
+
+    // 1. platform-team populates the cache
+    const resultA = await getCostByService("platform-svc", scopePlatform, "platform-system")
+    expect("serviceId" in resultA).toBe(true)
+
+    // 2. Swap the mocked metrics before the second call — a real cache-key collision
+    // (team dimension dropped from the fingerprint) would still return resultA's
+    // stale value here despite the new mock. Both cpu and memory must resolve
+    // non-empty (cpuByServiceQuery/topPodCpuQuery and memByServiceQuery/topPodMemQuery
+    // share these URL substrings), or telemetry.state !== "ok" and this call would
+    // skip caching entirely, same as getCost's empty-vector classification.
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("container_cpu_usage_seconds_total")) {
+        return jsonResponse([
+          {
+            metric: {
+              namespace: "platform-system",
+              label_app_kubernetes_io_instance: "platform-svc",
+              pod: "frontend-team-pod",
+            },
+            value: [0, "8.0"],
+          },
+        ])
+      }
+      if (url.includes("container_memory_working_set_bytes")) {
+        return jsonResponse([
+          {
+            metric: {
+              namespace: "platform-system",
+              label_app_kubernetes_io_instance: "platform-svc",
+              pod: "frontend-team-pod",
+            },
+            value: [0, "3000000000"],
+          },
+        ])
+      }
+      return jsonResponse([])
+    }))
+
+    const resultB = await getCostByService("platform-svc", scopeFrontend, "platform-system")
+    expect("serviceId" in resultB).toBe(true)
+    if ("serviceId" in resultA && "serviceId" in resultB) {
+      expect(resultB.cpu.cores).toBe(8)
+      expect(resultA.cpu.cores).toBe(1.5)
+    }
+
+    const setKeys = vi.mocked(cacheSet).mock.calls.map(([key]) => key).filter((k) => k.startsWith("cost:service:v2:"))
+    expect(new Set(setKeys).size).toBe(2)
+
+    // 3. Repeated query for platform-team hits its own cache entry, not frontend-team's.
+    const fetchSpy = vi.mocked(global.fetch)
+    fetchSpy.mockClear()
+    const cachedA = await getCostByService("platform-svc", scopePlatform, "platform-system")
+    expect(cachedA).toEqual(resultA)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("ensures a cost trend value cached for platform-team is never returned for frontend-team on the same cluster", async () => {
+    const scopePlatform = await getEffectiveScope({ groups: ["developer"], teams: ["platform-team"] }, "cluster-alpha")
+    const scopeFrontend = await getEffectiveScope({ groups: ["developer"], teams: ["frontend-team"] }, "cluster-alpha")
+    expect(scopePlatform.fingerprint).not.toBe(scopeFrontend.fingerprint)
+
+    // 1. platform-team queries trend and caches the result
+    const trendA = await getCostTrend("namespace", "platform-system", 7, scopePlatform)
+    expect(trendA.points.length).toBeGreaterThan(0)
+
+    // 2. Swap the mocked trend data before the second call
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([
+      {
+        metric: {},
+        values: [
+          [1700000000, "77.0"],
+        ],
+      },
+    ])))
+
+    // 3. frontend-team queries the same cluster/namespace/days
+    const trendB = await getCostTrend("namespace", "platform-system", 7, scopeFrontend)
+    expect(trendB.points).not.toEqual(trendA.points)
+
+    const setKeys = vi.mocked(cacheSet).mock.calls.map(([key]) => key).filter((k) => k.startsWith("cost:trend:v2:namespace:"))
+    expect(new Set(setKeys).size).toBe(2)
+
+    // 4. platform-team returns its own cached trend without calling fetch
+    const fetchSpy = vi.mocked(global.fetch)
+    fetchSpy.mockClear()
+    const cachedTrendA = await getCostTrend("namespace", "platform-system", 7, scopePlatform)
+    expect(cachedTrendA).toEqual(trendA)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
 })
 
 describe("cost exclusions and telemetry (Portal #64 AC3/AC4)", () => {
