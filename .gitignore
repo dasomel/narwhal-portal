@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# kaniko-build.sh build-evidence records (portal#23) — generated, not committed
+/build-evidence/
+
 # next.js
 /.next/
 /out/
