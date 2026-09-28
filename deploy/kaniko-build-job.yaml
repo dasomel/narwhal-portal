@@ -3,7 +3,8 @@
 #
 # Namespace: devtools
 # Context  : clones narwhal-portal from the in-cluster Gitea (private), builds with Kaniko,
-#            pushes to harbor.${DOMAIN}/library/narwhal-portal:latest
+#            pushes to harbor.${DOMAIN}/library/narwhal-portal:<full-source-sha>
+#            HARBOR_TAG may explicitly select a SemVer tag; it is the deploy reference.
 #
 # Required secrets (created by harbor-kaniko-setup.sh):
 #   devtools/idp-portal-kaniko-harbor   — docker config.json for Harbor push auth
@@ -13,8 +14,7 @@
 #   devtools/gitea-admin                — admin-password key (created by 12-gitea.sh)
 #
 # Domain templating:
-#   KANIKO_DESTINATION placeholder is replaced at apply-time by kaniko-build.sh
-#   using `sed "s|__HARBOR_DESTINATION__|harbor.${DOMAIN}/library/narwhal-portal:latest|g"`.
+#   Harbor host/repository prefix and optional SemVer tag are replaced at apply-time.
 #
 # Live-build caveats (cannot verify without a running cluster):
 #   - oven/bun:1.3.13-alpine must be pullable inside the cluster (Docker Hub rate limits may apply).
@@ -84,6 +84,7 @@ spec:
             - -c
             - |
               set -eu
+              trap 'rm -f "${HOME}/.netrc"' EXIT
               echo "==> Cloning narwhal-portal from in-cluster Gitea..."
               # portal#23: credential goes in a .netrc read by git's own HTTP auth,
               # never in the clone URL/argv — `ps`, Job events, and pod logs only
@@ -99,11 +100,17 @@ spec:
               git clone \
                 "http://gitea-http.devtools.svc.cluster.local:3000/gitea-admin/narwhal-portal.git" \
                 /workspace
-              rm -f "${HOME}/.netrc"
-              echo "==> Clone complete. HEAD: $(git -C /workspace rev-parse --short HEAD)"
+              source_sha="$(git -C /workspace rev-parse HEAD)"
+              # D1: verify the passed commit against the clone; stale sources fail early.
+              # Cost: exact checkout required. HARBOR_TAG SemVer override is the escape hatch.
+              test "$source_sha" = "__GIT_SHA__"
+              echo "$source_sha" > /build-metadata/source-sha
+              echo "==> Clone complete. HEAD: $source_sha"
           volumeMounts:
             - name: workspace
               mountPath: /workspace
+            - name: build-metadata
+              mountPath: /build-metadata
 
       # ------------------------------------------------------------------ #
       #  Main container: Kaniko builds from /workspace (dir:// context)     #
@@ -116,29 +123,34 @@ spec:
           # Digest pin (portal#23), resolved 2026-09-18 from gcr.io/kaniko-project/executor:v1.24.0.
           image: gcr.io/kaniko-project/executor:v1.24.0@sha256:4e7a52dd1f14872430652bb3b027405b8dfd17c4538751c620ac005741ef9698
           imagePullPolicy: IfNotPresent
+          # D2: expose the shared digest file through termination status for the caller.
+          # Cost: one emptyDir file; kubectl logs remain the fallback when status expires.
+          terminationMessagePath: /build-metadata/image-digest
+          terminationMessagePolicy: File
           args:
             - "--context=dir:///workspace"
             - "--dockerfile=/workspace/Dockerfile"
-            # Commit metadata is resolved by kaniko-build.sh from the pushed source.
-            - "--build-arg=GIT_SHA=__GIT_SHA__"
-            # Destination is templated by kaniko-build.sh at apply-time.
-            # The placeholder below must match the sed pattern in kaniko-build.sh.
-            - "--destination=__HARBOR_DESTINATION__"
-            # Trust the Narwhal Root CA for Harbor TLS verification.
-            # The CA is mounted at /kaniko/ssl/certs/narwhal-ca.crt so Kaniko's
-            # built-in certificate store picks it up automatically.
+            - "--build-arg=GIT_SHA=$(GIT_SHA)"
+            - "--destination=__HARBOR_DESTINATION_PREFIX__:$(HARBOR_TAG)"
+            - "--digest-file=/build-metadata/image-digest"
+            - "--label=org.opencontainers.image.revision=$(GIT_SHA)"
+            - "--label=org.opencontainers.image.source=https://github.com/dasomel/narwhal-portal"
+            # Trust the Narwhal Root CA for Harbor TLS verification; the CA is mounted at
+            # /kaniko/ssl/certs/narwhal-ca.crt so Kaniko's certificate store picks it up.
             - "--registry-certificate=__HARBOR_HOST__=/kaniko/ssl/certs/narwhal-ca.crt"
-            # Reproducible snapshot; safer for multi-stage Alpine builds on ARM64.
             - "--snapshot-mode=redo"
-            # Disable layer caching (no cache backend configured in this cluster).
             - "--cache=false"
             # D8: compressed-caching=false — do NOT keep a second compressed copy of each
-            # layer in memory during the build. Next.js 16 + React 19 standalone builds
-            # produce large snapshot diffs; having both uncompressed and compressed copies
-            # in-memory simultaneously caused the OOMKill at the previous 4 Gi limit.
-            # Trade-off: layers are compressed at push time (slight CPU cost), but peak
-            # RSS stays well under the limit. See: github.com/GoogleContainerTools/kaniko
+            # layer in memory. Next.js 16 + React 19 standalone builds produce large snapshot
+            # diffs; both copies in memory caused the OOMKill at the previous 4 Gi limit.
+            # Trade-off: layers are compressed at push time (slight CPU cost). For the same
+            # reason --reproducible (known to raise peak memory) is not used.
             - "--compressed-caching=false"
+          env:
+            - name: GIT_SHA
+              value: "__GIT_SHA__"
+            - name: HARBOR_TAG
+              value: "__HARBOR_TAG__"
           resources:
             requests:
               # D15: lowered from 1000m — worker nodes only have 2 vCPU allocatable
@@ -174,6 +186,8 @@ spec:
             - name: workspace
               mountPath: /workspace
               readOnly: true
+            - name: build-metadata
+              mountPath: /build-metadata
 
       volumes:
         - name: kaniko-docker-config
@@ -186,6 +200,8 @@ spec:
           secret:
             secretName: narwhal-root-ca-secret
         - name: workspace
+          emptyDir: {}
+        - name: build-metadata
           emptyDir: {}
 
       # Prefer worker nodes (avoid memory-tight masters)

@@ -24,7 +24,7 @@
 #   BUILD_NAMESPACE=devtools
 #   HARBOR_PROJECT=library
 #   HARBOR_REPO=narwhal-portal
-#   HARBOR_TAG=latest
+#   HARBOR_TAG=v1.2.3  # optional SemVer override; default is the full source SHA
 #   GITEA_ADMIN_USER=gitea-admin
 #   GITEA_PORTAL_REPO=narwhal-portal
 #   JOB_TIMEOUT=1200   # seconds (default 20 min)
@@ -42,7 +42,7 @@ BUILD_NAMESPACE="${BUILD_NAMESPACE:-devtools}"
 HARBOR_HOST="harbor.${DOMAIN}"
 HARBOR_PROJECT="${HARBOR_PROJECT:-library}"
 HARBOR_REPO="${HARBOR_REPO:-narwhal-portal}"
-HARBOR_TAG="${HARBOR_TAG:-latest}"
+HARBOR_TAG_OVERRIDE="${HARBOR_TAG:-}"
 GITEA_ADMIN_USER="${GITEA_ADMIN_USER:-gitea-admin}"
 GITEA_PORTAL_REPO="${GITEA_PORTAL_REPO:-narwhal-portal}"
 JOB_TIMEOUT="${JOB_TIMEOUT:-1200}"
@@ -194,10 +194,16 @@ EOF
 fi
 
 if [[ -z "${BUILD_GIT_SHA:-}" ]]; then
-  BUILD_GIT_SHA="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo dev)"
+  BUILD_GIT_SHA="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || true)"
 fi
-if [[ ! "${BUILD_GIT_SHA}" =~ ^[0-9a-f]{7,40}$ ]] && [[ "${BUILD_GIT_SHA}" != "dev" ]]; then
-  BUILD_GIT_SHA="dev"
+if [[ ! "${BUILD_GIT_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+  red "소스의 전체 Git SHA를 확인할 수 없습니다: ${BUILD_GIT_SHA:-empty}"
+  exit 1
+fi
+HARBOR_TAG="${HARBOR_TAG_OVERRIDE:-${BUILD_GIT_SHA}}"
+if [[ -n "${HARBOR_TAG_OVERRIDE}" && ! "${HARBOR_TAG_OVERRIDE}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+  red "HARBOR_TAG는 SemVer 형식이어야 합니다 (예: v1.2.3)."
+  exit 1
 fi
 
 cleanup_pf
@@ -236,13 +242,15 @@ if kubectl get job "${JOB_NAME}" -n "${BUILD_NAMESPACE}" &>/dev/null; then
 fi
 
 # ---- 9. Job manifest 적용 (domain placeholder 치환) -----------------------
-HARBOR_DESTINATION="${HARBOR_HOST}/${HARBOR_PROJECT}/${HARBOR_REPO}:${HARBOR_TAG}"
+HARBOR_DESTINATION_PREFIX="${HARBOR_HOST}/${HARBOR_PROJECT}/${HARBOR_REPO}"
+HARBOR_DESTINATION="${HARBOR_DESTINATION_PREFIX}:${HARBOR_TAG}"
 info "Kaniko Job 적용: destination=${HARBOR_DESTINATION}"
 
 sed \
-  -e "s|__HARBOR_DESTINATION__|${HARBOR_DESTINATION}|g" \
+  -e "s|__HARBOR_DESTINATION_PREFIX__|${HARBOR_DESTINATION_PREFIX}|g" \
   -e "s|__HARBOR_HOST__|${HARBOR_HOST}|g" \
   -e "s|__GIT_SHA__|${BUILD_GIT_SHA}|g" \
+  -e "s|__HARBOR_TAG__|${HARBOR_TAG}|g" \
   "${JOB_TEMPLATE}" | kubectl apply -f -
 
 # ---- 10. Job 완료 대기 -------------------------------------------------------
@@ -271,6 +279,13 @@ if kubectl wait \
   green ""
   green "[완료] Kaniko 빌드 성공!"
   green "  이미지: ${HARBOR_DESTINATION}"
+  IMAGE_DIGEST="$(kubectl get pods -n "${BUILD_NAMESPACE}" \
+    -l "job-name=${JOB_NAME}" \
+    --field-selector=status.phase=Succeeded \
+    -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="kaniko")].state.terminated.message}' 2>/dev/null || true)"
+  if [[ -n "${IMAGE_DIGEST}" ]]; then
+    green "  다이제스트: ${IMAGE_DIGEST}"
+  fi
   exit 0
 else
   # 실패 또는 타임아웃 — 로그 출력
