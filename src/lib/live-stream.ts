@@ -12,16 +12,55 @@ const memoryRing: LiveEvent[] = []
 let degradedReason: string | undefined
 let degradedAt = 0
 
+const liveStreamMetrics = {
+  acceptedIngests: 0,
+  duplicateIngests: 0,
+  incrFailures: 0,
+  writeFailures: 0,
+  subscribeFailures: 0,
+  degradedEntries: 0,
+  recoveries: 0,
+  replayInWindow: 0,
+  replayGaps: 0,
+  replayUnknown: 0,
+  connectedClients: 0,
+  disconnectCleanups: 0,
+}
+
+export function getLiveStreamMetrics() {
+  return { ...liveStreamMetrics }
+}
+
+export function recordLiveEventAccepted() { liveStreamMetrics.acceptedIngests++ }
+export function recordLiveEventDuplicate() { liveStreamMetrics.duplicateIngests++ }
+export function connectLiveClient() { liveStreamMetrics.connectedClients++ }
+export function disconnectLiveClient() {
+  liveStreamMetrics.connectedClients = Math.max(0, liveStreamMetrics.connectedClients - 1)
+  liveStreamMetrics.disconnectCleanups++
+}
+
+export function resetLiveStreamMetricsForTesting() {
+  Object.assign(liveStreamMetrics, {
+    acceptedIngests: 0, duplicateIngests: 0, incrFailures: 0, writeFailures: 0,
+    subscribeFailures: 0, degradedEntries: 0, recoveries: 0, replayInWindow: 0,
+    replayGaps: 0, replayUnknown: 0, connectedClients: 0, disconnectCleanups: 0,
+  })
+}
+
 export type LiveStreamStatus = { dependency: "valkey"; state: "ok" | "partial" | "unavailable"; observedAt: string; reason?: string }
 
 function markDegraded(reason = "persistence_failure") {
-  if (!degradedReason) console.warn("[live-stream] Valkey unavailable — operating in degraded in-memory mode")
+  if (!degradedReason) {
+    console.warn("[live-stream] Valkey unavailable — operating in degraded in-memory mode")
+    liveStreamMetrics.degradedEntries++
+  }
   degradedReason = reason
   degradedAt = Date.now()
   process.env.LIVE_STREAM_DEGRADED = "1"
 }
 
 function markHealthy() {
+  if (degradedReason) liveStreamMetrics.recoveries++
   degradedReason = undefined
   degradedAt = 0
   delete process.env.LIVE_STREAM_DEGRADED
@@ -51,6 +90,7 @@ export async function pushEvent(ingest: LiveEventIngest): Promise<LiveEvent> {
   try {
     id = await nextId()
   } catch {
+    liveStreamMetrics.incrFailures++
     markDegraded()
     id = nextMemoryId()
   }
@@ -71,10 +111,12 @@ export async function pushEvent(ingest: LiveEventIngest): Promise<LiveEvent> {
 
   try {
     const valkey = getLiveValkey()
-    await valkey.pipeline().lpush(RING_KEY, JSON.stringify(event)).ltrim(RING_KEY, 0, LIVE_EVENT_RETENTION - 1)
+    const results = await valkey.pipeline().lpush(RING_KEY, JSON.stringify(event)).ltrim(RING_KEY, 0, LIVE_EVENT_RETENTION - 1)
       .publish(PUBSUB_CHANNEL, JSON.stringify(event)).exec()
+    if (!results || results.some(([error]) => error)) throw new Error("Live event persistence pipeline failed")
     if (/^\d+$/.test(id)) markHealthy()
   } catch {
+    liveStreamMetrics.writeFailures++
     markDegraded()
   }
   return event
@@ -100,11 +142,17 @@ export function compareLiveEventIds(left: string, right: string): number | null 
 }
 
 export async function replayAfter(lastId: string, limit = LIVE_EVENT_RETENTION): Promise<ReplayResult> {
+  const counted = (result: ReplayResult): ReplayResult => {
+    if (result.gap) liveStreamMetrics.replayGaps++
+    else if (result.unknown) liveStreamMetrics.replayUnknown++
+    else liveStreamMetrics.replayInWindow++
+    return result
+  }
   if (lastId.startsWith("d-")) {
     const localOrdered = memoryRing.slice().reverse()
     const localIndex = localOrdered.findIndex((event) => event.id === lastId)
-    if (localIndex < 0) return { events: [], gap: false, unknown: true }
-    return { events: localOrdered.slice(localIndex + 1), gap: false, unknown: false }
+    if (localIndex < 0) return counted({ events: [], gap: false, unknown: true })
+    return counted({ events: localOrdered.slice(localIndex + 1), gap: false, unknown: false })
   }
   const newestFirst = await getRecentEvents(limit)
   const ordered = newestFirst.filter((event) => /^\d+$/.test(event.id)).slice().reverse()
@@ -114,11 +162,11 @@ export async function replayAfter(lastId: string, limit = LIVE_EVENT_RETENTION):
   const oldestComparison = oldest && compareLiveEventIds(lastId, oldest.id)
   const index = ordered.findIndex((event) => event.id === lastId)
   if (!newest || newestComparison === undefined || newestComparison === null || oldestComparison === undefined || oldestComparison === null || newestComparison > 0) {
-    return { events: [], gap: false, unknown: true }
+    return counted({ events: [], gap: false, unknown: true })
   }
-  if (oldestComparison < 0) return { events: [], gap: true, unknown: false }
-  if (index < 0) return { events: [], gap: false, unknown: true }
-  return { events: ordered.slice(index + 1), gap: false, unknown: false }
+  if (oldestComparison < 0) return counted({ events: [], gap: true, unknown: false })
+  if (index < 0) return counted({ events: [], gap: false, unknown: true })
+  return counted({ events: ordered.slice(index + 1), gap: false, unknown: false })
 }
 
 export async function* subscribeLive(afterId?: string, signal?: AbortSignal): AsyncIterable<LiveEvent> {
@@ -144,6 +192,7 @@ export async function* subscribeLive(afterId?: string, signal?: AbortSignal): As
     try {
       await subscriber.subscribe(PUBSUB_CHANNEL)
     } catch (error) {
+      liveStreamMetrics.subscribeFailures++
       markDegraded("subscription_failure")
       throw error
     }

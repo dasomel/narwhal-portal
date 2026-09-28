@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const state = vi.hoisted(() => ({ rows: [] as string[], fail: true, incrFail: false, subscribeFail: false, counter: BigInt(0), listeners: [] as ((channel: string, message: string) => void)[], unsubscribes: 0, disconnects: 0, removals: 0 }))
+const state = vi.hoisted(() => ({ rows: [] as string[], fail: true, incrFail: false, writeFail: false, subscribeFail: false, counter: BigInt(0), listeners: [] as ((channel: string, message: string) => void)[], unsubscribes: 0, disconnects: 0, removals: 0 }))
 vi.mock("./valkey", () => ({
   getLiveValkey: () => {
     if (state.fail) throw new Error("offline")
@@ -10,7 +10,7 @@ vi.mock("./valkey", () => ({
       pipeline: () => {
         const value: { payload?: string } = {}
         const pipe = { lpush: (_k: string, p: string) => { value.payload = p; return pipe }, ltrim: () => pipe,
-          publish: (_k: string, p: string) => { value.payload = p; return pipe }, exec: async () => { if (value.payload) state.rows.unshift(value.payload); return [] } }
+          publish: (_k: string, p: string) => { value.payload = p; return pipe }, exec: async () => { if (state.writeFail) throw new Error("write failed"); if (value.payload) state.rows.unshift(value.payload); return [] } }
         return pipe
       },
       lrange: async (_k: string, start: number, end: number) => state.rows.slice(start, end + 1),
@@ -22,14 +22,14 @@ vi.mock("./valkey", () => ({
   },
 }))
 
-const { pushEvent, getRecentEvents, replayAfter, getLiveStreamStatus, subscribeLiveWithReplay, compareLiveEventIds } = await import("./live-stream")
+const { pushEvent, getRecentEvents, replayAfter, getLiveStreamStatus, subscribeLiveWithReplay, compareLiveEventIds, getLiveStreamMetrics, resetLiveStreamMetricsForTesting, recordLiveEventAccepted, recordLiveEventDuplicate, connectLiveClient, disconnectLiveClient } = await import("./live-stream")
 
 async function add(title: string) {
   return pushEvent({ type: "custom", severity: "info", title, description: title, source: "manual" })
 }
 
 describe("live stream replay", () => {
-  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-28T00:00:00Z")); state.rows = []; state.fail = true; state.incrFail = false; state.subscribeFail = false; state.counter = BigInt(0); state.listeners = []; state.unsubscribes = 0; state.disconnects = 0; state.removals = 0 })
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-28T00:00:00Z")); state.rows = []; state.fail = true; state.incrFail = false; state.writeFail = false; state.subscribeFail = false; state.counter = BigInt(0); state.listeners = []; state.unsubscribes = 0; state.disconnects = 0; state.removals = 0; resetLiveStreamMetricsForTesting() })
   it("replays strictly after an in-window cursor in order", async () => {
     state.fail = false
     const a = await add("a"), b = await add("b"), c = await add("c")
@@ -118,5 +118,35 @@ describe("live stream replay", () => {
     expect(addSpy).toHaveBeenCalledTimes(1)
     expect(removeSpy).toHaveBeenCalledTimes(1)
     expect(state.listeners).toHaveLength(0)
+  })
+
+  it("counts ingestion, duplicate, persistence failures, degraded recovery, replay outcomes, and client gauge", async () => {
+    recordLiveEventAccepted()
+    recordLiveEventDuplicate()
+    await add("offline")
+    state.fail = false
+    state.incrFail = false
+    await add("recovered")
+    state.writeFail = true
+    await add("write failed")
+    state.writeFail = false
+
+    const event = (id: string) => JSON.stringify({ id, type: "custom", severity: "info", title: id, source: "manual" })
+    state.rows = [event("6"), event("5")]
+    await replayAfter("5")
+    await replayAfter("4")
+    await replayAfter("7")
+    state.subscribeFail = true
+    const setup = await subscribeLiveWithReplay()
+    await expect(setup.live[Symbol.asyncIterator]().next()).rejects.toThrow("subscribe failed")
+    connectLiveClient()
+    disconnectLiveClient()
+
+    expect(getLiveStreamMetrics()).toMatchObject({
+      acceptedIngests: 1, duplicateIngests: 1, incrFailures: 1, writeFailures: 2,
+      subscribeFailures: 1, degradedEntries: 3, recoveries: 2,
+      replayInWindow: 1, replayGaps: 1, replayUnknown: 1,
+      connectedClients: 0, disconnectCleanups: 1,
+    })
   })
 })

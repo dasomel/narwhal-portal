@@ -89,6 +89,27 @@ are non-comparable with shared counters; they replay only when the exact ID is s
 same process's in-memory ring. Other degraded cursors are reported as `unknown`. Client abort
 signals end the subscription and release its pub/sub listener and connection.
 
+The admin-only `/api/health/dependencies` response includes in-process `liveStream` metrics:
+
+| Metric | Meaning |
+|---|---|
+| `acceptedIngests` | Ingest requests accepted and sent to the live pipeline |
+| `duplicateIngests` | Requests rejected as duplicates by idempotency |
+| `incrFailures` | Failures obtaining the shared Valkey event ID with `INCR`; during a full Valkey outage, one `pushEvent` increments this and `writeFailures`, so summing them overstates distinct events |
+| `writeFailures` | Failures writing the replay ring or publishing the event; during a full Valkey outage, one `pushEvent` increments this and `incrFailures`, so summing them overstates distinct events |
+| `subscribeFailures` | Failures subscribing an SSE consumer to pub/sub |
+| `degradedEntries` | Transitions from healthy into degraded mode |
+| `recoveries` | Transitions from degraded back to healthy |
+| `replayInWindow` | Replay requests resolved within the retained window |
+| `replayGaps` | Replay requests whose cursor predates retained events |
+| `replayUnknown` | Replay requests whose cursor could not be established |
+| `connectedClients` | Current SSE clients connected to this process (gauge) |
+| `disconnectCleanups` | SSE client disconnects that ran subscription cleanup |
+
+All metrics except `connectedClients` are monotonic counters. They are process-local, reset on
+process restart, and report only the replica serving the admin request. Prometheus scraping and
+aggregation are future cluster-side work; this endpoint does not provide cluster-wide totals.
+
 ## Relationship to Narwhal
 
 This repository owns portal code and packaging. The [Narwhal repository](https://github.com/dasomel/narwhal) owns cluster provisioning, GitOps applications, gateways, identity and platform services. A new cluster capability therefore needs a portal contract here and deployment/configuration in Narwhal separately.
