@@ -118,6 +118,34 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
+      # Exercise the exact pushed digest on its matching native runner before the
+      # merge job creates any release tags or multi-arch manifest.
+      - name: Smoke test pushed image
+        run: |
+          set -euo pipefail
+          image="${IMAGE}@${{ steps.build.outputs.digest }}"
+          docker pull "$image"
+          container=$(docker run -d -p 3000:3000 \
+            -e AUTH_SECRET=smoke-test-secret-at-least-32-characters \
+            -e KEYCLOAK_ISSUER=https://keycloak.invalid/realms/narwhal \
+            -e KEYCLOAK_CLIENT_ID=portal \
+            -e KEYCLOAK_CLIENT_SECRET=dummy \
+            -e K8S_API_SERVER=https://kubernetes.invalid:6443 \
+            "$image")
+          trap 'docker logs "$container"; docker rm -f "$container" >/dev/null' EXIT
+          for attempt in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health/live || true)
+            if [ "$code" = 200 ]; then
+              echo "live health: $code"
+              ready=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health/ready || true)
+              echo "ready health: $ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::container did not return 200 from /api/health/live after ${attempt} attempts (last status: ${code:-none})"
+          exit 1
+
       - name: Export digest
         run: |
           set -euo pipefail

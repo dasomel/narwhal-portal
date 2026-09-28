@@ -68,6 +68,8 @@ const nextConfig: NextConfig = {
   // hubble-relay gRPC용 proto 파일 — standalone 빌드 추적에 포함 (런타임 loadSync)
   outputFileTracingIncludes: {
     "/api/service-graph/stream": ["./protos/**/*"],
+    // NFT traces the pnpm symlink and CJS entry, but misses the ESM export loaded by Next.
+    "/*": ["./node_modules/.pnpm/@swc+helpers@*/node_modules/@swc/helpers/esm/**/*"],
   },
   // sharp/libvips를 standalone 산출물에서 제외 — 아래 images.unoptimized 주석 참고.
   // unoptimized만으로는 빠지지 않는다(Next가 optimizer 사용 여부와 무관하게 추적함).
