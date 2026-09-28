@@ -13,6 +13,7 @@ import { pushEvent } from "./live-stream"
 import { claimIdempotencyKey, getIdempotencyStore } from "./idempotency"
 import { getValkey } from "./valkey"
 import { cacheKeys } from "./cache-keys"
+import { K8sCredentialError } from "./k8s-client"
 import type { LiveEventIngest, LiveEventType, LiveSeverity } from "@/types/live"
 import type { EventResource } from "@/types/event-envelope"
 
@@ -138,6 +139,7 @@ async function getLatestResourceVersion(apiServer: string, signal?: AbortSignal)
     // Rotated/expired token — drop the cache so the next retry (outer loop's
     // backoff in startLiveK8sInformer) re-reads the projected token file.
     if (res.status === 401) invalidateK8sBearerToken()
+    if (res.status === 401 || res.status === 403) throw new K8sCredentialError(res.status, "/api/v1/events?limit=1")
     throw new Error(`list events ${res.status}`)
   }
   const body = (await res.json()) as { metadata?: { resourceVersion?: string } }
@@ -152,6 +154,7 @@ async function watchOnce(apiServer: string, resourceVersion: string, signal?: Ab
   const res = await fetch(url, { headers: headers(apiServer), signal })
   if (!res.ok || !res.body) {
     if (res.status === 401) invalidateK8sBearerToken()
+    if (res.status === 401 || res.status === 403) throw new K8sCredentialError(res.status, "/api/v1/events?watch=1")
     throw new Error(`watch events ${res.status}`)
   }
 
