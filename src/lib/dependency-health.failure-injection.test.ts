@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { cacheKeys } from "./cache-keys"
 import {
   aggregateDependencyHealth,
   probeHttpDependency,
   probeK8sDependency,
   getDependencyHealthSnapshot,
   getDependencyHealthSummary,
-  type DependencyHealthSnapshot,
 } from "./dependency-health"
+import { costTelemetryToDependencyStatus } from "./cost"
 import {
+  FIXTURE_BASE_TIME,
   FIXTURE_TIMEOUT_CORE,
   FIXTURE_TIMEOUT_OPTIONAL,
   FIXTURE_403_CORE,
@@ -16,11 +16,10 @@ import {
   FIXTURE_5XX_CORE_K8S,
   FIXTURE_5XX_CORE_PROM,
   FIXTURE_5XX_OPTIONAL,
-  FIXTURE_STALE_CACHE,
   FIXTURE_PARTIAL_MIXED_DEPENDENCIES,
   makeStatus,
 } from "./dependency-health.fixtures"
-import { fakeCacheStore, resetHealthTestMocks, mockCacheGetWithMeta } from "./dependency-health.test-helpers"
+import { resetHealthTestMocks } from "./dependency-health.test-helpers"
 
 vi.mock("./config", async () => {
   const { mockGetK8sApiServer } = await import("./dependency-health.test-helpers")
@@ -242,52 +241,43 @@ describe("AC-6 Domain failure injection (portal#47)", () => {
       expect(argo502Agg.state).toBe("degraded")
     })
 
-    it("projects stale cache: preserves cachedAt/freshnessSeconds in admin view and marks aggregate degraded, absent from non-admin summary", async () => {
-      const staleSnapshot: DependencyHealthSnapshot = {
-        observedAt: FIXTURE_STALE_CACHE.observedAt,
-        dependencies: [
-          makeStatus("kubernetes", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
-          FIXTURE_STALE_CACHE,
-          makeStatus("valkey", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
-          makeStatus("argocd", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
-          makeStatus("gitea", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
-          makeStatus("keycloak", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
-        ],
-      }
-
-      fakeCacheStore.set(cacheKeys.healthDependencies(), {
-        value: staleSnapshot,
-        cachedAt: FIXTURE_STALE_CACHE.observedAt,
-        expiresAt: Date.now() + 60_000,
+    it("derives a stale status from the real fromTelemetryStatus/costTelemetryToDependencyStatus source and projects it as a degraded, source-redacted aggregate", () => {
+      // dependency-health.ts declares `freshnessSeconds` on DependencyStatus (line 58) as a field
+      // "the producer" MAY populate, but no producer in this codebase ever does: none of
+      // probeHttpDependency/probeK8sDependency/probeValkeyDependency ever return state "stale" or
+      // set freshnessSeconds, and dependency-health.ts itself only ever calls Valkey's plain
+      // cacheGet/cacheSet (never cacheGetWithMeta) — there is no production cache-age-vs-threshold
+      // computation to exercise. The one real producer of state "stale" is fromTelemetryStatus(),
+      // reached via cost.ts's costTelemetryToDependencyStatus, which passes a prometheus.ts
+      // TelemetryStatus of "stale" straight through (cost.ts:340-349). Drive that real path
+      // instead of seeding a cache entry with an already-stale DependencyStatus and reading it
+      // back through the mock — the previous version of this test proved only that the mock
+      // returns what was put into it.
+      const staleStatus = costTelemetryToDependencyStatus({
+        source: "prometheus",
+        queriedAt: FIXTURE_BASE_TIME,
+        state: "stale",
+        reason: "cache_stale",
       })
-
-      // 1. Real admin snapshot path (getDependencyHealthSnapshot, used by /api/health/dependencies)
-      const adminSnapshot = await getDependencyHealthSnapshot()
-      const promDep = adminSnapshot.dependencies.find((d) => d.dependency === "prometheus")
-      expect(promDep).toMatchObject({
+      expect(staleStatus).toMatchObject({
         dependency: "prometheus",
         state: "stale",
         reason: "cache_stale",
-        freshnessSeconds: 3600,
       })
-      expect(promDep?.freshnessSeconds).toBe(3600)
-      expect(adminSnapshot.dependencies.map((d) => d.dependency)).toContain("prometheus")
 
-      const cachedMeta = (await mockCacheGetWithMeta(
-        cacheKeys.healthDependencies()
-      )) as { value: DependencyHealthSnapshot; cachedAt: string; ageSeconds: number } | null
-      expect(cachedMeta).not.toBeNull()
-      expect(cachedMeta?.cachedAt).toBe(FIXTURE_STALE_CACHE.observedAt)
-      const cachedProm = cachedMeta?.value.dependencies.find((d) => d.dependency === "prometheus")
-      expect(cachedProm?.freshnessSeconds).toBe(3600)
-      expect(cachedProm?.state).toBe("stale")
-
-      // 3. Non-admin summary path: marks aggregate degraded, source absent from summary
-      const nonAdminSummary = await getDependencyHealthSummary()
-      expect(nonAdminSummary.state).toBe("degraded")
-      expect(nonAdminSummary).not.toHaveProperty("dependencies")
-      expect(JSON.stringify(nonAdminSummary)).not.toContain("prometheus")
-      expect(Object.keys(nonAdminSummary).sort()).toEqual(["observedAt", "state"])
+      // Real projection: aggregateDependencyHealth treats "stale" as neither ok/empty nor a core
+      // unavailable/unauthorized failure, so it degrades the aggregate without naming the source.
+      const agg = aggregateDependencyHealth([
+        makeStatus("kubernetes", { observedAt: FIXTURE_BASE_TIME }),
+        staleStatus,
+        makeStatus("valkey", { observedAt: FIXTURE_BASE_TIME }),
+        makeStatus("argocd", { observedAt: FIXTURE_BASE_TIME }),
+        makeStatus("gitea", { observedAt: FIXTURE_BASE_TIME }),
+        makeStatus("keycloak", { observedAt: FIXTURE_BASE_TIME }),
+      ])
+      expect(agg.state).toBe("degraded")
+      expect(agg.observedAt).toBe(FIXTURE_BASE_TIME)
+      expect(Object.keys(agg).sort()).toEqual(["observedAt", "state"])
     })
 
     it("projects partial provider responses: admin snapshot names degraded sources, non-admin exposes only state", async () => {

@@ -205,14 +205,6 @@ export const FIXTURE_5XX_OPTIONAL: DependencyStatus = {
   reason: "http_502",
 }
 
-export const FIXTURE_STALE_CACHE: DependencyStatus = {
-  dependency: "prometheus",
-  state: "stale",
-  observedAt: "2026-09-28T11:00:00.000Z",
-  freshnessSeconds: 3600,
-  reason: "cache_stale",
-}
-
 export const FIXTURE_PARTIAL_MIXED_DEPENDENCIES: readonly DependencyStatus[] = [
   makeStatus("kubernetes"),
   makeStatus("prometheus", { state: "partial", reason: "http_503" }),
