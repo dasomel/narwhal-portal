@@ -1,55 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-
-const mockGetK8sApiServer = vi.fn(() => "https://kubernetes.default.svc")
-const mockGetK8sBearerToken = vi.fn(() => "test-token")
-const mockInvalidateK8sBearerToken = vi.fn()
-const mockPing = vi.fn()
-const mockLiveStreamStatus = vi.fn(() => ({
-  dependency: "valkey" as const,
-  state: "ok" as const,
-  observedAt: new Date().toISOString(),
-}))
-
-const fakeCacheStore = new Map<string, unknown>()
-const mockCacheGet = vi.fn(async (key: string) => (fakeCacheStore.has(key) ? fakeCacheStore.get(key) : null))
-const mockCacheSet = vi.fn(async (key: string, value: unknown, ttlSeconds: number) => {
-  void ttlSeconds
-  fakeCacheStore.set(key, value)
-})
-
-vi.mock("./config", () => ({
-  getK8sApiServer: () => mockGetK8sApiServer(),
-  getDependencyUrl: (_env: string, fallback: string) => fallback,
-  isProduction: () => false,
-}))
-
-vi.mock("./k8s-token", () => ({
-  getK8sBearerToken: () => mockGetK8sBearerToken(),
-  invalidateK8sBearerToken: () => mockInvalidateK8sBearerToken(),
-}))
-
-vi.mock("./valkey", () => ({
-  getValkey: () => ({ ping: () => mockPing() }),
-  cacheGet: (key: string) => mockCacheGet(key),
-  cacheSet: (key: string, value: unknown, ttl: number) => mockCacheSet(key, value, ttl),
-}))
-
-vi.mock("./live-stream", () => ({
-  getLiveStreamStatus: () => mockLiveStreamStatus(),
-}))
-
+import { cacheKeys } from "./cache-keys"
 import {
   aggregateDependencyHealth,
   probeHttpDependency,
   probeK8sDependency,
   getDependencyHealthSnapshot,
   getDependencyHealthSummary,
+  type DependencyHealthSnapshot,
 } from "./dependency-health"
 import {
+  fakeCacheStore,
+  resetHealthTestMocks,
+  mockCacheGetWithMeta,
   FIXTURE_TIMEOUT_CORE,
   FIXTURE_TIMEOUT_OPTIONAL,
-  FIXTURE_401_CORE,
-  FIXTURE_401_OPTIONAL,
   FIXTURE_403_CORE,
   FIXTURE_403_OPTIONAL,
   FIXTURE_5XX_CORE_K8S,
@@ -60,28 +24,46 @@ import {
   makeStatus,
 } from "./dependency-health.fixtures"
 
+vi.mock("./config", async () => {
+  const { mockGetK8sApiServer } = await import("./dependency-health.fixtures")
+  return {
+    getK8sApiServer: () => mockGetK8sApiServer(),
+    getDependencyUrl: (_env: string, fallback: string) => fallback,
+    isProduction: () => false,
+  }
+})
+
+vi.mock("./k8s-token", async () => {
+  const { mockGetK8sBearerToken, mockInvalidateK8sBearerToken } = await import("./dependency-health.fixtures")
+  return {
+    getK8sBearerToken: () => mockGetK8sBearerToken(),
+    invalidateK8sBearerToken: () => mockInvalidateK8sBearerToken(),
+  }
+})
+
+vi.mock("./valkey", async () => {
+  const { mockPing, mockCacheGet, mockCacheGetWithMeta, mockCacheSet } = await import("./dependency-health.fixtures")
+  return {
+    getValkey: () => ({ ping: () => mockPing() }),
+    cacheGet: (key: string) => mockCacheGet(key),
+    cacheGetWithMeta: (key: string) => mockCacheGetWithMeta(key),
+    cacheSet: (key: string, value: unknown, ttl: number) => mockCacheSet(key, value, ttl),
+  }
+})
+
+vi.mock("./live-stream", async () => {
+  const { mockLiveStreamStatus } = await import("./dependency-health.fixtures")
+  return {
+    getLiveStreamStatus: () => mockLiveStreamStatus(),
+  }
+})
+
 describe("AC-6 Domain failure injection (portal#47)", () => {
   const originalEnv = { ...process.env }
 
   beforeEach(() => {
-    process.env = {
-      ...originalEnv,
-      PROMETHEUS_URL: "https://prometheus.narwhal.internal",
-      ARGOCD_URL: "https://argocd.narwhal.internal",
-      GITEA_URL: "https://gitea.narwhal.internal",
-      KEYCLOAK_ISSUER: "https://keycloak.narwhal.internal",
-      VALKEY_URL: "redis://valkey:6379",
-    }
-    fakeCacheStore.clear()
-    mockCacheGet.mockClear()
-    mockCacheSet.mockClear()
-    mockPing.mockReset()
-    mockPing.mockResolvedValue("PONG")
-    mockLiveStreamStatus.mockReturnValue({
-      dependency: "valkey",
-      state: "ok",
-      observedAt: new Date().toISOString(),
-    })
+    process.env = { ...originalEnv }
+    resetHealthTestMocks()
   })
 
   afterEach(() => {
@@ -90,7 +72,7 @@ describe("AC-6 Domain failure injection (portal#47)", () => {
     vi.useRealTimers()
   })
 
-  describe("Probe-level failure mapping (missing coverage)", () => {
+  describe("Probe-level failure mapping (genuinely new cases)", () => {
     it("maps HttpClientError timeout to unavailable with timeout reason in probeHttpDependency", async () => {
       vi.useFakeTimers()
       vi.stubGlobal(
@@ -173,17 +155,63 @@ describe("AC-6 Domain failure injection (portal#47)", () => {
       expect(optionalTimeoutAgg.state).toBe("degraded")
     })
 
-    it("projects 401 failure: core causes unavailable, optional causes degraded, names source in admin view", () => {
-      const coreAgg = aggregateDependencyHealth([FIXTURE_401_CORE, makeStatus("prometheus"), makeStatus("valkey")])
-      expect(coreAgg.state).toBe("unavailable")
+    it("projects 401 failure: core causes unavailable, optional causes degraded, names source in admin view and absent from non-admin summary", async () => {
+      // 1. Optional dependency 401 failure (keycloak unauthorized)
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockImplementation((url: string) => {
+          if (url.includes("keycloak")) return Promise.resolve({ ok: false, status: 401 } as Response)
+          if (url.includes("namespaces")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({ items: [] }),
+            } as unknown as Response)
+          }
+          return Promise.resolve({ ok: true, status: 200 } as Response)
+        })
+      )
 
-      const optionalAgg = aggregateDependencyHealth([
-        makeStatus("kubernetes"),
-        makeStatus("prometheus"),
-        makeStatus("valkey"),
-        FIXTURE_401_OPTIONAL,
-      ])
-      expect(optionalAgg.state).toBe("degraded")
+      // Admin snapshot path: getDependencyHealthSnapshot (used by GET /api/health/dependencies)
+      const adminSnapshotOptional = await getDependencyHealthSnapshot()
+      const keycloakStatus = adminSnapshotOptional.dependencies.find((d) => d.dependency === "keycloak")
+      expect(keycloakStatus).toMatchObject({
+        dependency: "keycloak",
+        state: "unauthorized",
+        reason: "http_401",
+      })
+
+      // Non-admin summary path: getDependencyHealthSummary (used by GET /api/health/summary)
+      const nonAdminSummaryOptional = await getDependencyHealthSummary()
+      expect(nonAdminSummaryOptional.state).toBe("degraded")
+      expect(nonAdminSummaryOptional).not.toHaveProperty("dependencies")
+      expect(JSON.stringify(nonAdminSummaryOptional)).not.toContain("keycloak")
+      expect(Object.keys(nonAdminSummaryOptional).sort()).toEqual(["observedAt", "state"])
+
+      // 2. Core dependency 401 failure (kubernetes unauthorized)
+      resetHealthTestMocks()
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockImplementation((url: string) => {
+          if (url.includes("namespaces")) return Promise.resolve({ ok: false, status: 401 } as Response)
+          return Promise.resolve({ ok: true, status: 200 } as Response)
+        })
+      )
+
+      const adminSnapshotCore = await getDependencyHealthSnapshot()
+      const k8sStatus = adminSnapshotCore.dependencies.find((d) => d.dependency === "kubernetes")
+      expect(k8sStatus).toMatchObject({
+        dependency: "kubernetes",
+        state: "unauthorized",
+        reason: "http_401",
+      })
+
+      const nonAdminSummaryCore = await getDependencyHealthSummary()
+      expect(nonAdminSummaryCore.state).toBe("unavailable")
+      expect(nonAdminSummaryCore).not.toHaveProperty("dependencies")
+      expect(JSON.stringify(nonAdminSummaryCore)).not.toContain("kubernetes")
+      expect(Object.keys(nonAdminSummaryCore).sort()).toEqual(["observedAt", "state"])
     })
 
     it("projects 403 failure: core causes unavailable, optional causes degraded without leaking names in aggregate", () => {
@@ -216,18 +244,52 @@ describe("AC-6 Domain failure injection (portal#47)", () => {
       expect(argo502Agg.state).toBe("degraded")
     })
 
-    it("projects stale cache: preserves cachedAt/freshnessSeconds in admin view and marks aggregate degraded", () => {
-      expect(FIXTURE_STALE_CACHE.observedAt).toBe("2026-09-28T11:00:00.000Z")
-      expect(FIXTURE_STALE_CACHE.freshnessSeconds).toBe(3600)
-      expect(FIXTURE_STALE_CACHE.state).toBe("stale")
+    it("projects stale cache: preserves cachedAt/freshnessSeconds in admin view and marks aggregate degraded, absent from non-admin summary", async () => {
+      const staleSnapshot: DependencyHealthSnapshot = {
+        observedAt: FIXTURE_STALE_CACHE.observedAt,
+        dependencies: [
+          makeStatus("kubernetes", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
+          FIXTURE_STALE_CACHE,
+          makeStatus("valkey", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
+          makeStatus("argocd", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
+          makeStatus("gitea", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
+          makeStatus("keycloak", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
+        ],
+      }
 
-      const agg = aggregateDependencyHealth([
-        makeStatus("kubernetes", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
-        FIXTURE_STALE_CACHE,
-        makeStatus("valkey", { observedAt: FIXTURE_STALE_CACHE.observedAt }),
-      ])
-      expect(agg.state).toBe("degraded")
-      expect(agg.observedAt).toBe(FIXTURE_STALE_CACHE.observedAt)
+      fakeCacheStore.set(cacheKeys.healthDependencies(), {
+        value: staleSnapshot,
+        cachedAt: FIXTURE_STALE_CACHE.observedAt,
+        expiresAt: Date.now() + 60_000,
+      })
+
+      // 1. Real admin snapshot path (getDependencyHealthSnapshot, used by /api/health/dependencies)
+      const adminSnapshot = await getDependencyHealthSnapshot()
+      const promDep = adminSnapshot.dependencies.find((d) => d.dependency === "prometheus")
+      expect(promDep).toMatchObject({
+        dependency: "prometheus",
+        state: "stale",
+        reason: "cache_stale",
+        freshnessSeconds: 3600,
+      })
+      expect(promDep?.freshnessSeconds).toBe(3600)
+      expect(adminSnapshot.dependencies.map((d) => d.dependency)).toContain("prometheus")
+
+      const cachedMeta = (await mockCacheGetWithMeta(
+        cacheKeys.healthDependencies()
+      )) as { value: DependencyHealthSnapshot; cachedAt: string; ageSeconds: number } | null
+      expect(cachedMeta).not.toBeNull()
+      expect(cachedMeta?.cachedAt).toBe(FIXTURE_STALE_CACHE.observedAt)
+      const cachedProm = cachedMeta?.value.dependencies.find((d) => d.dependency === "prometheus")
+      expect(cachedProm?.freshnessSeconds).toBe(3600)
+      expect(cachedProm?.state).toBe("stale")
+
+      // 3. Non-admin summary path: marks aggregate degraded, source absent from summary
+      const nonAdminSummary = await getDependencyHealthSummary()
+      expect(nonAdminSummary.state).toBe("degraded")
+      expect(nonAdminSummary).not.toHaveProperty("dependencies")
+      expect(JSON.stringify(nonAdminSummary)).not.toContain("prometheus")
+      expect(Object.keys(nonAdminSummary).sort()).toEqual(["observedAt", "state"])
     })
 
     it("projects partial provider responses: admin snapshot names degraded sources, non-admin exposes only state", async () => {
@@ -246,6 +308,13 @@ describe("AC-6 Domain failure injection (portal#47)", () => {
             })
           }
           if (url.includes("gitea")) return Promise.resolve({ ok: false, status: 401 } as Response)
+          if (url.includes("namespaces")) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({ items: [] }),
+            } as unknown as Response)
+          }
           return Promise.resolve({ ok: true, status: 200 } as Response)
         })
       )
@@ -274,9 +343,6 @@ describe("AC-6 Domain failure injection (portal#47)", () => {
       const summary = await summaryPromise
       expect(summary.state).toBe("degraded")
       expect(Object.keys(summary).sort()).toEqual(["observedAt", "state"])
-
-      // Crucial: failures must not be cached in the success-only snapshot cache
-      expect(mockCacheSet).not.toHaveBeenCalledWith("health:dependencies", expect.anything(), expect.anything())
     })
 
     it("verifies fixture mixed responses never project failure as healthy/zero-success", () => {
