@@ -32,6 +32,15 @@ export class K8sHttpError extends Error {
   }
 }
 
+// D1 (#54): preserve K8sHttpError inheritance so existing status checks and catch paths keep their behavior.
+export class K8sCredentialError extends K8sHttpError {
+  constructor(status: number, path: string) {
+    super(status, path)
+    this.name = "K8sCredentialError"
+    this.message = `K8s API ${status}: ${path}; check projected service account token file (K8S_SA_TOKEN_FILE) and Kubernetes RBAC`
+  }
+}
+
 async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const apiServer = getK8sApiServer()
   const headers: Record<string, string> = {
@@ -54,6 +63,7 @@ async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
     invalidateK8sBearerToken()
     res = await request({ ...headers, ...authHeaders(apiServer) })
   }
+  if (res.status === 401 || res.status === 403) throw new K8sCredentialError(res.status, path)
   if (!res.ok) throw new K8sHttpError(res.status, path)
   return readJsonWithPolicy<T>(res)
 }

@@ -391,6 +391,35 @@ describe("live-k8s-informer", () => {
     expect(capturedAuthHeaders[1]).toBe("Bearer fresh-rotated-token")
   })
 
+  it.each([
+    { status: 401, phase: "list" },
+    { status: 403, phase: "list" },
+    { status: 401, phase: "watch" },
+    { status: 403, phase: "watch" },
+  ])("reports sanitized $status credential diagnostics from $phase", async ({ status, phase }) => {
+    const sentinel = "informer-secret-token-sentinel-54"
+    mockGetK8sBearerToken.mockReturnValue(sentinel)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const fetchMock = vi.fn(async (url: string) => {
+      if (phase === "list" || url.includes("watch=1")) return new Response(null, { status })
+      return Response.json({ metadata: { resourceVersion: "1" } })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { startLiveK8sInformer, stopLiveK8sInformerForTesting } = await import("./live-k8s-informer")
+    stopInformer = stopLiveK8sInformerForTesting
+    startLiveK8sInformer()
+
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(
+      "[live-k8s-informer] watch error, retrying:",
+      expect.stringContaining(`K8s API ${status}`),
+    ))
+    const logged = JSON.stringify(warn.mock.calls)
+    expect(logged).toContain("K8S_SA_TOKEN_FILE")
+    expect(logged).not.toContain(sentinel)
+    expect(mockInvalidateK8sBearerToken).toHaveBeenCalledTimes(status === 401 ? 1 : 0)
+  })
+
   it("cleanly disables informer when no bearer token is available (no throw, no network call)", async () => {
     mockGetK8sBearerToken.mockReturnValue("") // empty token
     const fetchSpy = vi.fn()
