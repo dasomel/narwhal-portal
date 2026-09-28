@@ -17,6 +17,8 @@ vi.mock("@/lib/live-stream", () => ({
     timestamp: "2026-09-07T00:00:00.000Z",
     ...ingest,
   })),
+  recordLiveEventAccepted: vi.fn(),
+  recordLiveEventDuplicate: vi.fn(),
 }))
 
 vi.mock("@/lib/auth", () => ({
@@ -25,6 +27,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
 
 const { pushEvent } = await import("@/lib/live-stream")
+const { recordLiveEventAccepted, recordLiveEventDuplicate } = await import("@/lib/live-stream")
 const { auth } = await import("@/lib/auth")
 const { invalidateFor } = await import("@/lib/cache-invalidation")
 
@@ -112,6 +115,7 @@ describe("/api/events/ingest hardening", () => {
       expect(data1.id).toBeDefined()
       expect(data1.duplicate).toBeUndefined()
       expect(vi.mocked(pushEvent)).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(recordLiveEventAccepted)).toHaveBeenCalledTimes(1)
 
       // Replay same event with identical source_event_id
       const req2 = createRequest(payload, { secret: "am-secret-123" })
@@ -122,6 +126,7 @@ describe("/api/events/ingest hardening", () => {
       expect(data2.id).toBe(data1.id) // returns original canonical event ID
       expect(data2.duplicate).toBe(true)
       expect(vi.mocked(pushEvent)).toHaveBeenCalledTimes(1) // pushEvent NOT called again!
+      expect(vi.mocked(recordLiveEventDuplicate)).toHaveBeenCalledTimes(1)
 
       const metrics = getIngestMetrics()
       expect(metrics.total_accepted).toBe(1)

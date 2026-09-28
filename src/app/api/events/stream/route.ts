@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth"
-import { compareLiveEventIds, subscribeLiveWithReplay } from "@/lib/live-stream"
+import { compareLiveEventIds, connectLiveClient, disconnectLiveClient, subscribeLiveWithReplay } from "@/lib/live-stream"
 import { getEffectiveScope } from "@/lib/scope"
 import { isEventFiltered } from "@/lib/event-visibility"
 import type { LiveEvent } from "@/types/live"
@@ -32,6 +32,7 @@ export async function GET(request: Request) {
   const scope = await getEffectiveScope({ groups, teams })
   const lastEventId = request.headers.get("Last-Event-ID") ?? null
 
+  let cancelStream: (() => void) | undefined
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder()
@@ -50,66 +51,82 @@ export async function GET(request: Request) {
       enqueue("retry: 5000\n\n")
       enqueue(": connected\n\n")
 
-      const setup = await subscribeLiveWithReplay(lastEventId ?? undefined, request.signal)
-      if (lastEventId && setup.replay) {
-        if (setup.replay.gap) enqueue(formatControl("replay-gap", { after: lastEventId, state: "gap" }))
-        if (setup.replay.unknown) enqueue(formatControl("replay-gap", { after: lastEventId, state: "unknown" }))
-      }
-      enqueue(formatControl("status", setup.status))
-      const replaySlice = setup.replay?.events ?? []
-      const replayedIds = new Set(replaySlice.map((event) => event.id))
-      const replayHighWaterId = replaySlice.map((event) => event.id).filter((id) => /^\d+$/.test(id)).at(-1)
-
-      for (const event of replaySlice) {
-        if (!isEventFiltered(event, role, scope)) {
-          enqueue(formatSSE(event))
-        }
-      }
-
-      const heartbeatTimer = setInterval(() => {
-        enqueue(": heartbeat\n\n")
-      }, HEARTBEAT_MS)
-
-      // The stream's lifetime is bound to the CLIENT connection (request abort),
-      // NOT to the pub/sub subscription. Only the client disconnecting closes it.
       let closed = false
+      let disconnected = false
+      let finishLifetime!: () => void
+      const lifetime = new Promise<void>((resolve) => { finishLifetime = resolve })
+      const heartbeatTimer: { current?: ReturnType<typeof setInterval> } = {}
       const cleanup = () => {
         if (closed) return
         closed = true
-        clearInterval(heartbeatTimer)
+        if (!disconnected) {
+          disconnected = true
+          disconnectLiveClient()
+        }
+        if (heartbeatTimer.current) clearInterval(heartbeatTimer.current)
         request.signal.removeEventListener("abort", cleanup)
         try {
           controller.close()
         } catch {
           // already closed
         }
+        finishLifetime()
       }
-      request.signal.addEventListener("abort", cleanup)
-      if (request.signal.aborted) cleanup()
+      cancelStream = cleanup
 
-      // Consume live pub/sub in the background. If it ends or throws (e.g. Valkey
-      // pub/sub unavailable / degraded), DO NOT close the stream — the heartbeat
-      // keeps it open until the client disconnects. Previously an early return from
-      // subscribeLive() ran the finally→controller.close(), ending the response in
-      // ~10ms before the first heartbeat, so the browser reconnected every few
-      // seconds ("reconnecting" forever) even though Valkey was healthy.
-      void (async () => {
-        try {
-          for await (const event of setup.live) {
-            if (request.signal.aborted) break
-            if (/^\d+$/.test(event.id)) {
-              if (replayHighWaterId && compareLiveEventIds(event.id, replayHighWaterId) !== 1) continue
-            } else {
-              if (replayedIds.has(event.id)) continue
-            }
-            if (!isEventFiltered(event, role, scope)) {
-              enqueue(formatSSE(event))
-            }
-          }
-        } catch {
-          enqueue(formatControl("status", { dependency: "valkey", state: "partial", observedAt: new Date().toISOString(), reason: "subscription_failure" }))
+      connectLiveClient()
+      try {
+        request.signal.addEventListener("abort", cleanup)
+        if (request.signal.aborted) cleanup()
+        const setup = await subscribeLiveWithReplay(lastEventId ?? undefined, request.signal)
+        if (closed) return
+        if (lastEventId && setup.replay) {
+          if (setup.replay.gap) enqueue(formatControl("replay-gap", { after: lastEventId, state: "gap" }))
+          if (setup.replay.unknown) enqueue(formatControl("replay-gap", { after: lastEventId, state: "unknown" }))
         }
-      })()
+        enqueue(formatControl("status", setup.status))
+        const replaySlice = setup.replay?.events ?? []
+        const replayedIds = new Set(replaySlice.map((event) => event.id))
+        const replayHighWaterId = replaySlice.map((event) => event.id).filter((id) => /^\d+$/.test(id)).at(-1)
+
+        for (const event of replaySlice) {
+          if (!isEventFiltered(event, role, scope)) {
+            enqueue(formatSSE(event))
+          }
+        }
+
+        heartbeatTimer.current = setInterval(() => {
+          enqueue(": heartbeat\n\n")
+        }, HEARTBEAT_MS)
+
+        // The stream's lifetime is bound to the CLIENT connection (request abort),
+        // NOT to the pub/sub subscription. If pub/sub ends or throws, the heartbeat
+        // keeps the response open until the client disconnects.
+        void (async () => {
+          try {
+            for await (const event of setup.live) {
+              if (request.signal.aborted) break
+              if (/^\d+$/.test(event.id)) {
+                if (replayHighWaterId && compareLiveEventIds(event.id, replayHighWaterId) !== 1) continue
+              } else {
+                if (replayedIds.has(event.id)) continue
+              }
+              if (!isEventFiltered(event, role, scope)) {
+                enqueue(formatSSE(event))
+              }
+            }
+          } catch {
+            enqueue(formatControl("status", { dependency: "valkey", state: "partial", observedAt: new Date().toISOString(), reason: "subscription_failure" }))
+          }
+        })()
+        await lifetime
+      } finally {
+        cleanup()
+      }
+    },
+    cancel() {
+      // Consumer cancellation is also a stream end and must release its gauge slot.
+      cancelStream?.()
     },
   })
 

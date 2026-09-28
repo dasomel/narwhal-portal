@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { randomUUID } from "crypto"
-import { pushEvent } from "@/lib/live-stream"
+import { pushEvent, recordLiveEventAccepted, recordLiveEventDuplicate } from "@/lib/live-stream"
 import { assertHttpUrl, ValidationError } from "@/lib/validation"
 import { claimIdempotencyKey, getIdempotencyStore } from "@/lib/idempotency"
 import { auth } from "@/lib/auth"
@@ -342,6 +342,7 @@ export async function POST(request: Request) {
   const eventId = randomUUID()
   const existing = await claimIdempotencyKey(getIdempotencyStore(), idempotencyKey, eventId)
   if (existing) {
+    recordLiveEventDuplicate()
     recordIngestOutcome("duplicate", authResult.producer)
     return NextResponse.json({
       ok: true,
@@ -374,6 +375,7 @@ export async function POST(request: Request) {
 
   try {
     const event = await pushEvent(ingest)
+    recordLiveEventAccepted()
     recordIngestOutcome("accepted", authResult.producer)
     return NextResponse.json({
       ok: true,
