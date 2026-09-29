@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { useT } from "@/lib/i18n-client"
 import { DataState } from "@/components/ui/data-state"
+import { readTemplatePreviewResponse, type TemplatePreviewResult } from "@/lib/service-templates"
 
 interface TemplateField {
   name: string
@@ -23,14 +24,7 @@ interface ServiceTemplate {
   fields: TemplateField[]
 }
 
-interface PreviewResult {
-  success: boolean
-  preview: {
-    templateId: string
-    values: Record<string, string>
-    willCreate: string[]
-  }
-}
+type PreviewResult = TemplatePreviewResult
 
 export function TemplateList() {
   const t = useT()
@@ -51,7 +45,7 @@ export function TemplateList() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ templateId, values }),
       })
-      return res.json() as Promise<PreviewResult>
+      return readTemplatePreviewResponse(res)
     },
     onSuccess: (data) => setPreview(data),
   })
@@ -136,7 +130,7 @@ export function TemplateList() {
                       <label className="block text-xs font-medium text-foreground mb-1">
                         {field.label}
                         {field.required && (
-                          <span className="ml-1 text-narwhal-danger">*</span>
+                          <span className="ml-1 text-destructive">*</span>
                         )}
                       </label>
                       {field.type === "select" ? (
@@ -167,6 +161,10 @@ export function TemplateList() {
                   >
                     {submitMutation.isPending ? t("templates.submitting") : t("templates.submit")}
                   </button>
+
+                  {submitMutation.isError && (
+                    <p role="alert" className="mt-3 text-xs text-destructive">{submitMutation.error.message}</p>
+                  )}
 
                   {submitMutation.isSuccess && preview && (
                     <div className="mt-3 p-3 bg-muted/50 rounded">

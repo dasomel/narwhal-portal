@@ -42,3 +42,23 @@ export const TEMPLATES: ServiceTemplate[] = [
     ],
   },
 ]
+
+export interface TemplatePreviewResult {
+  success: boolean
+  preview: {
+    templateId: string
+    values: Record<string, string>
+    willCreate: string[]
+  }
+}
+
+/** Turns a validator rejection ({ error: { message } }, 4xx) into a thrown Error so the UI shows it instead of rendering a preview. */
+export async function readTemplatePreviewResponse(res: Response): Promise<TemplatePreviewResult> {
+  const body = (await res.json().catch(() => null)) as
+    | (Partial<TemplatePreviewResult> & { error?: { message?: string } })
+    | null
+  if (!res.ok || !body?.preview) {
+    throw new Error(body?.error?.message ?? `Preview failed (HTTP ${res.status})`)
+  }
+  return body as TemplatePreviewResult
+}
