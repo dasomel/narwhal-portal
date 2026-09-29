@@ -46,11 +46,15 @@ const platformApp = fakeApp("platform-app", "platform", "platform-system")
 const frontendApp = fakeApp("frontend-app", "apps", "frontend-app")
 
 beforeEach(() => {
+  vi.clearAllMocks()
+  const cache = new Map<string, unknown>()
   vi.mocked(getNamespaces).mockResolvedValue(namespaces)
   vi.mocked(getArgoAppsOrThrow).mockResolvedValue([platformApp, frontendApp])
   vi.mocked(getAlerts).mockResolvedValue([])
-  vi.mocked(cacheGet).mockResolvedValue(null)
-  vi.mocked(cacheSet).mockResolvedValue(undefined)
+  vi.mocked(cacheGet).mockImplementation(async (key: string) => cache.get(key) ?? null)
+  vi.mocked(cacheSet).mockImplementation(async (key: string, value: unknown) => {
+    cache.set(key, value)
+  })
 })
 
 describe("GET /api/governance/scorecard — scope enforcement", () => {
@@ -74,13 +78,24 @@ describe("GET /api/governance/scorecard — scope enforcement", () => {
     expect(services).not.toContain("frontend-app")
   })
 
-  it("keys the cache by scope fingerprint, not one shared literal key", async () => {
+  it("keys the cache by scope fingerprint and never serves platform-team's cached scorecard to frontend-team", async () => {
     vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
-    await GET()
+    const platformBody = await (await GET()).json()
+    expect(platformBody.map((s: { service: string }) => s.service)).toEqual(["platform-app"])
+
     vi.mocked(auth).mockResolvedValue(frontendTeamSession as never)
-    await GET()
+    const frontendBody = await (await GET()).json()
+    // If the two scopes collided on one cache key, this would come back as
+    // platform-team's already-cached scorecard instead of frontend-team's own.
+    expect(frontendBody.map((s: { service: string }) => s.service)).toEqual(["frontend-app"])
+
     const setKeys = vi.mocked(cacheSet).mock.calls.map((c) => c[0])
     expect(new Set(setKeys).size).toBe(2)
+
+    // Re-request platform-team: must hit its own cache entry, not frontend-team's.
+    vi.mocked(auth).mockResolvedValue(platformTeamSession as never)
+    const cachedPlatformBody = await (await GET()).json()
+    expect(cachedPlatformBody.map((s: { service: string }) => s.service)).toEqual(["platform-app"])
   })
 
   it("401s an unauthenticated caller", async () => {
