@@ -148,11 +148,23 @@ export async function replayAfter(lastId: string, limit = LIVE_EVENT_RETENTION):
     else liveStreamMetrics.replayInWindow++
     return result
   }
-  if (lastId.startsWith("d-")) {
-    const localOrdered = memoryRing.slice().reverse()
-    const localIndex = localOrdered.findIndex((event) => event.id === lastId)
-    if (localIndex < 0) return counted({ events: [], gap: false, unknown: true })
+  // memoryRing is written unconditionally on every pushEvent (before the Valkey
+  // write is even attempted), so it holds every event — numeric or degraded `d-`
+  // id — in true call order, independent of whether that push's Valkey write
+  // succeeded. Prefer it whenever `lastId` is still in it: it's the only source
+  // that can't silently omit a degraded event a numeric-cursor Valkey lookup
+  // would otherwise drop (portal#178 gap 1), and it's already exactly how a
+  // degraded cursor was resolved before this change.
+  const localOrdered = memoryRing.slice().reverse()
+  const localIndex = localOrdered.findIndex((event) => event.id === lastId)
+  if (localIndex >= 0) {
     return counted({ events: localOrdered.slice(localIndex + 1), gap: false, unknown: false })
+  }
+  if (lastId.startsWith("d-")) {
+    // A degraded id is never durable outside this process — if it's not in
+    // memoryRing (evicted, or a different/restarted process), there is
+    // nowhere else to resolve it.
+    return counted({ events: [], gap: false, unknown: true })
   }
   const newestFirst = await getRecentEvents(limit)
   const ordered = newestFirst.filter((event) => /^\d+$/.test(event.id)).slice().reverse()

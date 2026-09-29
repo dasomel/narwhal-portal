@@ -133,7 +133,7 @@ function toIngest(ev: K8sEvent): LiveEventIngest | null {
   }
 }
 
-async function getLatestResourceVersion(apiServer: string, signal?: AbortSignal): Promise<string> {
+async function listLatestEvent(apiServer: string, signal?: AbortSignal): Promise<{ resourceVersion: string; items: K8sEvent[] }> {
   const res = await fetch(`${apiServer}/api/v1/events?limit=1`, { headers: headers(apiServer), signal })
   if (!res.ok) {
     // Rotated/expired token — drop the cache so the next retry (outer loop's
@@ -142,8 +142,46 @@ async function getLatestResourceVersion(apiServer: string, signal?: AbortSignal)
     if (res.status === 401 || res.status === 403) throw new K8sCredentialError(res.status, "/api/v1/events?limit=1")
     throw new Error(`list events ${res.status}`)
   }
-  const body = (await res.json()) as { metadata?: { resourceVersion?: string } }
-  return body.metadata?.resourceVersion ?? "0"
+  const body = (await res.json()) as { metadata?: { resourceVersion?: string }; items?: K8sEvent[] }
+  return { resourceVersion: body.metadata?.resourceVersion ?? "0", items: body.items ?? [] }
+}
+
+/** Cold start / lease failover: resourceVersion is process-local, so there is
+ * nothing to catch up on — start watching from now and deliberately skip
+ * existing history. */
+async function getLatestResourceVersion(apiServer: string, signal?: AbortSignal): Promise<string> {
+  return (await listLatestEvent(apiServer, signal)).resourceVersion
+}
+
+async function ingestK8sEvent(ev: K8sEvent): Promise<void> {
+  const ingest = toIngest(ev)
+  if (!ingest) return
+  if (ingest.source_event_id) {
+    const claimed = await claimIdempotencyKey(
+      getIdempotencyStore(),
+      `source-event:${ingest.source}:${ingest.source_event_id}`,
+      "1",
+      3600,
+    )
+    if (claimed) return
+  }
+  void pushEvent(ingest).catch(() => {})
+}
+
+/** Resync after a watch 410 Gone: unlike cold start, events between the
+ * expired watch's last-seen resourceVersion and "now" must not be silently
+ * skipped. `?limit=1` only ever returns the single most-recent event, so a
+ * gap spanning more than one event is still not fully recovered here — see
+ * portal#52 for bounded/paginated listing — but the previous behavior
+ * discarded even that one, unconditionally (portal#178 gap 3). Ingesting the
+ * item is safe against double-delivery: the watch resumed from its
+ * resourceVersion only streams events strictly after it. */
+async function resyncAfterGone(apiServer: string, signal?: AbortSignal): Promise<string> {
+  const { resourceVersion, items } = await listLatestEvent(apiServer, signal)
+  for (const item of items) {
+    await ingestK8sEvent(item)
+  }
+  return resourceVersion
 }
 
 /** Runs one watch connection; returns the last-seen resourceVersion when it ends. */
@@ -190,25 +228,12 @@ async function watchOnce(apiServer: string, resourceVersion: string, signal?: Ab
           const obj = evt.object
           if (obj?.metadata?.resourceVersion) rv = obj.metadata.resourceVersion
           // Only surface newly-created events (skip MODIFIED/DELETED/BOOKMARK/ERROR).
-          if (evt.type === "ADDED") {
-            const ingest = toIngest(obj)
-            if (ingest) {
-              // Built from the same source_event_id toIngest() sets, in the same
-              // `source-event:${source}:${source_event_id}` shape /api/events/ingest
-              // dedups on — so an event delivered both via this informer and via the
-              // ingest webhook is deduped against the other, not just against itself.
-              if (ingest.source_event_id) {
-                const claimed = await claimIdempotencyKey(
-                  getIdempotencyStore(),
-                  `source-event:${ingest.source}:${ingest.source_event_id}`,
-                  "1",
-                  3600,
-                )
-                if (claimed) continue
-              }
-              void pushEvent(ingest).catch(() => {})
-            }
-          }
+          // Idempotency-keyed the same way resyncAfterGone's relisted items are,
+          // via the same `source-event:${source}:${source_event_id}` shape
+          // /api/events/ingest dedups on — so an event delivered both via this
+          // informer and via the ingest webhook (or via both watch and a 410
+          // relist) is deduped against the other, not just against itself.
+          if (evt.type === "ADDED") await ingestK8sEvent(obj)
         } catch {
           // malformed line — skip
         }
@@ -250,6 +275,11 @@ export function startLiveK8sInformer(): void {
     let rv = "0"
     let backoff = 1000
     let wasOwner = false
+    // Set only by the 410 branch below; consumed (and reset) the moment rv
+    // === "0" is next resolved, so it distinguishes "must relist to avoid
+    // skipping events" from a plain cold start/failover, which has nothing to
+    // catch up on (portal#178 gap 3).
+    let resyncDueTo410 = false
     for (;;) {
       if (signal.aborted) break
       const token = newOwnerToken()
@@ -266,6 +296,7 @@ export function startLiveK8sInformer(): void {
       }
       if (valkey && !leaseHeld && !leaseUnavailable) {
         wasOwner = false
+        resyncDueTo410 = false // losing the lease invalidates any in-flight resync intent
         informerMetrics.ownerState = "standby"
         await new Promise((resolve) => setTimeout(resolve, LEASE_RENEW_MS))
         continue
@@ -299,7 +330,12 @@ export function startLiveK8sInformer(): void {
         })
       }, LEASE_RENEW_MS) : null
       try {
-        if (rv === "0") rv = await getLatestResourceVersion(apiServer, watchController.signal)
+        if (rv === "0") {
+          rv = resyncDueTo410
+            ? await resyncAfterGone(apiServer, watchController.signal)
+            : await getLatestResourceVersion(apiServer, watchController.signal)
+          resyncDueTo410 = false
+        }
         if (signal.aborted || watchController.signal.aborted) break
         rv = await watchOnce(apiServer, rv, watchController.signal)
         if (!signal.aborted) informerMetrics.reconnects++
@@ -309,10 +345,12 @@ export function startLiveK8sInformer(): void {
         const msg = e instanceof Error ? e.message : String(e)
         if (watchController.signal.aborted) continue
         informerMetrics.reconnects++
-        // 410 Gone: resourceVersion too old — resync from the latest.
+        // 410 Gone: resourceVersion too old — relist (not a plain cold start)
+        // so events since the expired watch aren't silently skipped.
         if (msg.includes("410")) {
           informerMetrics.resyncs410++
           rv = "0"
+          resyncDueTo410 = true
           continue
         }
         console.warn("[live-k8s-informer] watch error, retrying:", msg)

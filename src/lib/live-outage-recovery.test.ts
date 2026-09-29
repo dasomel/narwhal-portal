@@ -192,7 +192,7 @@ describe("live outage / recovery durability (portal#13)", () => {
   // failures. Each asserts the CORRECT behavior; flip to `it` once #178 is
   // fixed and the assertion starts passing for real.
 
-  it.fails("#178 gap 1: a numeric-cursor replay after recovery should not silently omit an event that only ever lived in the process-local ring — it should either return the event or report a gap", async () => {
+  it("#178 gap 1: a numeric-cursor replay after recovery should not silently omit an event that only ever lived in the process-local ring — it should either return the event or report a gap", async () => {
     const { pushEvent, replayAfter } = await import("./live-stream")
     const before = await pushEvent({ type: "custom", severity: "info", title: "before-outage", description: "before-outage", source: "manual" })
     state.down = true
@@ -205,7 +205,7 @@ describe("live outage / recovery durability (portal#13)", () => {
     expect(sawLostEvent || result.gap || result.unknown).toBe(true)
   })
 
-  it.fails("#178 gap 2: an idempotency key claimed only during a Valkey outage should still be honored once Valkey recovers — a redelivery must not re-ingest", async () => {
+  it("#178 gap 2: an idempotency key claimed only during a Valkey outage should still be honored once Valkey recovers — a redelivery must not re-ingest", async () => {
     const { ValkeyIdempotencyStore, claimIdempotencyKey } = await import("./idempotency")
     const store = new ValkeyIdempotencyStore()
 
@@ -218,7 +218,7 @@ describe("live outage / recovery durability (portal#13)", () => {
     expect(redeliveredAfterRecovery).toBe("event-1") // correct: dedup should survive the recovery
   })
 
-  it.fails("#178 gap 3: after a 410, the informer should account for events between the expired cursor and the fresh resourceVersion instead of silently skipping them (live-k8s-informer.ts ~L136, ~L302)", async () => {
+  it("#178 gap 3: after a 410, the informer should account for events between the expired cursor and the fresh resourceVersion instead of silently skipping them (live-k8s-informer.ts ~L136, ~L302)", async () => {
     let watchCalls = 0
     let listCalls = 0
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
