@@ -39558,7 +39558,7 @@ SOFTWARE.
 
 </details>
 
-### tailwind-merge@3.6.0
+### tailwind-merge@3.7.0
 
 - License: `MIT`
 - Author: Dany Castillo
