@@ -323,6 +323,117 @@ describe("fetchWithPolicy", () => {
 
     expect(vi.getTimerCount()).toBe(0)
   })
+
+  it("retries on a connection reset error (ECONNRESET) and succeeds on subsequent attempt", async () => {
+    const resetErr = Object.assign(new TypeError("fetch failed"), { code: "ECONNRESET" })
+    mockFetch
+      .mockRejectedValueOnce(resetErr)
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
+
+    const promise = fetchWithPolicy("http://x/api", { method: "GET" }, { retry: { maxAttempts: 2 } })
+    await vi.runAllTimersAsync()
+    const res = await promise
+
+    expect(res.status).toBe(200)
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("normalizes a connection reset error (ECONNRESET) to kind 'network' on retry exhaustion", async () => {
+    const resetErr = Object.assign(new TypeError("fetch failed"), { code: "ECONNRESET" })
+    mockFetch.mockRejectedValue(resetErr)
+
+    const promise = fetchWithPolicy(
+      "http://x/api",
+      { method: "GET" },
+      { retry: { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 100 } }
+    )
+    const assertion = expect(promise).rejects.toMatchObject({
+      name: "HttpClientError",
+      kind: "network",
+      cause: resetErr,
+    })
+    await vi.runAllTimersAsync()
+    await assertion
+    expect(mockFetch).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not retry a 401 Unauthorized response and returns it immediately", async () => {
+    mockFetch.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }))
+
+    const res = await fetchWithPolicy("http://x/api", { method: "GET" }, { retry: { maxAttempts: 3 } })
+
+    expect(res.status).toBe(401)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not retry a 403 Forbidden response and returns it immediately", async () => {
+    mockFetch.mockResolvedValueOnce(new Response("forbidden", { status: 403 }))
+
+    const res = await fetchWithPolicy("http://x/api", { method: "GET" }, { retry: { maxAttempts: 3 } })
+
+    expect(res.status).toBe(403)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not retry a 500 Internal Server Error even on an idempotent GET", async () => {
+    mockFetch.mockResolvedValueOnce(new Response("server error", { status: 500 }))
+
+    const res = await fetchWithPolicy("http://x/api", { method: "GET" }, { retry: { maxAttempts: 3 } })
+
+    expect(res.status).toBe(500)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries a GET on 502 Bad Gateway and 504 Gateway Timeout statuses", async () => {
+    mockFetch
+      .mockResolvedValueOnce(new Response(null, { status: 502 }))
+      .mockResolvedValueOnce(new Response(null, { status: 504 }))
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
+
+    const promise = fetchWithPolicy("http://x/api", { method: "GET" }, { retry: { maxAttempts: 3 } })
+    await vi.runAllTimersAsync()
+    const res = await promise
+
+    expect(res.status).toBe(200)
+    expect(mockFetch).toHaveBeenCalledTimes(3)
+  })
+
+  it("returns the final retryable status response after exhausting maxAttempts", async () => {
+    mockFetch.mockResolvedValue(new Response("unavailable", { status: 503 }))
+
+    const promise = fetchWithPolicy(
+      "http://x/api",
+      { method: "GET" },
+      { retry: { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 100 } }
+    )
+    await vi.runAllTimersAsync()
+    const res = await promise
+
+    expect(res.status).toBe(503)
+    expect(mockFetch).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not retry a non-idempotent mutation (POST) on network error and throws kind 'network'", async () => {
+    mockFetch.mockRejectedValue(new TypeError("fetch failed"))
+
+    const promise = fetchWithPolicy("http://x/api", { method: "POST" }, { retry: { maxAttempts: 3 } })
+    const assertion = expect(promise).rejects.toMatchObject({
+      name: "HttpClientError",
+      kind: "network",
+    })
+    await assertion
+
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not retry a non-idempotent mutation (PATCH) even on a retryable status", async () => {
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 503 }))
+
+    const res = await fetchWithPolicy("http://x/api", { method: "PATCH" }, { retry: { maxAttempts: 3 } })
+
+    expect(res.status).toBe(503)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("correlationIdFrom", () => {

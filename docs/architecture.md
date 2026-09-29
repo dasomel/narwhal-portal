@@ -69,6 +69,45 @@ matching dimension, and no namespace caches a failed/partial provider fetch.
 (`KEYCLOAK_CACHE_KEYS`, already centralized per #49) own their own key construction and are
 referenced in the registry for completeness rather than migrated into this module.
 
+## Outbound HTTP transport policy
+
+Outbound HTTP calls to platform dependencies (Argo CD, Gitea, Prometheus, Keycloak, APISIX,
+Kubernetes API, OpenBao, Alertmanager, Falco/Loki) are standardized through the shared transport
+client in [`src/lib/http-client.ts`](../src/lib/http-client.ts).
+
+Detailed transport reference and matrix: [`docs/outbound-http-policy.md`](./outbound-http-policy.md).
+
+### Transport guarantees and error model
+
+- **Transport failures (`HttpClientError`)**: Transport-level failures throw `HttpClientError`
+  ([`src/lib/http-client.ts:98-116`](../src/lib/http-client.ts#L98-L116)) with normalized
+  `kind: HttpClientErrorKind` (`"timeout" | "network" | "aborted"`,
+  [`src/lib/http-client.ts:90`](../src/lib/http-client.ts#L90)).
+- **HTTP status responses**: Non-retried HTTP status outcomes (including 401, 403, 500, and
+  exhausted 429/502/503/504) return the `Response` object
+  ([`src/lib/http-client.ts:350-353, 413`](../src/lib/http-client.ts#L350-L353)). Callers evaluate
+  `response.ok` or `response.status` according to domain requirements.
+- **Redaction**: URL query parameters and user credentials (`scheme://user:pass@`) are stripped
+  via `redactUrl()` ([`src/lib/http-client.ts:122-134`](../src/lib/http-client.ts#L122-L134)). Headers
+  (such as `Authorization` or `X-Vault-Token`) are never leaked into `HttpClientError.message`, but
+  the original runtime error is preserved as `cause` ([`src/lib/http-client.ts:114, 425`](../src/lib/http-client.ts#L114));
+  callers must not log `cause` wholesale if it can carry sensitive data.
+- **Deadline-bounded body reads**: `fetchWithPolicy` records remaining attempt time
+  `Math.max(0, timeoutMs - elapsed)` in `bodyDeadlines`
+  ([`src/lib/http-client.ts:252, 412-413`](../src/lib/http-client.ts#L252)). Bodies read via
+  `readJsonWithPolicy` ([`src/lib/http-client.ts:338`](../src/lib/http-client.ts#L338)) or
+  `readTextWithPolicy` ([`src/lib/http-client.ts:343`](../src/lib/http-client.ts#L343)) must complete
+  within that budget; stalled streams are aborted and throw `kind: "timeout"`.
+- **Response byte-size limits**: Body-read time is deadline-bounded; response byte sizes are
+  currently unbounded at the transport client layer
+  ([`src/lib/http-client.ts:26-27`](../src/lib/http-client.ts#L26-L27)).
+- **Circuit breaker**: Per-provider circuit breakers are not implemented in this layer
+  ([`src/lib/http-client.ts:27-28`](../src/lib/http-client.ts#L27-L28)).
+
+### Timeout and retry policy
+
+Outbound HTTP calls routed through `fetchWithPolicy` enforce unified per-attempt deadlines (ranging from 2s cluster probes to 60s Kubernetes batch queries, with a 10s default) covering connection, headers, and remaining body streaming. Idempotent requests (`GET`, `HEAD`, `PUT`, `DELETE`, `OPTIONS`) automatically retry on transient network errors and 429/502/503/504 status codes up to 3 attempts with full-jitter exponential backoff, cancelling unread response bodies before retry. Non-idempotent mutations, 401/403/500 statuses, and timed-out requests are never retried. For full per-caller timeout classes, constants, and the complete retry matrix, see [`docs/outbound-http-policy.md`](outbound-http-policy.md) (or [한국어](outbound-http-policy-ko.md)).
+
 ## Live event pipeline
 
 The live event path stores a bounded replay ring in Valkey and publishes each event on a
