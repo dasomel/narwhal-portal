@@ -38,7 +38,13 @@ export interface IdempotencyStore {
  * Bounded by maxEntries with TTL-based eviction to prevent memory growth.
  */
 export class InMemoryIdempotencyStore implements IdempotencyStore {
-  private map = new Map<string, { value: string; expiresAt: number }>()
+  // `degraded: true` means this entry was claimed while Valkey was unavailable
+  // and Valkey has never seen it — distinct from a `degraded: false` entry,
+  // which is only a mirror of a claim Valkey already holds (see fulfill()).
+  // The distinction is what lets ValkeyIdempotencyStore.claim() recognize a
+  // post-recovery redelivery of a still-unreconciled key (portal#178 gap 2)
+  // without also shadowing Valkey for keys it already knows about.
+  private map = new Map<string, { value: string; expiresAt: number; degraded: boolean }>()
   private maxEntries: number
 
   constructor(maxEntries = 5000) {
@@ -60,13 +66,13 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
    * without the same bound here the fallback map grows unbounded while Valkey
    * stays healthy.
    */
-  private setBounded(key: string, value: string, ttlSeconds: number, now: number): void {
+  private setBounded(key: string, value: string, ttlSeconds: number, now: number, degraded: boolean): void {
     this.sweep(now)
     if (!this.map.has(key) && this.map.size >= this.maxEntries) {
       const oldest = this.map.keys().next().value
       if (oldest) this.map.delete(oldest)
     }
-    this.map.set(key, { value, expiresAt: now + ttlSeconds * 1000 })
+    this.map.set(key, { value, expiresAt: now + ttlSeconds * 1000, degraded })
   }
 
   async claim(key: string, value: string, ttlSeconds: number): Promise<string | null> {
@@ -75,12 +81,27 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
     if (existing && existing.expiresAt > now) {
       return existing.value
     }
-    this.setBounded(key, value, ttlSeconds, now)
+    this.setBounded(key, value, ttlSeconds, now, true)
     return null
   }
 
   async fulfill(key: string, value: string, ttlSeconds: number): Promise<void> {
-    this.setBounded(key, value, ttlSeconds, Date.now())
+    this.setBounded(key, value, ttlSeconds, Date.now(), false)
+  }
+
+  /**
+   * Returns the value of a key claimed while Valkey was unavailable and still
+   * unexpired, without mutating anything — or `null` if there is no such entry
+   * (never claimed, expired, or only ever a mirror of a Valkey-known key).
+   * Used by ValkeyIdempotencyStore.claim() to catch a redelivery whose
+   * original claim never reached Valkey: Valkey's own `SET NX` would
+   * otherwise see no record of the key and wrongly treat it as new
+   * (portal#178 gap 2).
+   */
+  peekDegraded(key: string): string | null {
+    const existing = this.map.get(key)
+    if (existing?.degraded && existing.expiresAt > Date.now()) return existing.value
+    return null
   }
 
   clear(): void {
@@ -105,6 +126,14 @@ export class ValkeyIdempotencyStore implements IdempotencyStore {
   }
 
   async claim(key: string, value: string, ttlSeconds: number): Promise<string | null> {
+    // A key claimed only in the in-memory fallback during a Valkey outage never
+    // reached Valkey, so once Valkey recovers its own SET NX would see no
+    // record of the key and wrongly treat a redelivery as the first claim —
+    // re-ingesting it and overwriting the fallback's original value with the
+    // duplicate's (portal#178 gap 2). Check the unreconciled fallback first.
+    const unreconciled = this.inMemoryFallback.peekDegraded(key)
+    if (unreconciled !== null) return unreconciled
+
     try {
       const client = getValkey()
       const result = await client.set(key, value, "EX", ttlSeconds, "NX")
