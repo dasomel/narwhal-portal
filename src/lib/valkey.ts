@@ -4,12 +4,6 @@ let client: Redis | null = null
 let isValkeyConnected = true
 
 function assertProductionSecurity(): void {
-  if (process.env.VALKEY_INSECURE_PRODUCTION === "true") {
-    if (!process.env.VALKEY_PASSWORD) {
-      console.warn("[Valkey] VALKEY_PASSWORD is not set in insecure production mode")
-    }
-    return
-  }
   if (process.env.NODE_ENV !== "production") {
     if (!process.env.VALKEY_PASSWORD) {
       console.warn("[Valkey] VALKEY_PASSWORD is not set — connection may fail if AUTH is required")
@@ -19,28 +13,46 @@ function assertProductionSecurity(): void {
     }
     return
   }
+  if (process.env.VALKEY_INSECURE_PRODUCTION !== undefined) {
+    // D1: fail on stale bypass config; rollout coordination is the cost, and secure TLS/ACL config is the replacement.
+    throw new Error("[Valkey] VALKEY_INSECURE_PRODUCTION is no longer supported")
+  }
   if (process.env.VALKEY_TLS !== "true") {
     throw new Error("[Valkey] VALKEY_TLS must be 'true' in production")
   }
   if (!process.env.VALKEY_PASSWORD) {
     throw new Error("[Valkey] VALKEY_PASSWORD is required in production")
   }
+  if (!process.env.VALKEY_USERNAME) {
+    throw new Error("[Valkey] VALKEY_USERNAME is required in production")
+  }
+  if (!process.env.VALKEY_URL?.startsWith("rediss://")) {
+    throw new Error("[Valkey] VALKEY_URL must use rediss:// in production")
+  }
+}
+
+function connectionAuthOptions() {
+  const password = process.env.VALKEY_PASSWORD
+  const username = process.env.VALKEY_USERNAME
+  const tlsEnabled = process.env.VALKEY_TLS === "true"
+
+  return {
+    ...(tlsEnabled ? { tls: {} } : {}),
+    ...(username ? { username } : {}),
+    ...(password ? { password } : {}),
+  }
 }
 
 export function getValkey(): Redis {
   if (!client) {
     assertProductionSecurity()
-    const tlsEnabled = process.env.VALKEY_TLS === "true"
-    const password = process.env.VALKEY_PASSWORD
-
     client = new Redis(process.env.VALKEY_URL ?? "redis://localhost:6379", {
       maxRetriesPerRequest: 1,
       enableReadyCheck: true,
       lazyConnect: true,
       connectTimeout: 500,
       commandTimeout: 500,
-      ...(tlsEnabled ? { tls: {} } : {}),
-      ...(password ? { password } : {}),
+      ...connectionAuthOptions(),
     })
     client.on("error", (err) => {
       if (isValkeyConnected) {
@@ -75,9 +87,6 @@ let liveClient: Redis | null = null
 export function getLiveValkey(): Redis {
   if (!liveClient) {
     assertProductionSecurity()
-    const tlsEnabled = process.env.VALKEY_TLS === "true"
-    const password = process.env.VALKEY_PASSWORD
-
     liveClient = new Redis(process.env.VALKEY_URL ?? "redis://localhost:6379", {
       maxRetriesPerRequest: null, // pub/sub must not drop commands
       enableReadyCheck: true,
@@ -85,8 +94,7 @@ export function getLiveValkey(): Redis {
       connectTimeout: 3000,
       // deliberately NO commandTimeout: SUBSCRIBE is long-lived and pipelines
       // must not be aborted mid-flight.
-      ...(tlsEnabled ? { tls: {} } : {}),
-      ...(password ? { password } : {}),
+      ...connectionAuthOptions(),
     })
     liveClient.on("error", (err) => {
       console.warn("[live-valkey] connection error:", err.message)
