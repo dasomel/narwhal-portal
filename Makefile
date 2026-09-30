@@ -29,3 +29,7 @@ push:
 
 ## 빌드 + 푸시 한 번에
 all: build push
+
+.PHONY: research-check
+research-check:
+	python3 scripts/research/check-research-evidence.py
