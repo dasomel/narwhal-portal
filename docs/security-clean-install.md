@@ -174,45 +174,28 @@ node -e "console.log(/^[^\s@:]+(?::[0-9]+)?\/[a-z0-9._\-\/]+@sha256:[0-9a-f]{64}
 
 **클러스터 리포 변경 사항(narwhal/ repo에서 처리):**
 
-1. `valkey.conf` ConfigMap 생성:
-   ```yaml
-   apiVersion: v1
-   kind: ConfigMap
-   metadata:
-     name: narwhal-portal-valkey-config
-     namespace: devtools
-   data:
-     valkey.conf: |
-       requirepass ${VALKEY_PASSWORD}
-       tls-port 6379
-       port 0
-       tls-cert-file /tls/tls.crt
-       tls-key-file /tls/tls.key
-       tls-ca-cert-file /tls/ca.crt
-       save ""
-       appendonly no
-   ```
-2. cert-manager Certificate 리소스로 `narwhal-portal-valkey-tls` Secret 발급 (CA: cluster issuer)
-3. Deployment 갱신: command를 `valkey-server /etc/valkey/valkey.conf`로 변경, ConfigMap+TLS Secret 마운트
-4. Service의 port는 그대로 6379 유지 (TLS 포트로 사용)
+1. Narwhal 제공자 설정에서 Valkey TLS를 켜고 `portal` 전용 ACL 사용자와 비밀번호를 생성한다. 비밀번호는 Secret으로만 저장한다.
+2. cert-manager가 발급한 Valkey 인증서와 클러스터 CA를 마운트하고, 평문 포트는 비활성화한다.
+3. Service는 TLS 포트 6379만 노출하며 포털 workload만 연결할 수 있게 제한한다.
 
 **포털 측(`.env.local`):**
 ```bash
 VALKEY_URL=rediss://narwhal-portal-valkey.devtools.svc.cluster.local:6379  # rediss:// (TLS)
 VALKEY_TLS=true
-VALKEY_PASSWORD=<bootstrap-secrets.sh가 생성한 값>
+VALKEY_USERNAME=portal
+VALKEY_PASSWORD=<전용 Valkey ACL Secret에서 주입>
 ```
 
-VALKEY_PASSWORD는 K8s Secret으로 cluster에 배포해야 하며, narwhal-portal Deployment에서 envFrom으로 주입.
+`VALKEY_USERNAME`은 `portal` 전용 ACL 사용자이며 `VALKEY_PASSWORD`는 전용 Kubernetes Secret 참조로 주입한다. 우회 환경 변수 `VALKEY_INSECURE_PRODUCTION`은 지원하지 않는다. 포털은 production에서 TLS, `rediss://` URL, username, password가 모두 유효하지 않으면 Valkey 클라이언트를 초기화하지 않는다. 기존 `NODE_EXTRA_CA_CERTS=/etc/ssl/narwhal/ca.crt` 마운트가 Node TLS의 추가 CA 신뢰를 제공하므로 Valkey 클라이언트는 이를 덮어쓰는 별도 CA 옵션을 지정하지 않는다.
 
 **검증:**
 ```bash
 kubectl exec -n devtools deploy/narwhal-portal-valkey -- \
-  valkey-cli --tls --cacert /tls/ca.crt -a "$VALKEY_PASSWORD" ping
+  valkey-cli --tls --cacert /tls/ca.crt --user portal -a "$VALKEY_PASSWORD" ping
 # PONG
 ```
 
-production 환경에서 `VALKEY_TLS!=true` 또는 `VALKEY_PASSWORD` 미설정이면 포털이 부팅 거부(`src/lib/valkey.ts`).
+production 환경에서 `VALKEY_TLS!=true`, `rediss://`가 아닌 URL, username/password 누락, 또는 폐기된 우회 변수가 설정되면 포털이 Valkey 초기화를 거부(`src/lib/valkey.ts`).
 
 ---
 
@@ -369,7 +352,7 @@ curl -sk -H "Authorization: Bearer $TOKEN" \
 | `ARGOCD_URL`, `ARGOCD_TOKEN`, `ARGOCD_DEVELOPER_PROJECTS` | 4 | |
 | `APISIX_ADMIN_URL`, `APISIX_API_KEY` | 수동 | APISIX admin 설정값 |
 | `PROMETHEUS_URL`, `ALERTMANAGER_URL`, `LOKI_URL` | 수동 | 클러스터 내부 DNS |
-| `VALKEY_URL`, `VALKEY_TLS=true`, `VALKEY_PASSWORD` | 1+6 | rediss:// + AUTH |
+| `VALKEY_URL`, `VALKEY_TLS=true`, `VALKEY_USERNAME=portal`, `VALKEY_PASSWORD` | 1+6 | rediss:// + ACL AUTH |
 | `OPENBAO_ADDR` | 7 | https:// 필수 |
 | `OPENBAO_AUTH_METHOD`, `OPENBAO_K8S_ROLE`, `OPENBAO_K8S_AUTH_MOUNT`, `OPENBAO_K8S_TOKEN_PATH`, `OPENBAO_K8S_AUTH_AUDIENCE` | 7 | 클러스터 배포 기본값(Kubernetes auth); `OPENBAO_TOKEN`은 주입하지 않음 |
 | `OPENBAO_TOKEN` | 7 (로컬 전용) | Kubernetes SA 토큰이 없을 때만 폴백; production은 `OPENBAO_AUTH_METHOD=token`을 명시해야 이 폴백을 허용 |
@@ -394,7 +377,7 @@ npx tsc --noEmit             # → 0 errors
 for k in AUTH_SECRET AUTH_URL OIDC_CLIENT_ID OIDC_CLIENT_SECRET \
          KEYCLOAK_URL KEYCLOAK_ADMIN_CLIENT_SECRET \
          ARGOCD_URL ARGOCD_TOKEN \
-         VALKEY_URL VALKEY_TLS VALKEY_PASSWORD \
+         VALKEY_URL VALKEY_TLS VALKEY_USERNAME VALKEY_PASSWORD \
          OPENBAO_ADDR \
          TUNING_JOB_IMAGE LIVE_INGEST_SECRET; do
   grep -q "^$k=.\+" .env.local || echo "MISSING: $k"
