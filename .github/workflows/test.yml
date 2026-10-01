@@ -103,6 +103,8 @@ jobs:
             registry.npmjs.org:443
             raw.githubusercontent.com:443
             cdn.playwright.dev:443
+            playwright-bkakghazbfe7grc5.z01.azurefd.net:443
+            mr-z01.tm-azurefd.net:443
             playwright.download.prss.microsoft.com:443
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
