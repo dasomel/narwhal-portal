@@ -18,7 +18,8 @@
     "check:cooling": "node scripts/check-lockfile-cooling.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@auth/core": "^0.34.3",

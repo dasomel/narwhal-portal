@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/playwright-report/
+/test-results/
 
 # kaniko-build.sh build-evidence records (portal#23) — generated, not committed
 /build-evidence/
