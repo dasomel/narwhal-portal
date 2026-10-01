@@ -235,3 +235,7 @@ SCAFFOLD_COMPLETE
 
 # agent worktrees (isolation: "worktree" scratch checkouts) — never commit, ephemeral
 /.claude/worktrees/
+
+# Local agent harness skills copied from the idp umbrella workspace — never publish.
+# Tracked portal skills (narwhal-portal-*) and .codex/agents/*.toml are unaffected.
+/.agents/skills/idp-*/
