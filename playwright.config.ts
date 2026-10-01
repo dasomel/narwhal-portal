@@ -10,6 +10,9 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "list",
   use: {
     ...devices["Desktop Chrome"],
+    // CI uses the Chrome preinstalled on GitHub-hosted runners: the egress-blocked job
+    // cannot download Playwright's browser build (cdn.playwright.dev is refused).
+    ...(process.env.CI ? { channel: "chrome" } : {}),
     baseURL,
     trace: "retain-on-failure",
   },
