@@ -72,7 +72,8 @@ describe("Valkey production connection security", () => {
         password: "test-secret",
         tls: {},
       })
-      expect(instance.options.tls).not.toHaveProperty("ca")
+      // toEqual, not toMatchObject: `tls: { rejectUnauthorized: false }` must fail this test
+      expect(instance.options.tls).toEqual({})
     }
     expect(process.env.NODE_EXTRA_CA_CERTS).toBe("/etc/ssl/narwhal/ca.crt")
   })
