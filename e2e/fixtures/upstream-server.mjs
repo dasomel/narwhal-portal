@@ -25,6 +25,18 @@ function makeApp() {
   }
 }
 
+function makeFrontendApp() {
+  return {
+    ...makeApp(),
+    metadata: { ...makeApp().metadata, name: "frontend-e2e" },
+    spec: {
+      ...makeApp().spec,
+      project: "apps",
+      destination: { ...makeApp().spec.destination, namespace: "frontend-e2e" },
+    },
+  }
+}
+
 let app = makeApp()
 let syncRequests = 0
 let readsAfterSync = 0
@@ -63,7 +75,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (url.pathname === "/api/v1/applications" && req.method === "GET") {
-    sendJson(res, 200, { items: [app] })
+    sendJson(res, 200, { items: [app, makeFrontendApp()] })
     return
   }
 
@@ -92,6 +104,11 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  if (url.pathname === "/api/v1/applications/frontend-e2e" && req.method === "GET") {
+    sendJson(res, 200, makeFrontendApp())
+    return
+  }
+
   if (url.pathname === "/api/v1/namespaces" && req.method === "GET") {
     sendJson(res, 200, {
       metadata: { resourceVersion: "1" },
@@ -99,6 +116,13 @@ const server = createServer(async (req, res) => {
         metadata: {
           name: "platform-e2e",
           labels: { "narwhal.io/team": "platform-team" },
+          creationTimestamp: now,
+        },
+        status: { phase: "Active" },
+      }, {
+        metadata: {
+          name: "frontend-e2e",
+          labels: { "narwhal.io/team": "frontend-team" },
           creationTimestamp: now,
         },
         status: { phase: "Active" },

@@ -102,6 +102,14 @@ const httpServer = createHttpServer((req, res) => {
     res.end(JSON.stringify({ events: persistedEvents }))
     return
   }
+  if (url.pathname === "/__test/reset" && req.method === "POST") {
+    lists.clear()
+    counters.clear()
+    persistedEvents.length = 0
+    res.writeHead(200, { "content-type": "application/json" })
+    res.end(JSON.stringify({ ok: true }))
+    return
+  }
   res.writeHead(404)
   res.end()
 })

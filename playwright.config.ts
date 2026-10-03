@@ -9,6 +9,7 @@ process.env.PLAYWRIGHT_E2E_VALKEY_URL = "http://127.0.0.1:3200"
 
 export default defineConfig({
   testDir: "./e2e",
+  workers: 1,
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

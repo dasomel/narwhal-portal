@@ -2,6 +2,7 @@ import NextAuth from "next-auth"
 import type { NextAuthConfig, Session } from "next-auth"
 import type { JWT } from "next-auth/jwt"
 import Credentials from "next-auth/providers/credentials"
+import { getTeamMappings } from "./role-filter"
 import { assertHttpsInProduction } from "./config"
 
 // H-8: AUTH_MOCK production guard — module-load-time check
@@ -124,7 +125,7 @@ function validateIssuerAudience(profile: Record<string, unknown>): boolean {
 const mockProvider = Credentials({
   id: "mock",
   name: "Mock",
-  credentials: { role: { label: "Role", type: "text" } },
+  credentials: { role: { label: "Role", type: "text" }, team: { label: "Team", type: "text" } },
   authorize(credentials) {
     const raw = (credentials.role as string | undefined) ?? "developer"
     if (!ALLOWED_GROUPS.has(raw as UserRole)) {
@@ -132,11 +133,16 @@ const mockProvider = Credentials({
       return null
     }
     const role = raw as UserRole
+    const rawTeam = credentials.team as string | undefined
+    const teams = rawTeam && getTeamMappings().some((mapping) => mapping.group === rawTeam)
+      ? [rawTeam]
+      : []
     return {
       id: "dev-user",
       name: "Dev User",
       email: "dev@narwhal.local",
       groups: [role],
+      teams,
     }
   },
 })

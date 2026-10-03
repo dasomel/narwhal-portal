@@ -6,6 +6,9 @@ test("cluster-admin reviews global effective permissions, opens a scoped catalog
   // This is the cluster-admin/global-scope path; the existing dialog is user confirmation, not a signed approval envelope or tenant-isolation proof.
   if (!fixtureURL) throw new Error("PLAYWRIGHT_E2E_FIXTURE_URL is not configured")
   await request.post(`${fixtureURL}/__test/reset`)
+  const valkeyStateURL = process.env.PLAYWRIGHT_E2E_VALKEY_URL
+  if (!valkeyStateURL) throw new Error("PLAYWRIGHT_E2E_VALKEY_URL is not configured")
+  await request.post(`${valkeyStateURL}/__test/reset`)
 
   await page.goto("/settings")
   await expect(page).toHaveURL(/\/login\?callbackUrl=%2Fsettings$/)
@@ -55,8 +58,6 @@ test("cluster-admin reviews global effective permissions, opens a scoped catalog
     operationState: { phase: "Succeeded" },
   })
 
-  const valkeyStateURL = process.env.PLAYWRIGHT_E2E_VALKEY_URL
-  if (!valkeyStateURL) throw new Error("PLAYWRIGHT_E2E_VALKEY_URL is not configured")
   const persistedEvents = await (await request.get(`${valkeyStateURL}/__test/state`)).json()
   expect(persistedEvents.events.map((event: { event_type: string }) => event.event_type)).toEqual([
     "operation.completed",

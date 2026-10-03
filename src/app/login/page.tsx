@@ -11,6 +11,7 @@ const isMock = process.env.NEXT_PUBLIC_AUTH_MOCK === "true"
 const MOCK_ROLES = [
   { label: "Cluster Admin", role: "cluster-admin" },
   { label: "Developer", role: "developer" },
+  { label: "Platform Team Developer", role: "developer", team: "platform-team" },
   { label: "Viewer", role: "viewer" },
 ]
 
@@ -38,12 +39,12 @@ function LoginForm() {
           {isMock ? (
             <>
               <p className="text-xs text-center text-muted-foreground mb-1">{t("login.mockMode")}</p>
-              {MOCK_ROLES.map(({ label, role }) => (
+              {MOCK_ROLES.map(({ label, role, team }) => (
                 <Button
-                  key={role}
+                  key={`${role}-${team ?? "default"}`}
                   variant="outline"
                   className="w-full"
-                  onClick={() => signIn("mock", { role, callbackUrl })}
+                  onClick={() => signIn("mock", { role, team, callbackUrl })}
                 >
                   {t("login.loginAs", { label })}
                 </Button>

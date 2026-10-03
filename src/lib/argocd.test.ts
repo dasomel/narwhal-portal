@@ -64,7 +64,7 @@ function makeScope(namespaces: string[], argocdProjects: string[] = []): Effecti
 
 const developerOnPlatformTeam: ArgoActor = {
   role: "developer",
-  groups: ["platform-team"],
+  groups: ["developer"],
   teams: ["platform-team"],
 }
 
