@@ -117,7 +117,7 @@ npx shadcn@latest add {component}  # add a shadcn/ui component
 - [docs/local-dev.md](./docs/local-dev.md) — full Skaffold/Kaniko dev workflow, troubleshooting
 - [docs/security-clean-install.md](./docs/security-clean-install.md) — clean-install secrets and
   security hardening checklist
-- `CLAUDE.md` — architecture, agent harness, and conventions for AI-assisted development
+- `AGENTS.md` — agent contract (gotchas, boundaries, verification); `CLAUDE.md` is a thin Claude Code bridge that imports it
 
 ## License
 

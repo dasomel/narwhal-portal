@@ -3,7 +3,7 @@
 > 자매 레포 `narwhal`의
 > [`docs/common/lessons-log.md`](https://github.com/dasomel/narwhal/blob/main/docs/common/lessons-log.md)와
 > 같은 규칙을 따른다. 날짜별 사건 서술은 여기에, 여러 사건에 걸쳐 일반화되는 규칙만
-> `CLAUDE.md` / `AGENTS.md`에 남긴다. 고치다 만든 실수도 같은 비중으로 기록한다.
+> `AGENTS.md`에 남긴다. 고치다 만든 실수도 같은 비중으로 기록한다.
 >
 > 항목 추가 형식: `| YYYY-MM-DD | 사건 설명 | 조치 |`
 >

@@ -116,7 +116,7 @@ npx shadcn@latest add {component}  # add a shadcn/ui component
 - [docs/local-dev.md](./docs/local-dev.md) — 전체 Skaffold/Kaniko 개발 워크플로우, 트러블슈팅
 - [docs/security-clean-install.md](./docs/security-clean-install.md) — 클린 설치 시크릿 및
   보안 강화 체크리스트
-- `CLAUDE.md` — AI 지원 개발을 위한 아키텍처, 에이전트 하네스 및 컨벤션
+- `AGENTS.md` — AI 에이전트 계약(주의사항, 경계, 검증); `CLAUDE.md`는 이를 import하는 Claude Code용 얇은 브리지
 
 ## 라이선스
 

@@ -1,6 +1,6 @@
 name: harness-rules
 
-# Enforce the countable CLAUDE.md "Critical Rules" (Tailwind-first styling, i18n
+# Enforce the countable AGENTS.md "Verify" rules (Tailwind-first styling, i18n
 # for UI text). Both have pre-existing debt, so this is a ratchet against
 # recorded baselines — see scripts/harness-rules.sh. It blocks NEW violations,
 # not the existing ones.
