@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2025 dasomel
 # =============================================================================
-# harness-rules.sh — make the countable CLAUDE.md "Critical Rules" actually block.
+# harness-rules.sh — make the countable AGENTS.md "Verify" rules actually block.
 #
 # These rules were prose only, and the codebase already violates them (i18n debt
 # is even acknowledged in-code, see the TODO at the top of service-map-view.tsx).

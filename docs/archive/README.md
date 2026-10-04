@@ -9,7 +9,7 @@
 | `portal-full-check.qa-report-2026-06-10.md` | 2026-06-10 | 포탈 전체 점검 + 가독성 감사 QA 리포트 (1회성 스냅샷) |
 | `RELEASE-TODO-gitea-permanence.md` | 2026-06-08 (archived 2026-09-17) | selfHeal-off + etcd/Admin API 직접 patch 임시 조치 기록. **superseded** — 현재는 GitOps에 영구화되어 selfHeal은 항상 `true`. |
 
-> 최신 상태는 상위 `docs/`의 현행 문서와 `CLAUDE.md`, `README.md`를 참고하세요.
+> 최신 상태는 상위 `docs/`의 현행 문서와 `AGENTS.md`, `README.md`를 참고하세요.
 
 ## 아카이브 표기 규칙 (agent/source-search 판별용)
 
