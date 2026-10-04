@@ -8,53 +8,30 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
-# Narwhal Portal engineering contract
+# Narwhal Portal
 
-Inspect repository guidance, design/architecture context, project skills, and the issue/spec relevant to the current task before editing. Do not preload unrelated documentation or skills. Preserve existing component, auth, API, routing, and state-management conventions.
+Change workflow, risk classes, and agent-engineering standards: https://github.com/dasomel/openforge/blob/main/docs/change-management.md and https://github.com/dasomel/openforge/blob/main/docs/agent-engineering.md. Portal-specific rules below; `.agents/openforge-adoption.md` holds the local adoption note.
 
-## Work contract
+## Skills
 
-- Make the smallest coherent change that solves the requested problem.
+Load the project skill matching the task before editing:
+
+- pages, components, widgets, navigation, RBAC rendering, i18n: `.agents/skills/narwhal-portal-frontend/SKILL.md`
+- API routes, infrastructure clients, cache, secrets, upstream integration: `.agents/skills/narwhal-portal-backend/SKILL.md`
+- API/UI seams, routes, RBAC/auth, cache keys, build/browser/integration evidence: `.agents/skills/narwhal-portal-qa/SKILL.md`
+
+`.claude/skills/idp-*` are legacy compatibility adapters; do not add workflow rules there.
+
+## Boundaries
+
+- Exported APIs, auth/RBAC, routing contracts, destructive actions, and shared component semantics are design changes, not routine edits.
 - Do not auto-fix unrelated findings; report them separately.
-- Preserve UI/API/auth boundaries and existing access restrictions.
-- Treat exported APIs, auth/RBAC changes, routing contracts, destructive actions, and shared component semantics as design changes.
-- Let formatter/linter rules own deterministic style. Do not add prompt-only style rules that tooling already enforces.
-- Comments explain why, invariants, compatibility constraints, or hazards; do not narrate obvious code.
+- Do not hand-edit `src/components/ui/` (shadcn-generated; regenerate instead).
+- The Narwhal cluster repo owns service endpoints, namespaces, secret paths, OIDC clients, RBAC bindings, and routes. Verify those assumptions in its source (normally `../narwhal`, never a maintainer-specific absolute path), treat it as read-only from Portal work, and route cluster-owned changes there. Do not copy cluster deployment config into Portal to make a local integration pass.
+- Shared/production/destructive/release/credential/permission/external mutations need explicit authorization; local disposable work within scope does not.
 
-## Companion Narwhal cluster contract
+## Verify
 
-The Portal consumes contracts owned by the Narwhal cluster repository: service endpoints, namespaces, secret paths, OIDC clients, RBAC bindings, routes, and other deployment details.
+`pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `bash scripts/harness-rules.sh`, `pnpm test:e2e` (Playwright). `harness-rules.sh` is a CI ratchet on Tailwind-first styling (no static `style={{}}`) and UI text via `src/lib/i18n.ts` (no hardcoded Korean): counts may only go down, and the baselines in the script are lowered in the same commit that pays debt off.
 
-- Verify those assumptions from the companion Narwhal source rather than memory.
-- When both repositories are checked out in one workspace, resolve the companion repository relatively (normally `../narwhal`) or through the workspace configuration; do not encode a maintainer-specific absolute path.
-- Treat the companion Narwhal repository as read-only during Portal work. Route cluster-owned mutations to that repository instead of editing it from the Portal task.
-- Do not duplicate cluster deployment configuration in Portal merely to make a local integration pass.
-
-## Bug fixes and verification
-
-- Prefer: reproduce -> failing test/evidence -> minimal fix -> same test passes -> relevant regression suite.
-- Use Playwright/integration evidence for browser/auth behavior when unit tests cannot prove the real path.
-- For API/UI seams, compare the actual producer and consumer contracts instead of relying on a stale hand-maintained mapping.
-- Choose verification proportional to task risk and user impact. A green build or self-authored test suite is not sufficient proof of browser/auth/live-integration behavior when those paths are affected.
-- Safe local/disposable inspect-edit-build-test-fix-retest work may proceed within scope. Shared/production/destructive/release/credential/permission/external mutations require explicit authorization unless already granted.
-- Do not claim completion without relevant evidence; distinguish mocked/static evidence from browser/runtime and live integration verification.
-
-## Convergence
-
-End substantive work as A) complete/verified, B) meaningful verified progress with the next blocker isolated, or C) stop with evidence when further work requires unjustified scope, fragile patches, or unsupported assumptions.
-
-References:
-- https://github.com/dasomel/openforge/blob/main/docs/agent-engineering.md
-- https://github.com/dasomel/openforge/blob/main/docs/model-agnostic-agent-instructions.md
-- https://github.com/dasomel/openforge/blob/main/docs/user-centric-validation.md
-- https://github.com/dasomel/openforge/blob/main/docs/agent-skills.md
-
-
-## Risk-scaled change workflow
-
-- Class A documentation-only changes use the Issue/PR as the change record.
-- Class B internal behavior changes require explicit acceptance criteria; use a Change Package when the work is complex, cross-component, or operationally risky.
-- Class C dependency/runtime/toolchain/build-contract changes and Class D release/deployment/security-boundary changes require an accepted Change Package before broad implementation.
-- For Class C/D or complex Class B work, use `templates/change/CHANGE.md` plus `templates/change/TASKS.md` when a versioned working artifact is useful.
-- Keep requirement → acceptance scenario → task → evidence traceability. Material scope changes require package update and re-review.
-- At completion, synchronize durable truth into code/tests, normative docs, ADRs, evidence, and portfolio/status records; do not maintain a duplicate long-lived specification tree.
+A green build or mocked/self-authored tests do not prove browser, auth, or live-integration behavior; use Playwright/integration evidence for those paths and say which kind of evidence you have. For API/UI seams compare the real producer and consumer instead of a hand-maintained mapping.
