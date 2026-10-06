@@ -1491,7 +1491,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 </details>
 
-### @grpc/grpc-js@1.14.4
+### @grpc/grpc-js@1.14.5
 
 - License: `Apache-2.0`
 - Author: Google Inc.
