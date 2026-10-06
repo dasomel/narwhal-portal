@@ -35,3 +35,7 @@ Load the project skill matching the task before editing:
 `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `bash scripts/harness-rules.sh`, `pnpm test:e2e` (Playwright). `harness-rules.sh` is a CI ratchet on Tailwind-first styling (no static `style={{}}`) and UI text via `src/lib/i18n.ts` (no hardcoded Korean): counts may only go down, and the baselines in the script are lowered in the same commit that pays debt off.
 
 A green build or mocked/self-authored tests do not prove browser, auth, or live-integration behavior; use Playwright/integration evidence for those paths and say which kind of evidence you have. For API/UI seams compare the real producer and consumer instead of a hand-maintained mapping.
+
+## Merge gate
+
+- `independent-review` (required check) is green only if the PR has the `review:pass` label applied **after the last push** (newest commit or force-push); any later push invalidates it. The label is applied by the independent reviewer after a PASS, never by the lane that authored the change, and never before CI-green self-merge. Escape hatch: admin merge, stated explicitly in the PR. Logic: `scripts/check-independent-review.mjs`.
