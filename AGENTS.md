@@ -35,3 +35,7 @@ Load the project skill matching the task before editing:
 `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `bash scripts/harness-rules.sh`, `pnpm test:e2e` (Playwright). `harness-rules.sh` is a CI ratchet on Tailwind-first styling (no static `style={{}}`) and UI text via `src/lib/i18n.ts` (no hardcoded Korean): counts may only go down, and the baselines in the script are lowered in the same commit that pays debt off.
 
 A green build or mocked/self-authored tests do not prove browser, auth, or live-integration behavior; use Playwright/integration evidence for those paths and say which kind of evidence you have. For API/UI seams compare the real producer and consumer instead of a hand-maintained mapping.
+
+## Merge gate
+
+- Merge requires an `independent-review` **success commit status on the PR's head SHA**, posted by the independent reviewer (never the author lane) after a PASS via `node scripts/mark-review-pass.mjs <pr> --sha <full 40-hex SHA>`, passing the full SHA it actually reviewed (no prefixes; the helper refuses if the head has moved). Any later push is a new SHA with no status, so it invalidates the review. Escape hatch: admin merge, stated explicitly in the PR. This is a procedural control (any writer can post a status), not identity proof.
