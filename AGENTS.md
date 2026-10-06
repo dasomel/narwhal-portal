@@ -38,4 +38,4 @@ A green build or mocked/self-authored tests do not prove browser, auth, or live-
 
 ## Merge gate
 
-- `independent-review` (required check) is green only if the PR has the `review:pass` label applied **after the last push** (newest commit or force-push); any later push invalidates it. The label is applied by the independent reviewer after a PASS, never by the lane that authored the change, and never before CI-green self-merge. Escape hatch: admin merge, stated explicitly in the PR. Logic: `scripts/check-independent-review.mjs`.
+- Merge requires an `independent-review` **success commit status on the PR's head SHA**, posted by the independent reviewer (never the author lane) after a PASS via `node scripts/mark-review-pass.mjs <pr> --sha <reviewed_sha>`, passing the SHA it actually reviewed (the helper refuses if the head has moved). Any later push is a new SHA with no status, so it invalidates the review. Escape hatch: admin merge, stated explicitly in the PR. This is a procedural control (any writer can post a status), not identity proof.
