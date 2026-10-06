@@ -38,4 +38,4 @@ A green build or mocked/self-authored tests do not prove browser, auth, or live-
 
 ## Merge gate
 
-- Merge requires an `independent-review` **success commit status on the PR's head SHA**, posted by the independent reviewer (never the author lane) after a PASS via `node scripts/mark-review-pass.mjs <pr> --sha <reviewed_sha>`, passing the SHA it actually reviewed (the helper refuses if the head has moved). Any later push is a new SHA with no status, so it invalidates the review. Escape hatch: admin merge, stated explicitly in the PR. This is a procedural control (any writer can post a status), not identity proof.
+- Merge requires an `independent-review` **success commit status on the PR's head SHA**, posted by the independent reviewer (never the author lane) after a PASS via `node scripts/mark-review-pass.mjs <pr> --sha <full 40-hex SHA>`, passing the full SHA it actually reviewed (no prefixes; the helper refuses if the head has moved). Any later push is a new SHA with no status, so it invalidates the review. Escape hatch: admin merge, stated explicitly in the PR. This is a procedural control (any writer can post a status), not identity proof.
