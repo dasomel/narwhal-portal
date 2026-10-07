@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
-import { evaluatePvcExpansion } from "@/lib/domain/storage"
-import { k8sFetch, K8sHttpError } from "@/lib/k8s-client"
+import { evaluatePvcExpansion, parseStorageQuantity } from "@/lib/domain/storage"
+import { getPersistentVolumeClaim, K8sHttpError } from "@/lib/k8s-client"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 
@@ -51,9 +51,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
     try {
-      pvc = await k8sFetch<unknown>(
-        `/api/v1/namespaces/${encodeURIComponent(body.namespace)}/persistentvolumeclaims/${encodeURIComponent(body.pvc_name)}`,
-      )
+      pvc = await getPersistentVolumeClaim(body.namespace, body.pvc_name)
     } catch (error) {
       if (error instanceof K8sHttpError && error.status === 404) {
         return NextResponse.json({ error: "Not found" }, { status: 404 })
@@ -80,10 +78,12 @@ export async function POST(req: Request) {
     const entry = record(condition)
     return typeof entry.type === "string" && ["True", "False", "Unknown"].includes(entry.status as string)
   })
+  // D4: echo only bounded domain values, losing malformed cluster evidence;
+  // extend these validators only when the supported storage contract changes.
   const facts = {
-    current_bytes_text: typeof current === "string" ? current : null,
-    storage_class_name: typeof storageClassName === "string" ? storageClassName : null,
-    phase: typeof phase === "string" ? phase : null,
+    current_bytes_text: typeof current === "string" && parseStorageQuantity(current) !== null ? current : null,
+    storage_class_name: typeof storageClassName === "string" && /^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$/.test(storageClassName) && !storageClassName.includes("\n") ? storageClassName : null,
+    phase: typeof phase === "string" && ["Pending", "Bound", "Lost"].includes(phase) ? phase : null,
     resize_in_progress: resizing ? true : validConditions ? false : null,
   }
   // D3: ../narwhal/gitops/charts/narwhal-platform/templates/narwhal-portal-k8s.yaml

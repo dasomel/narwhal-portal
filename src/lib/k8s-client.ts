@@ -41,7 +41,7 @@ export class K8sCredentialError extends K8sHttpError {
   }
 }
 
-export async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
+async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const apiServer = getK8sApiServer()
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -66,6 +66,15 @@ export async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (res.status === 401 || res.status === 403) throw new K8sCredentialError(res.status, path)
   if (!res.ok) throw new K8sHttpError(res.status, path)
   return readJsonWithPolicy<T>(res)
+}
+
+// D2: expose only a PVC GET; callers lose arbitrary request access and can
+// add separate resource helpers when another Kubernetes read is required.
+export async function getPersistentVolumeClaim(namespace: string, name: string): Promise<unknown> {
+  return k8sFetch<unknown>(
+    `/api/v1/namespaces/${encodeURIComponent(namespace)}/persistentvolumeclaims/${encodeURIComponent(name)}`,
+    { method: "GET" },
+  )
 }
 
 // --- Bounded/paginated list helper (portal#52) ---
