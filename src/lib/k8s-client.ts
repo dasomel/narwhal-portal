@@ -41,7 +41,7 @@ export class K8sCredentialError extends K8sHttpError {
   }
 }
 
-async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const apiServer = getK8sApiServer()
   const headers: Record<string, string> = {
     Accept: "application/json",
