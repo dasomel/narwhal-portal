@@ -68,6 +68,15 @@ async function k8sFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return readJsonWithPolicy<T>(res)
 }
 
+// D2: expose only a PVC GET; callers lose arbitrary request access and can
+// add separate resource helpers when another Kubernetes read is required.
+export async function getPersistentVolumeClaim(namespace: string, name: string): Promise<unknown> {
+  return k8sFetch<unknown>(
+    `/api/v1/namespaces/${encodeURIComponent(namespace)}/persistentvolumeclaims/${encodeURIComponent(name)}`,
+    { method: "GET" },
+  )
+}
+
 // --- Bounded/paginated list helper (portal#52) ---
 //
 // A plain k8sFetch("/api/v1/pods") on a large cluster returns every pod in one
