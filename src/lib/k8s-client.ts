@@ -86,6 +86,15 @@ export async function getStorageClass(name: string): Promise<unknown> {
   )
 }
 
+// D4: bounded ResourceQuota GET only; incomplete lists cost evidence at the
+// caller. Add pagination separately if complete larger lists become necessary.
+export async function getResourceQuotas(namespace: string): Promise<unknown> {
+  return k8sFetch<unknown>(
+    `/api/v1/namespaces/${encodeURIComponent(namespace)}/resourcequotas?limit=100`,
+    { method: "GET" },
+  )
+}
+
 // --- Bounded/paginated list helper (portal#52) ---
 //
 // A plain k8sFetch("/api/v1/pods") on a large cluster returns every pod in one
