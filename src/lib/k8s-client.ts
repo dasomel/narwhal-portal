@@ -77,6 +77,15 @@ export async function getPersistentVolumeClaim(namespace: string, name: string):
   )
 }
 
+// D3: keep StorageClass access GET-only; arbitrary operations remain private.
+// Add a separate helper if another resource contract is required.
+export async function getStorageClass(name: string): Promise<unknown> {
+  return k8sFetch<unknown>(
+    `/apis/storage.k8s.io/v1/storageclasses/${encodeURIComponent(name)}`,
+    { method: "GET" },
+  )
+}
+
 // --- Bounded/paginated list helper (portal#52) ---
 //
 // A plain k8sFetch("/api/v1/pods") on a large cluster returns every pod in one
