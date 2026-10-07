@@ -13,6 +13,10 @@ function record(value: unknown): Record<string, unknown> {
     ? value as Record<string, unknown> : {}
 }
 
+function own(value: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(value, key) ? value[key] : undefined
+}
+
 export async function POST(req: Request) {
   const gate = await requireRole("cluster-admin", "developer")
   if ("error" in gate) {
@@ -90,16 +94,18 @@ export async function POST(req: Request) {
   if (facts.storage_class_name !== null) {
     try {
       const raw: unknown = await getStorageClass(facts.storage_class_name)
-      if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
-        const entry = record(raw)
-        // D5: Kubernetes treats an absent expansion field as false; malformed
-        // values cost evidence. Relax only when the upstream contract changes.
-        const expansion = entry.allowVolumeExpansion
+      const entry = record(raw)
+      const metadata = record(own(entry, "metadata"))
+      // D5: only a positively identified class supplies facts; other shapes cost
+      // evidence. Relax this guard only if the upstream resource contract changes.
+      if (own(entry, "kind") === "StorageClass" && own(metadata, "name") === facts.storage_class_name) {
+        // Kubernetes defaults an absent expansion field to false on this class.
+        const expansion = own(entry, "allowVolumeExpansion")
         storageClass = {
           name: facts.storage_class_name,
           allowVolumeExpansion: expansion === true ? true : expansion === false ? false
             : Object.hasOwn(entry, "allowVolumeExpansion") ? null : false,
-          provisioner: typeof entry.provisioner === "string" ? entry.provisioner : null,
+          provisioner: null,
         }
       }
     } catch (error) {

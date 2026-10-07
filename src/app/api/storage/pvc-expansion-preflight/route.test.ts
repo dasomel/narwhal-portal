@@ -137,7 +137,8 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     vi.mocked(getStorageClass).mockResolvedValue({
       ...(allowVolumeExpansion === undefined ? {} : { allowVolumeExpansion }),
       provisioner: "SECRET-SC-PROVISIONER", parameters: { token: "SECRET-SC-PARAM" },
-      metadata: { annotations: { token: "SECRET-SC-ANNOTATION" } },
+      kind: "StorageClass",
+      metadata: { name: "standard", annotations: { token: "SECRET-SC-ANNOTATION" } },
     })
     const res = await POST(request())
     expect(res.status).toBe(200)
@@ -168,7 +169,18 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     }
   })
 
-  it.each([null, [], "secret", 1, { allowVolumeExpansion: "true" }, { allowVolumeExpansion: 1 }, { allowVolumeExpansion: null }])("keeps malformed class unknown %j", async (value) => {
+  it.each([
+    null, [], "secret", 1, {},
+    { kind: "Status", metadata: { name: "standard" }, status: "Success" },
+    { kind: "StorageClass", metadata: { name: "other" } },
+    { kind: "StorageClass" },
+    Object.create({ kind: "StorageClass", metadata: { name: "standard" } }),
+    { kind: "StorageClass", metadata: Object.create({ name: "standard" }) },
+    Object.assign(Object.create({ metadata: { name: "standard" } }), { kind: "StorageClass" }),
+    ...["true", 1, null].map((allowVolumeExpansion) => ({
+      kind: "StorageClass", metadata: { name: "standard" }, allowVolumeExpansion,
+    })),
+  ])("keeps malformed class unknown %j", async (value) => {
     vi.mocked(getStorageClass).mockResolvedValue(value)
     expect(await (await POST(request())).json()).toMatchObject({ verdict: "needs-evidence",
       reasons: ["class-unknown", "quota-evidence-missing"],
@@ -195,8 +207,10 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     vi.mocked(getPersistentVolumeClaim).mockResolvedValue({
       spec: { storageClassName }, status: { capacity: { storage: current }, phase, conditions },
     })
-    for (const expansion of [true, false, null, undefined]) {
-      vi.mocked(getStorageClass).mockResolvedValue({ allowVolumeExpansion: expansion })
+    for (const expansion of [true, false, null]) {
+      vi.mocked(getStorageClass).mockResolvedValue({
+        kind: "StorageClass", metadata: { name: storageClassName }, allowVolumeExpansion: expansion,
+      })
       const res = await POST(request())
       expect(res.status).toBe(200)
       const result = await res.json()
