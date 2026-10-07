@@ -36,6 +36,9 @@ function quotaHeadroom(raw: unknown, className: string | null): string | null {
       [`${className}.storageclass.storage.k8s.io/requests.storage`])]
     let minimum: bigint | null = null
     for (const item of items) {
+      // D10: unreadable items may hide a tighter quota; lose availability until
+      // a complete readable list is available rather than overstate headroom.
+      if (item === null || typeof item !== "object" || Array.isArray(item)) return null
       const entry = record(item)
       const status = record(entry.status)
       const hard = status.hard

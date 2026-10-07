@@ -354,6 +354,7 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
 
   it.each([
     quota({ "requests.storage": "20Gi" }, {}),
+    quota({}, { "requests.storage": "10Gi" }),
     quota({ "requests.storage": "invalid" }),
     quota({ "requests.storage": "20Gi" }, { "requests.storage": "invalid" }),
     quota({ "requests.storage": "20Gi", cpu: 2 }),
@@ -367,8 +368,49 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     })
   })
 
+  it.each([null, 1, "unreadable", []])("unreadable quota item poisons good evidence %j", async (item) => {
+    expect(await withQuotas(quotaList([quota(), item]))).toMatchObject({
+      facts: { quota_headroom_bytes_text: null }, evidence_gaps: ["quota", "limit-range"], reasons: ["quota-evidence-missing"],
+    })
+  })
+
+  it("computes a dotted class-specific key", async () => {
+    vi.mocked(getPersistentVolumeClaim).mockResolvedValue({ ...pvc(), spec: { storageClassName: "fast.ssd" } })
+    const key = "fast.ssd.storageclass.storage.k8s.io/requests.storage"
+    expect(await withQuotas(quotaList([quota({ [key]: "30Gi" }, { [key]: "10Gi" })]))).toMatchObject({
+      facts: { storage_class_name: "fast.ssd", quota_headroom_bytes_text: "21474836480" },
+    })
+  })
+
+  it.each([
+    ["1.5Gi", "1Gi", "536870912"],
+    ["2Gi", "1.5Gi", "536870912"],
+    ["1.5Gi", "1.5Gi", "0"],
+  ])("computes exact fractional bytes for hard %s and used %s", async (hard, used, bytes) => {
+    expect(await withQuotas(quotaList([quota({ "requests.storage": hard }, { "requests.storage": used })]))).toMatchObject({
+      facts: { quota_headroom_bytes_text: bytes }, evidence_gaps: ["limit-range"],
+    })
+  })
+
+  it.each(["1m", "-1Gi", "1e3"])("rejects covering quantity %s in hard or used", async (quantity) => {
+    for (const item of [
+      quota({ "requests.storage": quantity }),
+      quota({ "requests.storage": "40Gi" }, { "requests.storage": quantity }),
+    ]) {
+      expect(await withQuotas(quotaList([quota(), item]))).toMatchObject({
+        facts: { quota_headroom_bytes_text: null }, evidence_gaps: ["quota", "limit-range"],
+      })
+    }
+  })
+
+  it("skips an item without status.hard when it has no covering key", async () => {
+    expect(await withQuotas(quotaList([{ status: { used: { cpu: "1" } } }, quota()]))).toMatchObject({
+      facts: { quota_headroom_bytes_text: "32212254720" }, evidence_gaps: ["limit-range"],
+    })
+  })
+
   it("no covering key is unknown, never unlimited", async () => {
-    expect(await withQuotas(quotaList([quota({ cpu: "4" }, { cpu: "1" }), null]))).toMatchObject({
+    expect(await withQuotas(quotaList([quota({ cpu: "4" }, { cpu: "1" })]))).toMatchObject({
       facts: { quota_headroom_bytes_text: null }, evidence_gaps: ["quota", "limit-range"], reasons: ["quota-evidence-missing"],
     })
   })
