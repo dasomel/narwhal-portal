@@ -78,6 +78,8 @@ export function canonicalizeJson(value: unknown): string | null {
       if (keys.some((key) => typeof key !== "string" || key === "__proto__")) throw new Error("key")
       const descriptors = Object.getOwnPropertyDescriptors(input)
       if (Object.values(descriptors).some((d) => !Object.hasOwn(d, "value"))) throw new Error("accessor")
+      // D5: Reject hidden args to match executor JSON visibility; costs hidden metadata. Make it enumerable to opt in; array length is structural.
+      if (Object.entries(descriptors).some(([key, d]) => !(array && key === "length") && d.enumerable !== true)) throw new Error("non-enumerable")
       active.add(input)
       let result: string
       if (array) {
@@ -225,6 +227,7 @@ export function authorizeInvocation(input: InvocationAuthzInput): { decision: "a
 }
 
 /** risk MUST be the value returned by authorizeInvocation, never caller/model supplied. */
+// expectedInvocationDigest MUST be the digest returned by authorizeInvocation for this call, never caller-supplied.
 export function evaluateMutationOutcome(input: unknown): { status: "verified-success" | "unverified" | "failed" | "invalid"; reasons: string[] } {
   const result = (status: "verified-success" | "unverified" | "failed" | "invalid", reason?: string) => ({ status, reasons: reason ? [reason] : [] })
   try {

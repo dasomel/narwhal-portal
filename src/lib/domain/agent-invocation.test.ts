@@ -26,6 +26,17 @@ describe("canonicalization", () => {
     [Object.assign(Object.create(null), { x: 1 }), '{"x":1}'],
     [{ "\uE000": 1, "😀": 2 }, '{"😀":2,"":1}'],
   ])("serializes %j", (value, expected) => { expect(canonicalizeJson(value)).toBe(expected) })
+  it.each([
+    Object.defineProperty({ a: 1 }, "b", { value: 2, enumerable: false }),
+    Object.defineProperty([1, 2], "1", { value: 2, enumerable: false }),
+    Object.defineProperty([1], "extra", { value: 2, enumerable: false }),
+  ])("rejects non-enumerable own properties %#", (value) => {
+    expect(canonicalizeJson(value)).toBeNull()
+  })
+  it("accepts ordinary enumerable own properties", () => {
+    expect(canonicalizeJson(Object.defineProperty({ a: 1 }, "b", { value: 2, enumerable: true }))).toBe('{"a":1,"b":2}')
+    expect(canonicalizeJson([1, 2])).toBe("[1,2]")
+  })
   const cycle: Record<string, unknown> = {}
   cycle.self = cycle
   class Custom { x = 1 }
@@ -117,7 +128,7 @@ describe("authorization", () => {
     [auth({ resolution: { ...resolved, normalizedArgs: {} } }), "args-schema"],
     [auth({ resolution: { ...resolved, normalizedArgs: { name: "a", extra: true } } }), "args-schema"],
     [auth({ resolution: { ...resolved, normalizedArgs: [] } }), "args-schema"],
-    [auth({ resolution: { ...resolved, normalizedArgs: Object.defineProperty({ name: "app" }, "extra", { value: true }) } }), "args-schema"],
+    [auth({ resolution: { ...resolved, normalizedArgs: Object.defineProperty({ name: "app" }, "extra", { value: true }) } }), "digest-invalid"],
     [auth({ now: new Date(NaN) }), "digest-invalid"],
   ])("denies %#", (value, reason) => { expect(authorizeInvocation(value)).toMatchObject({ decision: "deny", reasons: [reason] }) })
   it.each(["read-only", "mutating", "destructive"] as const)("applies registry risk %s", (risk) => {
