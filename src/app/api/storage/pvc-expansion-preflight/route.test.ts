@@ -5,6 +5,7 @@ vi.mock("@/lib/k8s-client", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/k8s-client")>(),
   getPersistentVolumeClaim: vi.fn(),
   getStorageClass: vi.fn(),
+  getResourceQuotas: vi.fn(),
 }))
 vi.mock("@/lib/scope", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/scope")>(),
@@ -12,7 +13,7 @@ vi.mock("@/lib/scope", async (importOriginal) => ({
 }))
 
 const { requireRole } = await import("@/lib/auth")
-const { getPersistentVolumeClaim, getStorageClass, K8sHttpError } = await import("@/lib/k8s-client")
+const { getPersistentVolumeClaim, getResourceQuotas, getStorageClass, K8sHttpError } = await import("@/lib/k8s-client")
 const { getEffectiveScope } = await import("@/lib/scope")
 const { POST } = await import("./route")
 const { DEFAULT_CLUSTER_ID } = await import("@/types/cluster")
@@ -47,6 +48,7 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     expect(requireRole).toHaveBeenCalledWith("cluster-admin", "developer")
     expect(getEffectiveScope).not.toHaveBeenCalled()
     expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getResourceQuotas).not.toHaveBeenCalled()
     expect(getStorageClass).not.toHaveBeenCalled()
   })
 
@@ -66,12 +68,14 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     expect(await res.json()).toEqual({ error: "Invalid request" })
     expect(getEffectiveScope).not.toHaveBeenCalled()
     expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getResourceQuotas).not.toHaveBeenCalled()
     expect(getStorageClass).not.toHaveBeenCalled()
   })
 
   it("rejects malformed JSON", async () => {
     expect((await POST(new Request("http://localhost", { method: "POST", body: "{" }))).status).toBe(400)
     expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getResourceQuotas).not.toHaveBeenCalled()
     expect(getStorageClass).not.toHaveBeenCalled()
   })
 
@@ -81,6 +85,7 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     expect(await res.json()).toEqual({ error: "Forbidden" })
     expect(getEffectiveScope).not.toHaveBeenCalled()
     expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getResourceQuotas).not.toHaveBeenCalled()
     expect(getStorageClass).not.toHaveBeenCalled()
   })
 
@@ -89,6 +94,7 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ error: "Forbidden" })
     expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getResourceQuotas).not.toHaveBeenCalled()
     expect(getStorageClass).not.toHaveBeenCalled()
   })
 
@@ -110,7 +116,8 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
       expect(await res.json()).toEqual({ error: "Cluster unavailable" })
       expect(log).toHaveBeenCalledWith("PVC expansion preflight cluster lookup failed", error)
       if (lookup === "scope") expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
-    expect(getStorageClass).not.toHaveBeenCalled()
+      expect(getResourceQuotas).not.toHaveBeenCalled()
+      expect(getStorageClass).not.toHaveBeenCalled()
     } finally {
       log.mockRestore()
     }
@@ -122,8 +129,8 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     expect(await res.json()).toEqual({
       verdict: "needs-evidence", reasons: ["class-unknown", "quota-evidence-missing"],
       namespace: input.namespace, pvc_name: input.pvc_name,
-      facts: { current_bytes_text: "10Gi", storage_class_name: "standard", expansion_supported: null, phase: "Bound", resize_in_progress: false },
-      evidence_gaps: ["storage-class", "quota"],
+      facts: { quota_headroom_bytes_text: null, current_bytes_text: "10Gi", storage_class_name: "standard", expansion_supported: null, phase: "Bound", resize_in_progress: false },
+      evidence_gaps: ["storage-class", "quota", "limit-range"],
     })
     expect(getPersistentVolumeClaim).toHaveBeenCalledExactlyOnceWith(input.namespace, input.pvc_name)
     expect(getEffectiveScope).toHaveBeenCalledWith(expect.objectContaining({ teams: ["team-a"] }), DEFAULT_CLUSTER_ID)
@@ -143,7 +150,7 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     const res = await POST(request())
     expect(res.status).toBe(200)
     const result = await res.json()
-    expect(result).toMatchObject({ verdict, reasons, evidence_gaps: ["quota"],
+    expect(result).toMatchObject({ verdict, reasons, evidence_gaps: ["quota", "limit-range"],
       facts: { expansion_supported: allowVolumeExpansion === true } })
     expect(result.verdict).not.toBe("allowed")
     expect(getStorageClass).toHaveBeenCalledExactlyOnceWith("standard")
@@ -162,7 +169,7 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
       expect(res.status).toBe(200)
       expect(await res.json()).toMatchObject({ verdict: "needs-evidence",
         reasons: ["class-unknown", "quota-evidence-missing"],
-        evidence_gaps: ["storage-class", "quota"], facts: { expansion_supported: null } })
+        evidence_gaps: ["storage-class", "quota", "limit-range"], facts: { expansion_supported: null } })
       expect(log).toHaveBeenCalled()
     } finally {
       log.mockRestore()
@@ -184,13 +191,13 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     vi.mocked(getStorageClass).mockResolvedValue(value)
     expect(await (await POST(request())).json()).toMatchObject({ verdict: "needs-evidence",
       reasons: ["class-unknown", "quota-evidence-missing"],
-      evidence_gaps: ["storage-class", "quota"], facts: { expansion_supported: null } })
+      evidence_gaps: ["storage-class", "quota", "limit-range"], facts: { expansion_supported: null } })
   })
 
   it.each([undefined, null, "", "UPPER", "bad/name", "standard\n", "a".repeat(254), 1, {}])("does not request absent or invalid class %j", async (storageClassName) => {
     vi.mocked(getPersistentVolumeClaim).mockResolvedValue({ ...pvc(), spec: { storageClassName } })
     expect(await (await POST(request())).json()).toMatchObject({
-      verdict: "needs-evidence", evidence_gaps: ["storage-class", "quota"],
+      verdict: "needs-evidence", evidence_gaps: ["storage-class", "quota", "limit-range"],
       facts: { storage_class_name: null, expansion_supported: null },
     })
     expect(getStorageClass).not.toHaveBeenCalled()
@@ -288,4 +295,108 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
       verdict: "blocked", reasons: expect.arrayContaining(["requested-unparseable"]),
     })
   })
+
+  function quota(hard: unknown = { "requests.storage": "40Gi" }, used: unknown = { "requests.storage": "10Gi" }) {
+    return { status: { hard, used } }
+  }
+  function quotaList(items: unknown[] = [quota()]) {
+    return { kind: "ResourceQuotaList", items }
+  }
+  async function withQuotas(value: unknown) {
+    vi.mocked(getStorageClass).mockResolvedValue({
+      kind: "StorageClass", metadata: { name: "standard" }, allowVolumeExpansion: true,
+    })
+    vi.mocked(getResourceQuotas).mockResolvedValue(value)
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const result = await res.json()
+    expect(result.verdict).not.toBe("allowed")
+    expect(result.evidence_gaps).toContain("limit-range")
+    return result
+  }
+
+  it.each([
+    ["40Gi", "needs-evidence", "32212254720"],
+    ["20Gi", "needs-evidence", "10737418240"],
+    ["19Gi", "blocked", "9663676416"],
+    ["9Gi", "blocked", "0"],
+  ])("computes covering headroom with hard %s", async (hard, verdict, bytes) => {
+    const result = await withQuotas(quotaList([quota({ "requests.storage": hard })]))
+    expect(result).toMatchObject({ verdict, facts: { quota_headroom_bytes_text: bytes }, evidence_gaps: ["limit-range"] })
+    expect(result.reasons).toEqual(verdict === "blocked" ? ["exceeds-quota-headroom"] : ["unread-constraints"])
+    expect(getResourceQuotas).toHaveBeenCalledExactlyOnceWith(input.namespace)
+    expect(vi.mocked(getPersistentVolumeClaim).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(getResourceQuotas).mock.invocationCallOrder[0])
+    expect(vi.mocked(getStorageClass).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(getResourceQuotas).mock.invocationCallOrder[0])
+  })
+
+  it("computes headroom from only the validated class-specific key", async () => {
+    const key = "standard.storageclass.storage.k8s.io/requests.storage"
+    expect(await withQuotas(quotaList([quota({ [key]: "30Gi" }, { [key]: "10Gi" })]))).toMatchObject({
+      verdict: "needs-evidence", reasons: ["unread-constraints"], facts: { quota_headroom_bytes_text: "21474836480" },
+    })
+  })
+
+  it("does not apply another class quota when the PVC class is unknown", async () => {
+    vi.mocked(getPersistentVolumeClaim).mockResolvedValue({ ...pvc(), spec: {} })
+    const key = "standard.storageclass.storage.k8s.io/requests.storage"
+    expect(await withQuotas(quotaList([quota({ [key]: "30Gi" }, { [key]: "10Gi" })]))).toMatchObject({
+      facts: { quota_headroom_bytes_text: null }, evidence_gaps: ["storage-class", "quota", "limit-range"],
+    })
+  })
+
+  it("uses the class-specific key and the minimum across quotas and keys", async () => {
+    const key = "standard.storageclass.storage.k8s.io/requests.storage"
+    const result = await withQuotas(quotaList([
+      quota(), quota({ [key]: "15Gi", "requests.storage": "30Gi" }, { [key]: "10Gi", "requests.storage": "10Gi" }),
+    ]))
+    expect(result).toMatchObject({ verdict: "blocked", reasons: ["exceeds-quota-headroom"], facts: { quota_headroom_bytes_text: "5368709120" } })
+  })
+
+  it.each([
+    quota({ "requests.storage": "20Gi" }, {}),
+    quota({ "requests.storage": "invalid" }),
+    quota({ "requests.storage": "20Gi" }, { "requests.storage": "invalid" }),
+    quota({ "requests.storage": "20Gi", cpu: 2 }),
+    quota({ "requests.storage": "20Gi" }, null),
+    quota(Object.create({ "requests.storage": "20Gi" })),
+    { status: Object.create({ hard: { "requests.storage": "20Gi" }, used: { "requests.storage": "10Gi" } }) },
+    quota(Object.assign([], { "requests.storage": "20Gi" })),
+  ])("invalid covering quota poisons otherwise good evidence %j", async (item) => {
+    expect(await withQuotas(quotaList([quota(), item]))).toMatchObject({
+      facts: { quota_headroom_bytes_text: null }, evidence_gaps: ["quota", "limit-range"], reasons: ["quota-evidence-missing"],
+    })
+  })
+
+  it("no covering key is unknown, never unlimited", async () => {
+    expect(await withQuotas(quotaList([quota({ cpu: "4" }, { cpu: "1" }), null]))).toMatchObject({
+      facts: { quota_headroom_bytes_text: null }, evidence_gaps: ["quota", "limit-range"], reasons: ["quota-evidence-missing"],
+    })
+  })
+
+  it.each([
+    [], {}, null, { kind: "Status", items: [quota()] },
+    { kind: "ResourceQuotaList", items: {} },
+    { ...quotaList(), metadata: { continue: "next-page" } },
+    { ...quotaList(), metadata: { continue: "" } },
+    Object.create(quotaList()),
+  ])("rejects unidentified or incomplete quota lists %j", async (value) => {
+    expect(await withQuotas(value)).toMatchObject({ facts: { quota_headroom_bytes_text: null }, evidence_gaps: ["quota", "limit-range"] })
+  })
+
+  it.each([403, 404, 500, "throw"])("quota read failure %s still returns 200", async (failure) => {
+    vi.mocked(getResourceQuotas).mockRejectedValue(typeof failure === "number" ? new K8sHttpError(failure, "secret") : new Error("secret"))
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ facts: { quota_headroom_bytes_text: null }, evidence_gaps: ["storage-class", "quota", "limit-range"] })
+  })
+
+  it("does not leak quota names, maps, items or unrelated tenant keys", async () => {
+    const secret = "SECRET-OTHER-TENANT-QUOTA-793"
+    const result = await withQuotas(quotaList([
+      { ...quota(), metadata: { name: secret } }, quota({ [secret]: "40Gi" }, { [secret]: "10Gi" }),
+    ]))
+    expect(result.facts.quota_headroom_bytes_text).toBe("32212254720")
+    for (const text of [secret, '"hard"', '"used"', '"items"', '"metadata"']) expect(JSON.stringify(result)).not.toContain(text)
+  })
+
 })

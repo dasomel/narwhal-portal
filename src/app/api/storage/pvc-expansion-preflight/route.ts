@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { evaluatePvcExpansion, parseStorageQuantity, type StorageClassFacts } from "@/lib/domain/storage"
-import { getPersistentVolumeClaim, getStorageClass, K8sHttpError } from "@/lib/k8s-client"
+import { getPersistentVolumeClaim, getResourceQuotas, getStorageClass, K8sHttpError } from "@/lib/k8s-client"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 
@@ -15,6 +15,58 @@ function record(value: unknown): Record<string, unknown> {
 
 function own(value: Record<string, unknown>, key: string): unknown {
   return Object.hasOwn(value, key) ? value[key] : undefined
+}
+
+function stringMap(value: unknown): value is Record<string, string> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return (prototype === Object.prototype || prototype === null) &&
+    Object.values(value).every((entry) => typeof entry === "string")
+}
+
+function quotaHeadroom(raw: unknown, className: string | null): string | null {
+  // D7: only an identified, complete list proves quota evidence; malformed or
+  // truncated reads cost availability. Revisit with a pagination contract.
+  try {
+    const list = record(raw)
+    const items = own(list, "items")
+    if (own(list, "kind") !== "ResourceQuotaList" || !Array.isArray(items) ||
+      Object.hasOwn(record(own(list, "metadata")), "continue")) return null
+    const keys = ["requests.storage", ...(className === null ? [] :
+      [`${className}.storageclass.storage.k8s.io/requests.storage`])]
+    let minimum: bigint | null = null
+    for (const item of items) {
+      const entry = record(item)
+      const status = record(entry.status)
+      const hard = status.hard
+      const used = status.used
+      // Check mentions before shape validation so a malformed covering quota
+      // cannot be skipped in favor of another quota with ample headroom.
+      const mentions = (value: unknown, key: string) => value !== null &&
+        typeof value === "object" && key in value
+      const covering = keys.some((key) => mentions(hard, key) || mentions(used, key))
+      if (!covering) continue
+      if (!Object.hasOwn(entry, "status") || !Object.hasOwn(status, "hard") ||
+        !Object.hasOwn(status, "used") || !stringMap(hard) || !stringMap(used)) return null
+      for (const key of keys) {
+        if (!Object.hasOwn(hard, key)) {
+          if (key in hard || key in used) return null
+          continue
+        }
+        const limit = parseStorageQuantity(hard[key])
+        const consumed = parseStorageQuantity(own(used, key))
+        if (limit === null || consumed === null) return null
+        const remaining = limit > consumed ? limit - consumed : BigInt("0")
+        if (minimum === null || remaining < minimum) minimum = remaining
+      }
+    }
+    // D8: no covering key is unknown: the domain cannot express unlimited,
+    // and other admission constraints exist. Extend the domain to change this.
+    const text = minimum === null ? null : minimum.toString()
+    return parseStorageQuantity(text) === null ? null : text
+  } catch {
+    return null
+  }
 }
 
 export async function POST(req: Request) {
@@ -114,20 +166,35 @@ export async function POST(req: Request) {
       console.error("PVC expansion preflight StorageClass lookup failed", error)
     }
   }
-  // D3: quota remains unread: absence of a ResourceQuota cannot yet be
-  // represented in the domain model. This costs availability until that model changes.
+  let quotaHeadroomBytes: string | null = null
+  try {
+    quotaHeadroomBytes = quotaHeadroom(await getResourceQuotas(body.namespace), facts.storage_class_name)
+  } catch {
+    // Failed quota reads provide no evidence; do not expose upstream details.
+  }
+  // D9: LimitRange max.storage and PV backend limits remain unread. This
+  // costs an allowed verdict until those constraints have verified readers.
+  const evidenceGaps = [
+    ...(storageClass?.allowVolumeExpansion === true || storageClass?.allowVolumeExpansion === false
+      ? [] : ["storage-class"]),
+    ...(quotaHeadroomBytes === null ? ["quota"] : []),
+    "limit-range",
+  ]
   const result = evaluatePvcExpansion({
     currentBytes: facts.current_bytes_text,
     requestedBytes: body.requested_size,
     boundPhase: facts.phase,
     resizeInProgress: facts.resize_in_progress,
     storageClass,
-    quotaHeadroomBytes: null,
+    quotaHeadroomBytes,
   })
   return NextResponse.json({
-    ...result, namespace: body.namespace, pvc_name: body.pvc_name,
-    facts: { ...facts, expansion_supported: storageClass?.allowVolumeExpansion ?? null },
-    evidence_gaps: storageClass?.allowVolumeExpansion === true || storageClass?.allowVolumeExpansion === false
-      ? ["quota"] : ["storage-class", "quota"],
+    ...result,
+    verdict: result.verdict === "allowed" && evidenceGaps.length > 0 ? "needs-evidence" : result.verdict,
+    reasons: result.verdict === "allowed" && evidenceGaps.length > 0
+      ? [...result.reasons, "unread-constraints"] : result.reasons,
+    namespace: body.namespace, pvc_name: body.pvc_name,
+    facts: { ...facts, quota_headroom_bytes_text: quotaHeadroomBytes, expansion_supported: storageClass?.allowVolumeExpansion ?? null },
+    evidence_gaps: evidenceGaps,
   })
 }
