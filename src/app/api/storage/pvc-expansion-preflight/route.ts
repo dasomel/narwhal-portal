@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
-import { evaluatePvcExpansion, parseStorageQuantity } from "@/lib/domain/storage"
-import { getPersistentVolumeClaim, K8sHttpError } from "@/lib/k8s-client"
+import { evaluatePvcExpansion, parseStorageQuantity, type StorageClassFacts } from "@/lib/domain/storage"
+import { getPersistentVolumeClaim, getStorageClass, K8sHttpError } from "@/lib/k8s-client"
 import { getEffectiveScope, namespaceVisible } from "@/lib/scope"
 import { DEFAULT_CLUSTER_ID } from "@/types/cluster"
 
@@ -11,6 +11,10 @@ const PVC_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : {}
+}
+
+function own(value: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(value, key) ? value[key] : undefined
 }
 
 export async function POST(req: Request) {
@@ -86,19 +90,44 @@ export async function POST(req: Request) {
     phase: typeof phase === "string" && ["Pending", "Bound", "Lost"].includes(phase) ? phase : null,
     resize_in_progress: resizing ? true : validConditions ? false : null,
   }
-  // D3: ../narwhal/gitops/charts/narwhal-platform/templates/narwhal-portal-k8s.yaml
-  // grants PVC reads but no storage.k8s.io/storageclasses or resourcequotas reads.
-  // This costs evidence; adding RBAC + reading those resources is a follow-up.
+  let storageClass: StorageClassFacts | null = null
+  if (facts.storage_class_name !== null) {
+    try {
+      const raw: unknown = await getStorageClass(facts.storage_class_name)
+      const entry = record(raw)
+      const metadata = record(own(entry, "metadata"))
+      // D5: only a positively identified class supplies facts; other shapes cost
+      // evidence. Relax this guard only if the upstream resource contract changes.
+      if (own(entry, "kind") === "StorageClass" && own(metadata, "name") === facts.storage_class_name) {
+        // Kubernetes defaults an absent expansion field to false on this class.
+        const expansion = own(entry, "allowVolumeExpansion")
+        storageClass = {
+          name: facts.storage_class_name,
+          allowVolumeExpansion: expansion === true ? true : expansion === false ? false
+            : Object.hasOwn(entry, "allowVolumeExpansion") ? null : false,
+          provisioner: null,
+        }
+      }
+    } catch (error) {
+      // D6: unavailable class reads cost evidence, never the whole preflight.
+      // narwhal#315 owns RBAC synchronization; retry via a later request.
+      console.error("PVC expansion preflight StorageClass lookup failed", error)
+    }
+  }
+  // D3: quota remains unread: absence of a ResourceQuota cannot yet be
+  // represented in the domain model. This costs availability until that model changes.
   const result = evaluatePvcExpansion({
     currentBytes: facts.current_bytes_text,
     requestedBytes: body.requested_size,
     boundPhase: facts.phase,
     resizeInProgress: facts.resize_in_progress,
-    storageClass: null,
+    storageClass,
     quotaHeadroomBytes: null,
   })
   return NextResponse.json({
     ...result, namespace: body.namespace, pvc_name: body.pvc_name,
-    facts, evidence_gaps: ["storage-class", "quota"],
+    facts: { ...facts, expansion_supported: storageClass?.allowVolumeExpansion ?? null },
+    evidence_gaps: storageClass?.allowVolumeExpansion === true || storageClass?.allowVolumeExpansion === false
+      ? ["quota"] : ["storage-class", "quota"],
   })
 }

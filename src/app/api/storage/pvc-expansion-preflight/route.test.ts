@@ -4,6 +4,7 @@ vi.mock("@/lib/auth", () => ({ requireRole: vi.fn() }))
 vi.mock("@/lib/k8s-client", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/k8s-client")>(),
   getPersistentVolumeClaim: vi.fn(),
+  getStorageClass: vi.fn(),
 }))
 vi.mock("@/lib/scope", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/scope")>(),
@@ -11,7 +12,7 @@ vi.mock("@/lib/scope", async (importOriginal) => ({
 }))
 
 const { requireRole } = await import("@/lib/auth")
-const { getPersistentVolumeClaim, K8sHttpError } = await import("@/lib/k8s-client")
+const { getPersistentVolumeClaim, getStorageClass, K8sHttpError } = await import("@/lib/k8s-client")
 const { getEffectiveScope } = await import("@/lib/scope")
 const { POST } = await import("./route")
 const { DEFAULT_CLUSTER_ID } = await import("@/types/cluster")
@@ -46,6 +47,7 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     expect(requireRole).toHaveBeenCalledWith("cluster-admin", "developer")
     expect(getEffectiveScope).not.toHaveBeenCalled()
     expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getStorageClass).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -64,11 +66,13 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     expect(await res.json()).toEqual({ error: "Invalid request" })
     expect(getEffectiveScope).not.toHaveBeenCalled()
     expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getStorageClass).not.toHaveBeenCalled()
   })
 
   it("rejects malformed JSON", async () => {
     expect((await POST(new Request("http://localhost", { method: "POST", body: "{" }))).status).toBe(400)
     expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getStorageClass).not.toHaveBeenCalled()
   })
 
   it("denies a cluster mismatch without echoing it", async () => {
@@ -77,6 +81,7 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     expect(await res.json()).toEqual({ error: "Forbidden" })
     expect(getEffectiveScope).not.toHaveBeenCalled()
     expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getStorageClass).not.toHaveBeenCalled()
   })
 
   it("denies an out-of-scope namespace before any PVC read", async () => {
@@ -84,6 +89,7 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ error: "Forbidden" })
     expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getStorageClass).not.toHaveBeenCalled()
   })
 
   it("returns 404 only for an in-scope PVC lookup", async () => {
@@ -104,6 +110,7 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
       expect(await res.json()).toEqual({ error: "Cluster unavailable" })
       expect(log).toHaveBeenCalledWith("PVC expansion preflight cluster lookup failed", error)
       if (lookup === "scope") expect(getPersistentVolumeClaim).not.toHaveBeenCalled()
+    expect(getStorageClass).not.toHaveBeenCalled()
     } finally {
       log.mockRestore()
     }
@@ -115,11 +122,78 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     expect(await res.json()).toEqual({
       verdict: "needs-evidence", reasons: ["class-unknown", "quota-evidence-missing"],
       namespace: input.namespace, pvc_name: input.pvc_name,
-      facts: { current_bytes_text: "10Gi", storage_class_name: "standard", phase: "Bound", resize_in_progress: false },
+      facts: { current_bytes_text: "10Gi", storage_class_name: "standard", expansion_supported: null, phase: "Bound", resize_in_progress: false },
       evidence_gaps: ["storage-class", "quota"],
     })
     expect(getPersistentVolumeClaim).toHaveBeenCalledExactlyOnceWith(input.namespace, input.pvc_name)
     expect(getEffectiveScope).toHaveBeenCalledWith(expect.objectContaining({ teams: ["team-a"] }), DEFAULT_CLUSTER_ID)
+  })
+
+  it.each([
+    [true, "needs-evidence", ["quota-evidence-missing"]],
+    [false, "blocked", ["class-expansion-unsupported", "quota-evidence-missing"]],
+    [undefined, "blocked", ["class-expansion-unsupported", "quota-evidence-missing"]],
+  ])("handles readable expansion field %j", async (allowVolumeExpansion, verdict, reasons) => {
+    vi.mocked(getStorageClass).mockResolvedValue({
+      ...(allowVolumeExpansion === undefined ? {} : { allowVolumeExpansion }),
+      provisioner: "SECRET-SC-PROVISIONER", parameters: { token: "SECRET-SC-PARAM" },
+      kind: "StorageClass",
+      metadata: { name: "standard", annotations: { token: "SECRET-SC-ANNOTATION" } },
+    })
+    const res = await POST(request())
+    expect(res.status).toBe(200)
+    const result = await res.json()
+    expect(result).toMatchObject({ verdict, reasons, evidence_gaps: ["quota"],
+      facts: { expansion_supported: allowVolumeExpansion === true } })
+    expect(result.verdict).not.toBe("allowed")
+    expect(getStorageClass).toHaveBeenCalledExactlyOnceWith("standard")
+    expect(vi.mocked(getPersistentVolumeClaim).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(getStorageClass).mock.invocationCallOrder[0])
+    for (const secret of ["SECRET-SC-PROVISIONER", "SECRET-SC-PARAM", "SECRET-SC-ANNOTATION", "parameters", "annotations", "provisioner"]) {
+      expect(JSON.stringify(result)).not.toContain(secret)
+    }
+  })
+
+  it.each([403, 404, 500, "throw"])("keeps class unknown on read failure %s", async (failure) => {
+    const error = typeof failure === "number" ? new K8sHttpError(failure, "secret") : new Error("secret")
+    vi.mocked(getStorageClass).mockRejectedValue(error)
+    const log = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const res = await POST(request())
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ verdict: "needs-evidence",
+        reasons: ["class-unknown", "quota-evidence-missing"],
+        evidence_gaps: ["storage-class", "quota"], facts: { expansion_supported: null } })
+      expect(log).toHaveBeenCalled()
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it.each([
+    null, [], "secret", 1, {},
+    { kind: "Status", metadata: { name: "standard" }, status: "Success" },
+    { kind: "StorageClass", metadata: { name: "other" } },
+    { kind: "StorageClass" },
+    Object.create({ kind: "StorageClass", metadata: { name: "standard" } }),
+    { kind: "StorageClass", metadata: Object.create({ name: "standard" }) },
+    Object.assign(Object.create({ metadata: { name: "standard" } }), { kind: "StorageClass" }),
+    ...["true", 1, null].map((allowVolumeExpansion) => ({
+      kind: "StorageClass", metadata: { name: "standard" }, allowVolumeExpansion,
+    })),
+  ])("keeps malformed class unknown %j", async (value) => {
+    vi.mocked(getStorageClass).mockResolvedValue(value)
+    expect(await (await POST(request())).json()).toMatchObject({ verdict: "needs-evidence",
+      reasons: ["class-unknown", "quota-evidence-missing"],
+      evidence_gaps: ["storage-class", "quota"], facts: { expansion_supported: null } })
+  })
+
+  it.each([undefined, null, "", "UPPER", "bad/name", "standard\n", "a".repeat(254), 1, {}])("does not request absent or invalid class %j", async (storageClassName) => {
+    vi.mocked(getPersistentVolumeClaim).mockResolvedValue({ ...pvc(), spec: { storageClassName } })
+    expect(await (await POST(request())).json()).toMatchObject({
+      verdict: "needs-evidence", evidence_gaps: ["storage-class", "quota"],
+      facts: { storage_class_name: null, expansion_supported: null },
+    })
+    expect(getStorageClass).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -129,15 +203,20 @@ describe("POST /api/storage/pvc-expansion-preflight", () => {
     ["10Gi", "standard", "Bound", [{ type: "Resizing", status: "True" }]],
     ["garbage", "standard", "Bound", null],
     [null, null, null, []],
-  ])("never allows expansion with unread class/quota: %j %j %j", async (current, storageClassName, phase, conditions) => {
+  ])("never allows expansion with unread quota: %j %j %j", async (current, storageClassName, phase, conditions) => {
     vi.mocked(getPersistentVolumeClaim).mockResolvedValue({
       spec: { storageClassName }, status: { capacity: { storage: current }, phase, conditions },
     })
-    const res = await POST(request())
-    expect(res.status).toBe(200)
-    const result = await res.json()
-    expect(result.verdict).not.toBe("allowed")
-    expect(result.evidence_gaps).toEqual(["storage-class", "quota"])
+    for (const expansion of [true, false, null]) {
+      vi.mocked(getStorageClass).mockResolvedValue({
+        kind: "StorageClass", metadata: { name: storageClassName }, allowVolumeExpansion: expansion,
+      })
+      const res = await POST(request())
+      expect(res.status).toBe(200)
+      const result = await res.json()
+      expect(result.verdict).not.toBe("allowed")
+      expect(result.evidence_gaps).toContain("quota")
+    }
   })
 
   it.each([
