@@ -57,6 +57,18 @@ export function reconcileExecutingCrash(current: RestoreApprovalState, expectedV
   return compareAndSetRestoreState(current, expectedVersion, "reconciling")
 }
 
+export const REQUIRED_RESTORE_PREFLIGHT_CHECKS = [
+  "request-scope",
+  "backup-status",
+  "target-conflicts",
+  "storage",
+  "secret-identity",
+  "version-compatibility",
+  "capacity",
+  "rpo-rto",
+  "integrity",
+] as const
+
 export type RestoreCheckStatus = "pass" | "fail" | "warning" | "unknown"
 export type RestorePreflightVerdict = "ready" | "needs-evidence" | "blocked"
 
