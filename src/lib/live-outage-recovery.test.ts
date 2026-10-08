@@ -127,9 +127,9 @@ describe("live outage / recovery durability (portal#13)", () => {
     let watchCalls = 0
     let listCalls = 0
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.includes("limit=1")) {
+      if (!url.includes("watch=1")) {
         listCalls++
-        return { ok: true, status: 200, json: async () => ({ metadata: { resourceVersion: String(listCalls) } }) } as Response
+        return new Response(JSON.stringify({ metadata: { resourceVersion: String(listCalls) }, items: [] }))
       }
       watchCalls++
       switch (watchCalls) {
@@ -222,7 +222,7 @@ describe("live outage / recovery durability (portal#13)", () => {
     let watchCalls = 0
     let listCalls = 0
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.includes("limit=1")) {
+      if (!url.includes("watch=1")) {
         listCalls++
         // A real `GET /api/v1/events?limit=1` list response carries `items`
         // (here: the one event that happened during the gap window) even
@@ -230,14 +230,10 @@ describe("live outage / recovery durability (portal#13)", () => {
         // `metadata.resourceVersion` (live-k8s-informer.ts:136-146) and
         // silently discards `items` — so a resync after 410 never learns
         // about, replays, or flags the events it skipped.
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return new Response(JSON.stringify({
             metadata: { resourceVersion: "5" },
             items: listCalls === 1 ? [] : [{ metadata: { uid: "uid-missed", resourceVersion: "5" }, reason: "Failed", type: "Warning", involvedObject: { kind: "Pod", name: "pod-missed", namespace: "default" } }],
-          }),
-        } as unknown as Response
+          }))
       }
       watchCalls++
       if (watchCalls === 1) return { ok: true, status: 200, body: makeStream([k8sEvent("uid-e1", "2", "pod-e1")]) } as unknown as Response

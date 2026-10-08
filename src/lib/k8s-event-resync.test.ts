@@ -29,7 +29,7 @@ describe("bounded informer event resync", () => {
     await expect(listEventsForResync("https://k8s.test", {})).rejects.toThrow("page limit exceeded")
     expect(fetch).toHaveBeenCalledTimes(100)
   })
-  it.each([{}, { items: [], metadata: {} }, { items: new Array(101).fill({}), metadata: { resourceVersion: "1" } }])("rejects malformed/oversized provider pages", async (body) => {
+  it.each([null, {}, { items: [], metadata: {} }, { items: [], metadata: { resourceVersion: 1 } }, { items: [], metadata: { resourceVersion: "1", continue: {} } }, { items: new Array(101).fill({}), metadata: { resourceVersion: "1" } }])("rejects malformed/oversized provider pages", async (body) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
     await expect(listEventsForResync("https://k8s.test", {})).rejects.toThrow("invalid bounded list")
   })

@@ -31,7 +31,9 @@ export async function listEventsForResync(
     })
     if (!response.ok) throw new Error(`resync events ${response.status}`)
     const body = await readJsonWithPolicy<{ metadata?: { resourceVersion?: string; continue?: string }; items?: ResyncEvent[] }>(response)
-    if (!Array.isArray(body.items) || body.items.length > PAGE_SIZE || !body.metadata?.resourceVersion) {
+    if (!body || !Array.isArray(body.items) || body.items.length > PAGE_SIZE
+      || typeof body.metadata?.resourceVersion !== "string" || !body.metadata.resourceVersion
+      || (body.metadata.continue !== undefined && typeof body.metadata.continue !== "string")) {
       throw new Error("resync events invalid bounded list")
     }
     if (resourceVersion && resourceVersion !== body.metadata.resourceVersion) {
