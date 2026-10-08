@@ -23,8 +23,8 @@
  *    Authorization/Cookie by hand
  *
  * Left open, not attempted here: TLS-verification enforcement (already handled
- * per-URL by config.ts's assertHttpsInProduction), response/stream body-SIZE
- * bounds (this slice bounds body-read TIME, not bytes), and per-provider
+ * per-URL by config.ts's assertHttpsInProduction), streaming watch exceptions,
+ * and per-provider
  * circuit/health metrics — each is a separate #48 AC that touches call sites
  * this slice doesn't.
  */
@@ -52,6 +52,7 @@ const DEFAULT_TIMEOUT_MS = 10_000
 const DEFAULT_MAX_ATTEMPTS = 3
 const DEFAULT_BASE_DELAY_MS = 200
 const DEFAULT_MAX_DELAY_MS = 5_000
+export const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export interface RetryOptions {
   /** Total attempts including the first, default {@link DEFAULT_MAX_ATTEMPTS}. */
@@ -63,6 +64,8 @@ export interface RetryOptions {
 }
 
 export interface FetchWithPolicyOptions {
+  /** Maximum decoded body bytes read by policy readers; default 8 MiB. Positive safe integer. */
+  maxResponseBytes?: number
   /** Abort the request after this many ms (covers connect+headers; see readJsonWithPolicy/readTextWithPolicy for the body). Default {@link DEFAULT_TIMEOUT_MS}. */
   timeoutMs?: number
   /**
@@ -87,7 +90,7 @@ export interface FetchWithPolicyOptions {
   signal?: AbortSignal
 }
 
-export type HttpClientErrorKind = "timeout" | "network" | "aborted"
+export type HttpClientErrorKind = "timeout" | "network" | "aborted" | "response-too-large"
 
 /**
  * Typed transport failure. `message` and `url` are built from the request
@@ -106,7 +109,9 @@ export class HttpClientError extends Error {
         ? `Request timed out calling ${redacted}`
         : kind === "aborted"
           ? `Request aborted by caller calling ${redacted}`
-          : `Network error calling ${redacted}`
+          : kind === "response-too-large"
+            ? `Response size limit exceeded calling ${redacted}`
+            : `Network error calling ${redacted}`
     )
     this.name = "HttpClientError"
     this.kind = kind
@@ -249,7 +254,7 @@ async function cancelBody(response: Response): Promise<void> {
 // client didn't produce (e.g. one built by hand in a test) simply has no
 // entry, and readJsonWithPolicy/readTextWithPolicy fall back to reading with
 // no bound in that case.
-const bodyDeadlines = new WeakMap<Response, { deadlineAt: number; url: string }>()
+const bodyDeadlines = new WeakMap<Response, { deadlineAt: number; url: string; maxResponseBytes: number }>()
 
 function concatBytes(chunks: Uint8Array[]): Uint8Array {
   const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
@@ -269,11 +274,12 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
 // lock can cancel a stream mid-read. Acquiring the reader here means a
 // stalled body can actually be cancelled when the deadline hits, not just
 // abandoned to keep the connection open.
-async function collectBytesWithDeadline(response: Response, remainingMs: number, url: string): Promise<Uint8Array> {
+async function collectBytesWithDeadline(response: Response, remainingMs: number, url: string, maxResponseBytes: number): Promise<Uint8Array> {
   if (!response.body) return new Uint8Array()
 
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
+  let totalBytes = 0
   // Cancelling a reader resolves any of ITS OWN pending read() with a normal
   // {done: true} — that's how a locked stream lets its lock holder cancel
   // mid-read at all. Racing read() against the deadline promise is therefore
@@ -299,7 +305,16 @@ async function collectBytesWithDeadline(response: Response, remainingMs: number,
       const { done, value } = await Promise.race([reader.read(), deadline])
       if (timedOut) throw new HttpClientError("timeout", url)
       if (done) break
-      if (value) chunks.push(value)
+      if (value) {
+        totalBytes += value.byteLength
+        // D2: Bound decoded bytes before retaining chunks; Content-Length is
+        // untrusted/compressed. Cost: 8 MiB default; larger adapters opt in.
+        if (totalBytes > maxResponseBytes) {
+          void reader.cancel().catch(() => {})
+          throw new HttpClientError("response-too-large", url)
+        }
+        chunks.push(value)
+      }
     }
   } finally {
     clearTimeout(timer)
@@ -324,7 +339,7 @@ async function readBodyWithDeadline<T>(response: Response, parse: (text: string)
     throw new HttpClientError("timeout", entry.url)
   }
 
-  const bytes = await collectBytesWithDeadline(response, remainingMs, entry.url)
+  const bytes = await collectBytesWithDeadline(response, remainingMs, entry.url, entry.maxResponseBytes)
   return parse(new TextDecoder().decode(bytes))
 }
 
@@ -361,6 +376,10 @@ export async function fetchWithPolicy(
 ): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase()
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES
+  if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes <= 0) {
+    throw new RangeError("maxResponseBytes must be a positive safe integer")
+  }
 
   const retryConfig =
     options.retry === false
@@ -410,7 +429,7 @@ export async function fetchWithPolicy(
       // readJsonWithPolicy/readTextWithPolicy can bound it later, instead of
       // a stalled body being free to hang forever once this function returns.
       const remainingMs = Math.max(0, timeoutMs - (Date.now() - attemptStartedAt))
-      bodyDeadlines.set(response, { deadlineAt: Date.now() + remainingMs, url })
+      bodyDeadlines.set(response, { deadlineAt: Date.now() + remainingMs, url, maxResponseBytes })
       return response
     } catch (err) {
       // Caller abort takes priority in classification: if the caller's own
