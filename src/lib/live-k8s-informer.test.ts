@@ -524,6 +524,31 @@ describe("live-k8s-informer", () => {
     expect(mockPushEvent.mock.calls.map(([ingest]) => ingest.source_event_id)).toEqual(["gap-a:a", "gap-b:b"])
   })
 
+  it("waits for acceptance before submitting the next watch event", async () => {
+    let acceptFirst!: () => void
+    mockPushEvent.mockImplementationOnce(() => new Promise<void>((resolve) => { acceptFirst = resolve }))
+    const event = (uid: string) => JSON.stringify({ type: "ADDED", object: {
+      type: "Warning", reason: "Failed", metadata: { uid, resourceVersion: uid },
+    } })
+    let watches = 0
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (!url.includes("watch=1")) return new Response(JSON.stringify({ metadata: { resourceVersion: "1" }, items: [] }))
+      watches++
+      return { ok: true, status: 200, body: watches === 1
+        ? makeStream([event("first"), event("second")]) : makePendingStream() } as unknown as Response
+    }))
+    const { startLiveK8sInformer, stopLiveK8sInformerForTesting } = await import("./live-k8s-informer")
+    stopInformer = stopLiveK8sInformerForTesting
+    startLiveK8sInformer()
+    await vi.waitFor(() => expect(mockPushEvent).toHaveBeenCalledTimes(1))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(mockPushEvent).toHaveBeenCalledTimes(1)
+    expect(watches).toBe(1)
+    acceptFirst()
+    await vi.waitFor(() => expect(mockPushEvent).toHaveBeenCalledTimes(2))
+    expect(mockPushEvent.mock.calls.map(([ingest]) => ingest.source_event_id)).toEqual(["first:first", "second:second"])
+  })
+
   it("keeps resourceVersion across owner reconnects", async () => {
     const watchVersions: string[] = []
     let watches = 0
