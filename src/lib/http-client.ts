@@ -138,8 +138,23 @@ function redactUrl(url: string): string {
   }
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function delay(ms: number, signal: AbortSignal | undefined, url: string): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new HttpClientError("aborted", url))
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }
+    const timer = setTimeout(finish, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      reject(new HttpClientError("aborted", url))
+    }
+    // D5: Retry sleep is part of caller-owned work too. Cost: one temporary
+    // abort listener per retry; removed on either outcome, no delayed retry.
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
 }
 
 // Full-jitter backoff (AWS Architecture Blog, "Exponential Backoff and Jitter"):
@@ -420,7 +435,7 @@ export async function fetchWithPolicy(
             ? (retryAfterMs(response, retryConfig.maxDelayMs) ??
               computeBackoffMs(attempt, retryConfig.baseDelayMs, retryConfig.maxDelayMs))
             : computeBackoffMs(attempt, retryConfig.baseDelayMs, retryConfig.maxDelayMs)
-        await delay(waitMs)
+        await delay(waitMs, options.signal, url)
         continue
       }
 
@@ -438,7 +453,7 @@ export async function fetchWithPolicy(
       // retried — the caller asked to stop, full stop.
       const kind: HttpClientErrorKind = options.signal?.aborted ? "aborted" : timedOut ? "timeout" : "network"
       if (canRetry && attempt < maxAttempts && kind === "network") {
-        await delay(computeBackoffMs(attempt, retryConfig.baseDelayMs, retryConfig.maxDelayMs))
+        await delay(computeBackoffMs(attempt, retryConfig.baseDelayMs, retryConfig.maxDelayMs), options.signal, url)
         continue
       }
       throw new HttpClientError(kind, url, err)
