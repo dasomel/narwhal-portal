@@ -197,6 +197,9 @@ and are now fixed (the cases above are `it`, no longer `it.fails`):
   one bounded snapshot before ingestion and watch advancement. Tests prove multiple retained
   events recover, repeated cursors/changing snapshots fail, and page/body budgets stay bounded.
   Kubernetes-expired history and cold owner failover remain outside these recovery guarantees.
+  Watch/resync producers await each `pushEvent` acceptance before submitting another event,
+  bounding submission concurrency to one. Valkey failures resolve with explicitly degraded
+  memory acceptance; claim-before-write crash atomicity remains a durable-store requirement.
 
 ## Relationship to Narwhal
 
