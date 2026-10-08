@@ -168,6 +168,21 @@ describe("fetchWithPolicy", () => {
     expect(thrown?.url).toBe("http://host with space/path")
   })
 
+  it.each(["network", "status"])("cancels %s retry backoff immediately without another request", async (failure) => {
+    const caller = new AbortController()
+    if (failure === "network") mockFetch.mockRejectedValue(new TypeError("fetch failed"))
+    else mockFetch.mockImplementation(async () => new Response(null, { status: 503 }))
+    const request = fetchWithPolicy("https://user:secret@example.test/api?token=secret", {}, {
+      signal: caller.signal, retry: { maxAttempts: 3, baseDelayMs: 5000, maxDelayMs: 5000 },
+    })
+    const assertion = expect(request).rejects.toMatchObject({ kind: "aborted", url: "https://example.test/api" })
+    await vi.advanceTimersByTimeAsync(1)
+    caller.abort()
+    await assertion
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it("honors a caller-supplied abort signal: classified 'aborted', never retried", async () => {
     mockFetch.mockImplementation(
       (_url: string, init?: RequestInit) =>
