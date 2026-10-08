@@ -17,6 +17,7 @@ distributed correlation, body deadlines, and sensitive credential redaction.
   - `"timeout"`: Request aborted because attempt duration exceeded `timeoutMs` or body read exceeded remaining deadline.
   - `"network"`: Network or socket-level error (e.g. `TypeError: fetch failed`, `ECONNRESET`, DNS resolution failure).
   - `"aborted"`: Caller-supplied `AbortSignal` was aborted by the inbound consumer.
+  - `"response-too-large"`: The decoded JSON/text body exceeds its configured byte budget.
 - **HTTP status responses**: Non-retried HTTP status responses (including 401, 403, 500, and exhausted
   429/502/503/504) return the standard `Response` object ([`src/lib/http-client.ts:350-353, 413`](../src/lib/http-client.ts#L350-L353)).
   Domain adapters handle HTTP statuses explicitly (e.g., checking `res.status === 401`).
@@ -43,8 +44,15 @@ distributed correlation, body deadlines, and sensitive credential redaction.
   `readTextWithPolicy` ([`src/lib/http-client.ts:343`](../src/lib/http-client.ts#L343)) acquires a stream reader
   and bounds payload reception to `remainingMs`. If the body stalls, the reader is cancelled, the underlying stream
   is aborted, and `HttpClientError(kind: "timeout")` is thrown.
-- **Response byte-size limits**: Body read *time* is bounded by the deadline, but byte size is currently
-  unbounded at the transport client layer ([`src/lib/http-client.ts:26-27`](../src/lib/http-client.ts#L26-L27)).
+- **Response byte-size limits**: Policy JSON/text readers retain at most **8 MiB of decoded bytes** by
+  default, independent of `Content-Length` (which may be absent, wrong, or compressed). The first
+  chunk exceeding the limit cancels the reader and throws `HttpClientError(kind: "response-too-large")`.
+  This body failure is never retried. An adapter with a documented larger bounded inventory can pass
+  `maxResponseBytes` as a positive safe integer to `fetchWithPolicy`; there is no unlimited setting.
+  Exact-limit bodies are accepted. Native `response.json()`/`.text()`, independently constructed
+  Responses, and the Kubernetes long-lived watch remain explicit exceptions to these policy readers.
+  Acceptance evidence: `src/lib/http-client.size.test.ts` covers chunked responses with a misleading
+  length, UTF-8 byte counting, exact boundaries, defaults, invalid overrides, and cancellation.
 
 ### 4. Correlation Propagation
 - Inbound correlation IDs are extracted via `correlationIdFrom()` ([`src/lib/http-client.ts:168`](../src/lib/http-client.ts#L168)),
