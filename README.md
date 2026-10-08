@@ -51,7 +51,7 @@ Routes live under `src/app/(dashboard)/`; backing API routes under `src/app/api/
 | Cache | Valkey (ioredis) |
 | Secrets | OpenBao Agent Injector |
 | Package manager | pnpm (`pnpm@10.27.0`, pinned via `packageManager`) |
-| Test | Vitest + Playwright (planned — not yet implemented) |
+| Test | Vitest unit/API regression suite + Playwright browser auth checks |
 
 ## Quick Start
 
@@ -104,11 +104,18 @@ pnpm dev              # local dev server
 pnpm build            # production build
 pnpm run dev:skaffold # in-cluster HMR dev loop (Skaffold + Kaniko)
 pnpm run harbor:setup # one-time Kaniko/Harbor auth secret bootstrap
-npx tsc --noEmit      # type check
+pnpm typecheck        # type check
 pnpm test             # unit/API tests (vitest)
 pnpm lint             # eslint
+pnpm test:e2e         # browser login/session and API permission boundaries
 npx shadcn@latest add {component}  # add a shadcn/ui component
 ```
+
+The Unit Test Gate runs typecheck, lint, unit/API tests and browser E2E on application
+and test-input changes. Browser tests use development-only mock login with real
+session cookies; they verify anonymous, Viewer, Developer and Cluster Admin mutation
+permissions without production credentials or upstream mutations. They do not prove
+Keycloak SSO, tenant-scoped views or successful provider-backed mutations (#18).
 
 ## Related Docs
 
