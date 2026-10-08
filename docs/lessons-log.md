@@ -103,6 +103,7 @@
 ### Evidence / Freshness Mistakes
 | Date | Mistake | Fix |
 |------|---------|-----|
+| 2026-10-08 | #18 Browser E2E는 미인증 리다이렉트만 검사해 로그인 후 실제 쿠키의 역할과 API 변경 권한이 어긋나도 green이었다. 단위 테스트에서 auth를 mock한 결과만으로 브라우저 세션 경계를 증명할 수 없다. 첫 실행은 초기 session GET들의 CSRF 쿠키 설정과 signIn이 겹쳐 MissingCSRF로 flaky했다 | 실제 mock-provider UI 로그인 후 session 응답과 namespace POST·gateway PATCH의 역할별 401/403/400을 확인한다. 익명 CSRF 쿠키를 먼저 초기화해 권한 검증을 격리한다. 판별자: 400은 권한 게이트 통과 후 입력 검증의 증거이며 성공한 변경의 증거가 아니다. 최초 방문 로그인 race·provider 변경·tenant scope 검증은 별도 fixture가 필요하다 |
 | 2026-09-18 | #27 스코어카드 규칙 평가기가 K8s/ArgoCD API 조회 실패(네트워크 오류, 5xx)를 `listK8sResources`/`getPodsForService`의 `catch { return 0 / [] }`로 삼켜서, "쿼리 성공 + 리소스 0개"(정당한 fail)와 "쿼리 자체 실패"(unavailable)가 구분 불가능했다 — #51 Prometheus와 같은 실패 유형("0/[]로 묵살")이지만 텔레메트리가 아니라 컴플라이언스 스코어카드 표면에서 재발했다 | `listK8sResources`/`getPodsForService`가 `{ ok: true, data } \| { ok: false, reason }`를 반환하도록 바꾸고, `CheckResult.status`에 `"pass" \| "fail" \| "unavailable"`을 도입해 규칙별로 `unavailable` 배열에 분리 기록(`failed`/`passed`에 섞지 않음). `ScorecardEvaluation.evaluationComplete`와 응답의 `servicesWithIncompleteEvidence`/`oldestEvaluationAt`으로 "필터링된 집계가 완전하고 신선한 값처럼 보이는" 문제도 같이 노출. 판별자: **같은 "0/[]로 묵살" 실수가 표면마다 다시 나타난다 — 외부 소스를 쿼리하는 모든 헬퍼의 `catch` 블록을 감사 대상으로 취급하라.** 빈 결과와 조회 실패를 같은 타입으로 반환하면 호출부가 구조적으로 구분할 방법이 없다 |
 
 ### Performance / Scale Mistakes
