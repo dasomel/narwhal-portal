@@ -7,6 +7,7 @@
  * source at all — the page could only ever show what the /api/events/ingest webhook
  * received (nothing was posting to it).
  */
+import { listEventsForResync } from "./k8s-event-resync"
 import { getK8sApiServer } from "./config"
 import { getK8sBearerToken, invalidateK8sBearerToken } from "./k8s-token"
 import { pushEvent } from "./live-stream"
@@ -168,16 +169,17 @@ async function ingestK8sEvent(ev: K8sEvent): Promise<void> {
   void pushEvent(ingest).catch(() => {})
 }
 
-/** Resync after a watch 410 Gone: unlike cold start, events between the
- * expired watch's last-seen resourceVersion and "now" must not be silently
- * skipped. `?limit=1` only ever returns the single most-recent event, so a
- * gap spanning more than one event is still not fully recovered here — see
- * portal#52 for bounded/paginated listing — but the previous behavior
- * discarded even that one, unconditionally (portal#178 gap 3). Ingesting the
- * item is safe against double-delivery: the watch resumed from its
- * resourceVersion only streams events strictly after it. */
+/** Resync a complete bounded paginated snapshot before advancing the watch.
+ * Partial snapshots fail/retry visibly rather than silently skipping events. */
 async function resyncAfterGone(apiServer: string, signal?: AbortSignal): Promise<string> {
-  const { resourceVersion, items } = await listLatestEvent(apiServer, signal)
+  let snapshot
+  try {
+    snapshot = await listEventsForResync(apiServer, headers(apiServer), signal)
+  } catch (error) {
+    if (error instanceof Error && error.message === "resync events 401") invalidateK8sBearerToken()
+    throw error
+  }
+  const { resourceVersion, items } = snapshot
   for (const item of items) {
     await ingestK8sEvent(item)
   }

@@ -500,13 +500,16 @@ describe("live-k8s-informer", () => {
     expect(valkeyState.value).toBeNull()
   })
 
-  it("counts a 410 and relists before resuming the watch", async () => {
+  it("recovers multiple events after 410 before resuming the watch", async () => {
     let lists = 0
     let watches = 0
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.includes("limit=1")) {
+      if (!url.includes("watch=1")) {
         lists++
-        return { ok: true, status: 200, json: async () => ({ metadata: { resourceVersion: String(lists) } }) } as Response
+        return new Response(JSON.stringify({ metadata: { resourceVersion: String(lists) }, items: lists === 1 ? [] : [
+          { type: "Warning", reason: "Failed", metadata: { uid: "gap-a", resourceVersion: "a" } },
+          { type: "Warning", reason: "Failed", metadata: { uid: "gap-b", resourceVersion: "b" } },
+        ] }))
       }
       watches++
       if (watches === 1) return { ok: false, status: 410 } as Response
@@ -518,6 +521,7 @@ describe("live-k8s-informer", () => {
     await vi.waitFor(() => expect(getLiveK8sInformerStatus().resyncs410).toBe(1))
     expect(lists).toBe(2)
     expect(watches).toBe(2)
+    expect(mockPushEvent.mock.calls.map(([ingest]) => ingest.source_event_id)).toEqual(["gap-a:a", "gap-b:b"])
   })
 
   it("keeps resourceVersion across owner reconnects", async () => {
