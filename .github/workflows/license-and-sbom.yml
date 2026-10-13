@@ -57,7 +57,7 @@ jobs:
     steps:
       # See build-check.yml for why this runs first: a compromised install/build
       # script only gets one shot before egress is blocked.
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -122,7 +122,7 @@ jobs:
     steps:
       # No install here, but the script itself calls out to registry.npmjs.org, so it
       # gets the same egress floor as the jobs that do install.
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: block
           allowed-endpoints: >
