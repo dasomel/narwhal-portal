@@ -87,7 +87,15 @@ function resolvedAuthMethod(): "kubernetes" | "token" {
 // empty token in dev so local flows without OpenBao configured still boot.
 function tokenFromEnv(): string {
   const envToken = process.env.OPENBAO_TOKEN
-  if (envToken) return envToken
+  if (envToken) {
+    // D7: Production legacy mode must be explicit, matching the cluster's
+    // ENABLE_LEGACY_OPENBAO_TOKEN contract. Cost: reject accidental fallback;
+    // operators can choose token mode intentionally until identity migration.
+    if (isProduction() && process.env.OPENBAO_AUTH_METHOD !== "token") {
+      throw new Error("[OpenBao] Static credentials require explicit OPENBAO_AUTH_METHOD=token in production; prefer Kubernetes auth")
+    }
+    return envToken
+  }
   if (isProduction()) {
     throw new Error(
       "[OpenBao] Missing required production configuration: no Kubernetes auth JWT found and OPENBAO_TOKEN is not set"
@@ -148,6 +156,10 @@ async function loginWithKubernetes(): Promise<CachedToken> {
  * `forceRefresh` to bypass the cache and re-login (used after a 403).
  */
 export async function getOpenBaoToken(forceRefresh = false): Promise<string> {
+  const configured = process.env.OPENBAO_AUTH_METHOD
+  if (configured && configured !== "kubernetes" && configured !== "token" && isProduction()) {
+    throw new Error("[OpenBao] OPENBAO_AUTH_METHOD must be kubernetes or token")
+  }
   // A valid cached Kubernetes-auth token wins before re-resolving the auth
   // method: with OPENBAO_AUTH_METHOD unset, resolution re-reads the JWT file,
   // and a transient unmount during volume rotation must not flip us to
