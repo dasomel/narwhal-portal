@@ -16,7 +16,7 @@ distributed correlation, body deadlines, and sensitive credential redaction.
   ([`src/lib/http-client.ts:90`](../src/lib/http-client.ts#L90)) is strictly normalized into:
   - `"timeout"`: Request aborted because attempt duration exceeded `timeoutMs` or body read exceeded remaining deadline.
   - `"network"`: Network or socket-level error (e.g. `TypeError: fetch failed`, `ECONNRESET`, DNS resolution failure).
-  - `"aborted"`: Caller-supplied `AbortSignal` was aborted by the inbound consumer.
+  - `"aborted"`: Caller-supplied `AbortSignal` (`RequestInit.signal` or policy `signal`) was aborted by the inbound consumer.
   - `"response-too-large"`: The decoded JSON/text body exceeds its configured byte budget.
 - **HTTP status responses**: Non-retried HTTP status responses (including 401, 403, 500, and exhausted
   429/502/503/504) return the standard `Response` object ([`src/lib/http-client.ts:350-353, 413`](../src/lib/http-client.ts#L350-L353)).
@@ -103,3 +103,11 @@ classes used across `src/lib/` domain providers:
 | **Any operation** | Caller signal aborted (`signal.aborted === true`) | **No** | 1 attempt (terminates immediately during backoff). Throws `HttpClientError(kind: "aborted")`. | Inbound caller cancelled the request; execution stops without retry. Retry backoff also observes the caller signal: cancellation clears its timer/listener immediately and prevents another request. [`src/lib/http-client.ts:416-425`](../src/lib/http-client.ts#L416-L425) |
 | **Non-idempotent mutation** (`POST`, `PATCH`, non-standard methods) | Any failure (Network, 429, 5xx, timeout) | **No** | 1 attempt (`maxAttempts = 1`). Returns `Response` on HTTP status or throws `HttpClientError`. | Prevents duplicate state mutations (e.g. duplicate commits, duplicate build or sync triggers). [`src/lib/http-client.ts:373-374`](../src/lib/http-client.ts#L373-L374) |
 | **Explicit single-shot callers** (`retry: false`, e.g. `K8S_POLICY`, `PROM_POLICY`, Keycloak admin PUT/DELETE, OpenBao login, Alertmanager silence delete) | Any failure (Network, 429, 5xx, timeout) | **No** | 1 attempt (`maxAttempts = 1`). | Prevents fighting Kubernetes API Priority & Fairness (APF), multiplying Prometheus scrape loads, or repeating administrative mutations. [`src/lib/k8s-client.ts:16`](../src/lib/k8s-client.ts#L16), [`src/lib/prometheus.ts:11`](../src/lib/prometheus.ts#L11), [`src/lib/keycloak-client.ts:182`](../src/lib/keycloak-client.ts#L182) |
+
+### Native caller cancellation
+
+The policy preserves `RequestInit.signal` and combines it with an optional policy `signal`
+and the internal timeout. Either caller source cancels the request and retry sleep immediately;
+already-aborted requests send no HTTP call. The listener-based compatibility fallback also
+checks pre-aborted sources and removes caller listeners after each attempt. Only the internal
+timeout is classified as `timeout`; either caller cancellation remains `aborted`.
