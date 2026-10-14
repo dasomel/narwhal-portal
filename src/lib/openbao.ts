@@ -1,7 +1,7 @@
 import { readFileSync } from "fs"
 import { cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
-import { getDependencyUrl, isProduction } from "./config"
+import { assertHttpsInProduction, getDependencyUrl, isProduction } from "./config"
 import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
 
 /**
@@ -36,21 +36,6 @@ export interface SecretEntry {
  * surfacing the degraded state explicitly.
  */
 export class SecretMetadataError extends Error {}
-
-let httpsChecked = false
-function assertHttpsInProduction(addr: string): void {
-  if (httpsChecked) return
-  httpsChecked = true
-  if (!addr.startsWith("http://")) return
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      `[OpenBao] OPENBAO_ADDR must use HTTPS in production. Got: ${addr}`
-    )
-  }
-  console.warn(
-    `[OpenBao] OPENBAO_ADDR is using HTTP (${addr}) — HTTPS required in production`
-  )
-}
 
 // --- Kubernetes auth token provider (narwhal#156 / portal#54) ---
 //
@@ -130,7 +115,7 @@ async function loginWithKubernetes(): Promise<CachedToken> {
   }
 
   const addr = openbaoAddr()
-  assertHttpsInProduction(addr)
+  assertHttpsInProduction("OPENBAO_ADDR", addr)
   const mount = k8sAuthMount()
 
   const res = await fetchWithPolicy(`${addr}/v1/auth/${mount}/login`, {
@@ -186,7 +171,7 @@ export async function getOpenBaoToken(forceRefresh = false): Promise<string> {
 
 export async function baoFetch(path: string, init?: RequestInit): Promise<Response> {
   const addr = openbaoAddr()
-  assertHttpsInProduction(addr)
+  assertHttpsInProduction("OPENBAO_ADDR", addr)
 
   const token = await getOpenBaoToken()
   const res = await fetchWithPolicy(`${addr}${path}`, {
