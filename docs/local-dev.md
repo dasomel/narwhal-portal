@@ -340,3 +340,15 @@ Istio ambient mesh가 쿠키를 손상시킴. 매니페스트 pod label `istio.i
 - Kaniko 공식: https://github.com/GoogleContainerTools/kaniko
 - Cloud Code for IntelliJ: https://cloud.google.com/code/docs/intellij/
 - ArgoCD `ignoreDifferences`: https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/
+
+## Mandatory regression status (#18)
+
+Every pull request, including documentation changes, runs the unit/API/typecheck/lint suite
+and browser suite. The stable `Portal critical regression gate` check runs even when a
+prerequisite fails, is cancelled or skipped, and passes only when both suites succeeded.
+Branch protection must require that exact context alongside independent review; configuring
+protection is a separate GitHub administrative step after the current workflow head is green.
+
+The tradeoff is running both full suites on documentation PRs. A future selective gate must
+keep emitting the same required context on every PR and prove its skipped-path policy.
+Offline gate failure scenarios need no dependencies: `node --test scripts/check-regression-results.node.mjs`.

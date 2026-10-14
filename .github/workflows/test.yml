@@ -2,7 +2,7 @@ name: Unit Test Gate
 
 # Runs typecheck, lint, and the Vitest regression suite (619+ tests covering RBAC,
 # cluster/team scope, event idempotency, and other security-critical paths) on every
-# change to application source, so a broken suite or lint error blocks merge instead
+# pull request, including documentation, so a broken suite or lint error blocks merge instead
 # of only being discoverable by running it by hand.
 #
 # WHY THIS EXISTS: `pnpm test` (vitest run) was a defined script with a real,
@@ -15,27 +15,7 @@ name: Unit Test Gate
 on:
   push:
     branches: [main]
-    paths:
-      - "src/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "vitest.config.*"
-      - "playwright.config.ts"
-      - "e2e/**"
-      - "tsconfig.json"
-      - "eslint.config.mjs"
-      - ".github/workflows/test.yml"
   pull_request:
-    paths:
-      - "src/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "vitest.config.*"
-      - "playwright.config.ts"
-      - "e2e/**"
-      - "tsconfig.json"
-      - "eslint.config.mjs"
-      - ".github/workflows/test.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -115,3 +95,18 @@ jobs:
         run: pnpm test:e2e
         env:
           CI: true
+
+  regression-gate:
+    name: Portal critical regression gate
+    if: ${{ always() }}
+    needs: [test, browser-e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify gate failure scenarios
+        run: node --test scripts/check-regression-results.node.mjs
+      - name: Require successful critical suites
+        run: node scripts/check-regression-results.mjs
+        env:
+          UNIT_API_RESULT: ${{ needs.test.result }}
+          BROWSER_RESULT: ${{ needs.browser-e2e.result }}
