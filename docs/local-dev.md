@@ -352,3 +352,13 @@ protection is a separate GitHub administrative step after the current workflow h
 The tradeoff is running both full suites on documentation PRs. A future selective gate must
 keep emitting the same required context on every PR and prove its skipped-path policy.
 Offline gate failure scenarios need no dependencies: `node --test scripts/check-regression-results.node.mjs`.
+
+## OpenBao authentication fallback (#54)
+
+Development keeps `OPENBAO_TOKEN` as the local fallback when no Kubernetes JWT is mounted.
+Production prefers Kubernetes workload identity and rejects unknown auth modes and implicit
+static-token fallback. If `OPENBAO_AUTH_METHOD=kubernetes`, a missing projected JWT fails
+closed even when `OPENBAO_TOKEN` exists. A still-supported cluster legacy exception requires
+explicit `OPENBAO_AUTH_METHOD=token`; this is the mode supplied only when Narwhal's
+`ENABLE_LEGACY_OPENBAO_TOKEN=true` provisioner flag is selected. This exception remains a
+long-lived credential path and does not satisfy full provider identity/rotation acceptance.
