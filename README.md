@@ -2,6 +2,14 @@
 
 English | [한국어](README-ko.md)
 
+> **This repository is archived. The portal now lives in [`dasomel/narwhal`](https://github.com/dasomel/narwhal) under [`portal/`](https://github.com/dasomel/narwhal/tree/main/portal).**
+> The full history (415 commits) was imported with `git-filter-repo` (decision record: ADR-0001 in narwhal).
+> Open issues were transferred to narwhal (#356-#382, label `area:portal`; mapping table in the comment on
+> [narwhal#356](https://github.com/dasomel/narwhal/issues/356)). Old issue and PR numbers (`#N`) in this repository
+> keep their meaning here. Releases restart from the first `portal/vX.Y.Z` tag in narwhal; the published image name
+> stays `ghcr.io/dasomel/narwhal-portal`. The text below describes the repository as it was when archived, including
+> references to a sibling `../narwhal` checkout that no longer applies.
+
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 Management portal (Next.js) for the **Narwhal Kubernetes Internal Developer Platform (IDP)**
