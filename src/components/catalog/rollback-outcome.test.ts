@@ -19,4 +19,16 @@ describe("rollbackErrorMessage (#47)", () => {
   ])("falls back to the null for %s", async (_l, body) => {
     expect(await rollbackErrorMessage(res(body))).toBeNull()
   })
+  it("truncates an oversized error", async () => {
+    const out = await rollbackErrorMessage(res(JSON.stringify({ outcome: "unknown", error: "x".repeat(10_000) })))
+    expect(out).toHaveLength(300)
+    expect(out?.endsWith("…")).toBe(true)
+  })
+  it("trims and leaves a normal message unchanged", async () => {
+    expect(await rollbackErrorMessage(res(JSON.stringify({ outcome: "unknown", error: "  ok  " })))).toBe("ok")
+  })
+  it("returns null for whitespace-only error and for an oversized body", async () => {
+    expect(await rollbackErrorMessage(res(JSON.stringify({ outcome: "unknown", error: "   " })))).toBeNull()
+    expect(await rollbackErrorMessage(res(JSON.stringify({ outcome: "unknown", error: "x".repeat(1_000_000) })))).toBeNull()
+  })
 })

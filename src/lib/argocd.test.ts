@@ -198,6 +198,7 @@ describe("assertAppAccessible provider failure is not NotFound (#47)", () => {
   it.each([
     ["metadata.name", { metadata: {}, spec: { project: "p" } }],
     ["spec", { metadata: { name: "x" } }],
+    ["spec (array)", { metadata: { name: "x" }, spec: [] }],
   ])("200 body lacking %s is a provider error, not an app", async (_label, body) => {
     respond(body, 200)
     const err = await assertAppAccessible("x", admin).catch((e) => e)
@@ -377,6 +378,8 @@ describe("argocd credential handling", () => {
     ["spec missing", { metadata: { name: "app-1" } }],
     ["a different Application", { metadata: { name: "other" }, spec: {} }],
     ["spec not an object", { metadata: { name: "app-1" }, spec: "x" }],
+    ["spec an array", { metadata: { name: "app-1" }, spec: [] }],
+    ["metadata an array", { metadata: [], spec: {} }],
     ["array body", []],
     ["null body", null],
     ["empty object", {}],

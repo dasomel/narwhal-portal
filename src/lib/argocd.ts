@@ -159,6 +159,9 @@ export async function getArgoApp(name: string): Promise<ArgoApp | null> {
  * they are unknown provider state, not "app is absent". getArgoApp keeps its
  * non-throwing contract for read fan-outs (D1, #54 review).
  */
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v)
+
 async function getArgoAppOrThrow(name: string): Promise<ArgoApp | null> {
   const cacheKey = `argocd:app:${name}`
   const cached = await cacheGet<ArgoApp>(cacheKey)
@@ -171,7 +174,7 @@ async function getArgoAppOrThrow(name: string): Promise<ArgoApp | null> {
   const app = await readJsonWithPolicy<ArgoApp>(res)
   // status is deliberately not required: a brand-new Application has none until the first reconcile;
   // spec.project/destination are enforced (fail closed) where assertAppAccessible reads them.
-  if (typeof app?.metadata?.name !== "string" || !app.metadata.name || typeof app.spec !== "object" || app.spec === null) {
+  if (!isPlainObject(app) || !isPlainObject(app.metadata) || typeof app.metadata.name !== "string" || !app.metadata.name || !isPlainObject(app.spec)) {
     throw new Error("ArgoCD application lookup returned a malformed Application")
   }
   await cacheSet(cacheKey, app, 10)
@@ -354,11 +357,9 @@ export async function rollbackArgoApp(name: string, id: number): Promise<boolean
   try {
     const app = await readJsonWithPolicy<ArgoApp>(res)
     // Must be THIS app's object with a spec; status is not required (a never-synced app has none).
-    if (
-      typeof app !== "object" || app === null || Array.isArray(app) ||
-      app.metadata?.name !== name ||
-      typeof app.spec !== "object" || app.spec === null
-    ) throw new Error("malformed")
+    if (!isPlainObject(app) || !isPlainObject(app.metadata) || app.metadata.name !== name || !isPlainObject(app.spec)) {
+      throw new Error("malformed")
+    }
   } catch {
     throw new ArgoRollbackOutcomeUnknownError()
   }

@@ -96,6 +96,8 @@ describe("POST /api/catalog/[name]/rollback outcome mapping (#47, fetch-level)",
     ["200 Application without spec", () => json({ metadata: { name: "checkout-api" } }, 200), 502, "unknown"],
     ["200 a different Application", () => json({ ...app, metadata: { name: "other-app" } }, 200), 502, "unknown"],
     ["200 array body", () => json([], 200), 502, "unknown"],
+    ["200 spec is an array", () => json({ ...app, spec: [] }, 200), 502, "unknown"],
+    ["200 metadata is an array", () => json({ ...app, metadata: [] }, 200), 502, "unknown"],
     ["200 null body", () => json(null, 200), 502, "unknown"],
     ["200 empty body", () => new Response("", { status: 200 }), 502, "unknown"],
   ]
