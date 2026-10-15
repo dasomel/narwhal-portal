@@ -107,3 +107,41 @@ describe("getPlatformStatus provider failure (#53: failure is never a healthy su
     expect(getArgoAppsOrThrow).not.toHaveBeenCalled()
   })
 })
+
+describe("getPlatformStatus single-flight (#53: no provider stampede during an outage)", () => {
+  beforeEach(() => {
+    vi.mocked(cacheGet).mockReset().mockResolvedValue(null)
+    vi.mocked(cacheSet).mockReset().mockResolvedValue(undefined as never)
+    vi.mocked(getNodeReadiness).mockReset().mockResolvedValue({ total: 3, ready: 3 })
+    vi.mocked(getControlPlaneHealth).mockReset().mockResolvedValue(healthyControlPlane)
+    vi.mocked(getArgoAppsOrThrow).mockReset().mockResolvedValue([healthyArgoApp] as never)
+    vi.mocked(getAlertsOrThrow).mockReset().mockResolvedValue([])
+  })
+
+  it("coalesces concurrent calls into one provider fetch", async () => {
+    const [a, b, c] = await Promise.all([getPlatformStatus(), getPlatformStatus(), getPlatformStatus()])
+
+    expect(getArgoAppsOrThrow).toHaveBeenCalledTimes(1)
+    expect(getAlertsOrThrow).toHaveBeenCalledTimes(1)
+    expect(b).toBe(a)
+    expect(c).toBe(a)
+  })
+
+  it("re-fetches for a call made after the in-flight one settled", async () => {
+    await getPlatformStatus()
+    await getPlatformStatus()
+
+    expect(getArgoAppsOrThrow).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not retain a failed aggregation", async () => {
+    vi.mocked(getNodeReadiness).mockRejectedValueOnce(new Error("boom"))
+    vi.mocked(getArgoAppsOrThrow).mockRejectedValueOnce(new Error("ArgoCD API failed: 503"))
+    const failed = await getPlatformStatus()
+    expect(failed.overall).toBe("degraded")
+
+    const next = await getPlatformStatus()
+    expect(next.overall).toBe("healthy")
+    expect(getArgoAppsOrThrow).toHaveBeenCalledTimes(2)
+  })
+})

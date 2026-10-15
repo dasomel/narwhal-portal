@@ -148,7 +148,22 @@ function isPlatformStatus(value: unknown): value is PlatformStatus {
 // Aggregator
 // ---------------------------------------------------------------------------
 
-export async function getPlatformStatus(): Promise<PlatformStatus> {
+// D2 (#53): single-flight. Failed aggregations are not cached, so during an
+// outage every poll would re-hit both providers (5s x 3 attempts each); concurrent
+// callers share one in-flight aggregation instead. The slot is cleared in finally,
+// so a failure is never retained beyond the call that produced it.
+let inFlight: Promise<PlatformStatus> | null = null
+
+export function getPlatformStatus(): Promise<PlatformStatus> {
+  if (!inFlight) {
+    inFlight = aggregatePlatformStatus().finally(() => {
+      inFlight = null
+    })
+  }
+  return inFlight
+}
+
+async function aggregatePlatformStatus(): Promise<PlatformStatus> {
   const cached = await cacheGet<unknown>(cacheKeys.platformStatus())
   if (isPlatformStatus(cached)) return cached
 

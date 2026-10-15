@@ -129,6 +129,13 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
       expect(res).toEqual([])
     })
 
+    // #53: getAlertsOrThrow refactor must not change getAlerts' swallow contract.
+    it("returns [] (non-throwing) on a persistent HTTP 500", async () => {
+      mockFetch.mockImplementation(async () => new Response(null, { status: 500 }))
+      const res = await getAlerts()
+      expect(res).toEqual([])
+    })
+
     // portal#48: getAlerts kept its pre-existing 5s AbortController timeout,
     // now expressed as fetchWithPolicy's timeoutMs:5000.
     it("aborts once its 5s timeout elapses", async () => {
