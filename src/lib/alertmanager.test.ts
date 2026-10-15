@@ -72,6 +72,25 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
       }
     )
 
+    it.each([["padded", " abc "], ["trailing newline", "abc\n"], ["leading tab", "\tabc"], ["inner space", "a b"]])(
+      "throws outcome-unknown on a silenceID with whitespace instead of trimming it (%s)",
+      async (_label, silenceID) => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID }))
+        await expect(
+          createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+        ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
+        expect(mockFetch).toHaveBeenCalledTimes(1)
+      }
+    )
+
+    it("returns a UUID silenceID verbatim", async () => {
+      const id = "3f9c1d2e-7a4b-4c1e-9d3a-0b5e6f7a8b9c"
+      mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID: id }))
+      await expect(
+        createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      ).resolves.toBe(id)
+    })
+
     // portal#48: POST is a mutation — retry: false explicitly, so a retryable
     // 502/503/504 must not be retried the way a GET would be.
     it("does not retry a retryable 502", async () => {

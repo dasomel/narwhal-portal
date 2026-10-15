@@ -109,9 +109,10 @@ export async function createSilence(
   } catch {
     throw new AlertmanagerSilenceOutcomeUnknownError()
   }
-  // Validate the value that gets used: a whitespace-only id is not proof of a created silence.
-  const silenceId = isRecord(data) && typeof data.silenceID === "string" ? data.silenceID.trim() : ""
-  if (!silenceId) throw new AlertmanagerSilenceOutcomeUnknownError()
+  // Never return a value other than the one the server sent: an id with any whitespace
+  // (empty, padded, inner) is untrustworthy, not something to trim (UUIDs have none).
+  const silenceId = isRecord(data) ? data.silenceID : undefined
+  if (typeof silenceId !== "string" || !/^\S+$/.test(silenceId)) throw new AlertmanagerSilenceOutcomeUnknownError()
   return silenceId
 }
 
