@@ -6,7 +6,14 @@ vi.mock("./valkey", () => ({
 }))
 
 import { cacheGet, cacheSet } from "./valkey"
-import { createSilence, getSilence, getSilenceOrThrow, deleteSilence, getAlerts } from "./alertmanager"
+import {
+  createSilence,
+  getSilence,
+  getSilenceOrThrow,
+  deleteSilence,
+  getAlerts,
+  AlertmanagerSilenceOutcomeUnknownError,
+} from "./alertmanager"
 
 // portal#48: these functions now read their response via fetchWithPolicy's
 // readJsonWithPolicy, which reads response.body directly (not response.json())
@@ -46,12 +53,12 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
       )
     })
 
-    it("returns null (non-throwing) on a connection failure", async () => {
+    it("throws outcome-unknown on a connection failure (#47: no longer swallowed to null)", async () => {
       mockFetch.mockRejectedValueOnce(new Error("Connection refused"))
 
-      const id = await createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
-
-      expect(id).toBeNull()
+      await expect(
+        createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
     })
 
     // portal#48: POST is a mutation — retry: false explicitly, so a retryable
@@ -59,9 +66,9 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
     it("does not retry a retryable 502", async () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 502 }))
 
-      const id = await createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
-
-      expect(id).toBeNull()
+      await expect(
+        createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
   })
@@ -105,8 +112,7 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
     // idempotent-retry methods.
     it("does not retry a retryable 503", async () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 503 }))
-      const ok = await deleteSilence("silence-123")
-      expect(ok).toBe(false)
+      await expect(deleteSilence("silence-123")).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
   })

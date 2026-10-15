@@ -24,18 +24,66 @@ export interface AlertmanagerSilence {
   status?: { state: string }
 }
 
+// Write-outcome classes for silence create/delete (#47). Messages are fixed strings:
+// they never carry the Alertmanager URL/host/token or response body, so the route can
+// map them without leaking into responses or the operation event stream.
+export class AlertmanagerSilenceRejectedError extends Error {
+  constructor(readonly status: number) {
+    super(`Alertmanager rejected the silence mutation (HTTP ${status})`)
+    this.name = "AlertmanagerSilenceRejectedError"
+  }
+}
+
+export class AlertmanagerSilenceOutcomeUnknownError extends Error {
+  constructor() {
+    super("Alertmanager silence outcome unknown; change may have been applied, verify before retrying")
+    this.name = "AlertmanagerSilenceOutcomeUnknownError"
+  }
+}
+
+export class AlertmanagerSilenceNotFoundError extends Error {
+  constructor() {
+    super("Silence not found / already expired")
+    this.name = "AlertmanagerSilenceNotFoundError"
+  }
+}
+
+export class AlertmanagerCredentialError extends Error {
+  constructor() {
+    super("Alertmanager rejected the portal credentials")
+    this.name = "AlertmanagerCredentialError"
+  }
+}
+
+export class AlertmanagerForbiddenError extends Error {
+  constructor() {
+    super("Alertmanager denied access to the silence")
+    this.name = "AlertmanagerForbiddenError"
+  }
+}
+
+// Throws unless the mutation was accepted (2xx). Other 4xx = rejected before applying;
+// 408, 5xx and anything else non-2xx = unknown (the mutation may have been applied).
+function assertSilenceWriteAccepted(res: Response): void {
+  if (res.ok) return
+  if (res.status === 401) throw new AlertmanagerCredentialError()
+  if (res.status === 403) throw new AlertmanagerForbiddenError()
+  if (res.status >= 400 && res.status < 500 && res.status !== 408) throw new AlertmanagerSilenceRejectedError(res.status)
+  throw new AlertmanagerSilenceOutcomeUnknownError()
+}
+
 export async function createSilence(
   matchers: Array<{ name: string; value: string; isRegex: boolean }>,
   durationMinutes: number,
   createdBy: string,
   comment: string
-): Promise<string | null> {
+): Promise<string> {
+  const now = new Date()
+  const end = new Date(now.getTime() + durationMinutes * 60000)
+  let res: Response
   try {
-    const now = new Date()
-    const end = new Date(now.getTime() + durationMinutes * 60000)
-    // POST is a mutation (creates a real silence) — never auto-retried (no
-    // timeout before this migration; now gets the shared client's default 10s).
-    const res = await fetchWithPolicy(
+    // POST is a mutation (creates a real silence) — never auto-retried.
+    res = await fetchWithPolicy(
       `${alertmanagerUrl()}/api/v2/silences`,
       {
         method: "POST",
@@ -50,12 +98,21 @@ export async function createSilence(
       },
       { retry: false }
     )
-    if (!res.ok) return null
-    const data = await readJsonWithPolicy<{ silenceID?: string }>(res)
-    return data.silenceID ?? null
   } catch {
-    return null
+    throw new AlertmanagerSilenceOutcomeUnknownError()
   }
+  assertSilenceWriteAccepted(res)
+  // A 2xx without a string id is not proof of a created silence: outcome unknown.
+  let data: unknown
+  try {
+    data = await readJsonWithPolicy<unknown>(res)
+  } catch {
+    throw new AlertmanagerSilenceOutcomeUnknownError()
+  }
+  if (!isRecord(data) || typeof data.silenceID !== "string" || !data.silenceID) {
+    throw new AlertmanagerSilenceOutcomeUnknownError()
+  }
+  return data.silenceID
 }
 
 export async function getSilence(silenceId: string): Promise<AlertmanagerSilence | null> {
@@ -134,19 +191,20 @@ function isValidSilence(body: unknown, silenceId: string): body is AlertmanagerS
 }
 
 export async function deleteSilence(silenceId: string): Promise<boolean> {
+  let res: Response
   try {
-    // DELETE mutates alertmanager's silence state — retry: false explicitly,
-    // same as the other providers' mutation calls (no timeout before this
-    // migration; now gets the shared client's default 10s).
-    const res = await fetchWithPolicy(
+    // DELETE mutates alertmanager's silence state — retry: false explicitly.
+    res = await fetchWithPolicy(
       `${alertmanagerUrl()}/api/v2/silence/${encodeURIComponent(silenceId)}`,
       { method: "DELETE" },
       { retry: false }
     )
-    return res.ok
   } catch {
-    return false
+    throw new AlertmanagerSilenceOutcomeUnknownError()
   }
+  if (res.status === 404) throw new AlertmanagerSilenceNotFoundError()
+  assertSilenceWriteAccepted(res)
+  return true
 }
 
 /**

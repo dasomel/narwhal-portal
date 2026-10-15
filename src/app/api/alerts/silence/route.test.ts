@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/lib/auth", () => ({ requireRole: vi.fn() }))
-vi.mock("@/lib/alertmanager", () => ({ createSilence: vi.fn(), deleteSilence: vi.fn(), getSilence: vi.fn() }))
+vi.mock("@/lib/alertmanager", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/alertmanager")>()
+  return { ...actual, createSilence: vi.fn(), deleteSilence: vi.fn(), getSilence: vi.fn() }
+})
 vi.mock("@/lib/operation-context", () => ({ beginOperation: vi.fn().mockResolvedValue({}), completeOperation: vi.fn(), failOperation: vi.fn() }))
 vi.mock("@/lib/scope", () => ({ getEffectiveScope: vi.fn(), }))
 vi.mock("@/lib/alert-silence-scope", () => ({ checkSilenceScope: vi.fn(() => ({ ok: true })) }))
 vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
 
 const { requireRole } = await import("@/lib/auth")
-const { createSilence, deleteSilence } = await import("@/lib/alertmanager")
+const { createSilence, deleteSilence, AlertmanagerSilenceOutcomeUnknownError } = await import("@/lib/alertmanager")
 const { invalidateFor } = await import("@/lib/cache-invalidation")
 const { POST, DELETE } = await import("./route")
 
@@ -27,14 +30,14 @@ describe("alert silence cache invalidation", () => {
   })
 
   it("does not invalidate after failed create or delete", async () => {
-    vi.mocked(createSilence).mockResolvedValue(null as never)
+    vi.mocked(createSilence).mockRejectedValue(new AlertmanagerSilenceOutcomeUnknownError())
     let req = new Request("http://localhost/api/alerts/silence", { method: "POST", body: JSON.stringify({ alertname: "HighCPU", comment: "maintenance" }) })
-    expect((await POST(req)).status).toBe(500)
+    expect((await POST(req)).status).toBe(502)
     expect(invalidateFor).not.toHaveBeenCalled()
 
-    vi.mocked(deleteSilence).mockResolvedValue(false)
+    vi.mocked(deleteSilence).mockRejectedValue(new AlertmanagerSilenceOutcomeUnknownError())
     req = new Request("http://localhost/api/alerts/silence?id=silence-1", { method: "DELETE" })
-    expect((await DELETE(req)).status).toBe(500)
+    expect((await DELETE(req)).status).toBe(502)
     expect(invalidateFor).not.toHaveBeenCalled()
   })
 })
