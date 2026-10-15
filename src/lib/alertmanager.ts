@@ -69,6 +69,46 @@ export async function getSilence(silenceId: string): Promise<AlertmanagerSilence
   }
 }
 
+export type AlertmanagerLookupFailure = "credential" | "forbidden" | "unavailable"
+
+/**
+ * Typed failure of the write-precondition lookup. Messages are fixed strings: they
+ * never carry the Alertmanager URL/host (HttpClientError messages do), so a route
+ * can return them directly (#47).
+ */
+export class AlertmanagerLookupError extends Error {
+  constructor(readonly failure: AlertmanagerLookupFailure, message: string) {
+    super(message)
+    this.name = "AlertmanagerLookupError"
+  }
+}
+
+/**
+ * Write-precondition variant of getSilence (#47): null ONLY for an explicit 404
+ * (silence does not exist). 401, 403, other non-2xx, timeout/network failure and a
+ * body that is not a silence all throw AlertmanagerLookupError, because they are
+ * unknown provider state, not "absent". getSilence keeps its swallow contract for
+ * other callers.
+ */
+export async function getSilenceOrThrow(silenceId: string): Promise<AlertmanagerSilence | null> {
+  let body: AlertmanagerSilence
+  try {
+    const res = await fetchWithPolicy(`${alertmanagerUrl()}/api/v2/silence/${encodeURIComponent(silenceId)}`)
+    if (res.status === 404) return null
+    if (res.status === 401) throw new AlertmanagerLookupError("credential", "Alertmanager rejected the portal credentials")
+    if (res.status === 403) throw new AlertmanagerLookupError("forbidden", "Alertmanager denied access to the silence")
+    if (!res.ok) throw new AlertmanagerLookupError("unavailable", `Alertmanager silence lookup failed: ${res.status}`)
+    body = await readJsonWithPolicy<AlertmanagerSilence>(res)
+  } catch (err) {
+    if (err instanceof AlertmanagerLookupError) throw err
+    throw new AlertmanagerLookupError("unavailable", "Alertmanager is unreachable")
+  }
+  if (typeof body?.id !== "string" || typeof body.createdBy !== "string" || !Array.isArray(body.matchers)) {
+    throw new AlertmanagerLookupError("unavailable", "Alertmanager returned a malformed silence")
+  }
+  return body
+}
+
 export async function deleteSilence(silenceId: string): Promise<boolean> {
   try {
     // DELETE mutates alertmanager's silence state — retry: false explicitly,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
-import { createSilence, deleteSilence, getSilence } from "@/lib/alertmanager"
+import { AlertmanagerLookupError, createSilence, deleteSilence, getSilenceOrThrow } from "@/lib/alertmanager"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 import { claimIdempotencyKey, fulfillIdempotencyKey, getIdempotencyStore } from "@/lib/idempotency"
 import { checkSilenceScope, type SilenceMatcher } from "@/lib/alert-silence-scope"
@@ -170,7 +170,16 @@ export async function DELETE(req: Request) {
   // operation's resource.namespace source.
   let namespaceHint: string | undefined
   if (session.user.role !== "cluster-admin") {
-    const existing = await getSilence(silenceId)
+    let existing: Awaited<ReturnType<typeof getSilenceOrThrow>>
+    try {
+      existing = await getSilenceOrThrow(silenceId)
+    } catch (err) {
+      // #47: a failed lookup is unknown provider state, not "silence absent" — never 404.
+      if (!(err instanceof AlertmanagerLookupError)) throw err
+      console.error("[api/alerts/silence]", err.message)
+      const status = err.failure === "forbidden" ? 403 : err.failure === "credential" ? 503 : 502
+      return NextResponse.json({ error: err.message }, { status })
+    }
     if (!existing) return NextResponse.json({ error: "Silence not found" }, { status: 404 })
     const me = session.user.email ?? session.user.name ?? "unknown"
     if (existing.createdBy !== me) {
