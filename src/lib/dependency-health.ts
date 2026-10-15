@@ -89,6 +89,14 @@ export function aggregateDependencyHealth(statuses: readonly DependencyStatus[])
     "",
   ) || new Date().toISOString()
 
+  // D2: no statuses is absence of evidence, not health — `[].every()` is vacuously true and
+  // would otherwise yield a false-green "ok" (e.g. from a truncated/tampered cached snapshot).
+  // Cost: an empty probe set now surfaces as "unavailable"; escape hatch: callers that
+  // legitimately probe nothing must not call this aggregate.
+  if (statuses.length === 0) {
+    return { state: "unavailable", observedAt }
+  }
+
   if (statuses.every(({ state }) => state === "ok" || state === "empty")) {
     return { state: "ok", observedAt }
   }

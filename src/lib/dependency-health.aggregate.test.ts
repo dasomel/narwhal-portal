@@ -11,7 +11,7 @@ describe("aggregateDependencyHealth", () => {
   it.each([
     ["all ok", [status("kubernetes", "ok"), status("argocd", "ok")], "ok"],
     ["empty results", [status("prometheus", "empty")], "ok"],
-    ["no dependencies", [], "ok"],
+    ["no dependencies (absence of evidence is not health)", [], "unavailable"],
     ["partial core", [status("kubernetes", "partial")], "degraded"],
     ["stale core", [status("prometheus", "stale")], "degraded"],
     ["unavailable optional", [status("argocd", "unavailable")], "degraded"],
