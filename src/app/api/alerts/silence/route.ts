@@ -170,22 +170,23 @@ export async function DELETE(req: Request) {
   // operation's resource.namespace source.
   let namespaceHint: string | undefined
   if (session.user.role !== "cluster-admin") {
-    let existing: Awaited<ReturnType<typeof getSilenceOrThrow>>
+    // #47: any throw from lookup or from evaluating the result fails closed (502, no DELETE).
     try {
-      existing = await getSilenceOrThrow(silenceId)
+      const existing = await getSilenceOrThrow(silenceId)
+      if (!existing) return NextResponse.json({ error: "Silence not found" }, { status: 404 })
+      const me = session.user.email ?? session.user.name ?? "unknown"
+      if (existing.createdBy !== me) {
+        return NextResponse.json({ error: "Forbidden: not silence owner" }, { status: 403 })
+      }
+      namespaceHint = existing.matchers.find((m) => m.name === "namespace")?.value
     } catch (err) {
-      // #47: a failed lookup is unknown provider state, not "silence absent" — never 404.
-      if (!(err instanceof AlertmanagerLookupError)) throw err
-      console.error("[api/alerts/silence]", err.message)
-      const status = err.failure === "forbidden" ? 403 : err.failure === "credential" ? 503 : 502
-      return NextResponse.json({ error: err.message }, { status })
+      // A failed lookup is unknown provider state, not "silence absent" — never 404.
+      const lookup =
+        err instanceof AlertmanagerLookupError ? err : new AlertmanagerLookupError("unavailable", "Alertmanager returned a malformed silence")
+      console.error("[api/alerts/silence]", lookup.message)
+      const status = lookup.failure === "forbidden" ? 403 : lookup.failure === "credential" ? 503 : 502
+      return NextResponse.json({ error: lookup.message }, { status })
     }
-    if (!existing) return NextResponse.json({ error: "Silence not found" }, { status: 404 })
-    const me = session.user.email ?? session.user.name ?? "unknown"
-    if (existing.createdBy !== me) {
-      return NextResponse.json({ error: "Forbidden: not silence owner" }, { status: 403 })
-    }
-    namespaceHint = existing.matchers.find((m) => m.name === "namespace")?.value
   }
   // cluster-admin path skips the ownership fetch above, so resource.namespace
   // stays undefined there rather than paying an extra Alertmanager round trip

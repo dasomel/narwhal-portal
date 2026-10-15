@@ -90,6 +90,25 @@ describe("DELETE /api/alerts/silence ownership lookup mapping (#47, fetch-level)
     expect(mockFetch.mock.calls.some(isDelete)).toBe(false)
   })
 
+  const m = (over: object) => ({ ...silence("dev@example.com"), ...over })
+  const badBodies: Array<[string, unknown]> = [
+    ["matchers [null]", m({ matchers: [null] })],
+    ["matchers []", m({ matchers: [] })],
+    ["matchers [{}]", m({ matchers: [{}] })],
+    ["matchers non-object element", m({ matchers: ["namespace"] })],
+    ["matcher name not a string", m({ matchers: [{ name: 1, value: "x" }] })],
+    ["matcher value not a string", m({ matchers: [{ name: "namespace", value: null }] })],
+    ["response id differs from requested id", m({ id: "sil-other" })],
+    ["body is an array", []],
+  ]
+  it.each(badBodies)("owner + %s -> 502, no DELETE sent (#47 fail closed)", async (_label, body) => {
+    alertmanager(() => json(body, 200))
+    const { status, text } = await call()
+    expect(status).toBe(502)
+    expect(text).not.toContain(FAKE_HOST)
+    expect(mockFetch.mock.calls.some(isDelete)).toBe(false)
+  })
+
   it("non-owner is still 403 and sends no DELETE", async () => {
     alertmanager(() => json(silence("someone-else@example.com"), 200))
     const { status } = await call()

@@ -6,7 +6,7 @@ vi.mock("./valkey", () => ({
 }))
 
 import { cacheGet, cacheSet } from "./valkey"
-import { createSilence, getSilence, deleteSilence, getAlerts } from "./alertmanager"
+import { createSilence, getSilence, getSilenceOrThrow, deleteSilence, getAlerts } from "./alertmanager"
 
 // portal#48: these functions now read their response via fetchWithPolicy's
 // readJsonWithPolicy, which reads response.body directly (not response.json())
@@ -155,6 +155,36 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
       const res = await pending
 
       expect(res).toEqual([])
+    })
+  })
+
+  describe("getSilenceOrThrow body validation (#47)", () => {
+    const ok = { id: "sil-1", createdBy: "dev@example.com", matchers: [{ name: "namespace", value: "x", isRegex: false }] }
+    const bad: Array<[string, unknown]> = [
+      ["matchers [null]", { ...ok, matchers: [null] }],
+      ["matchers []", { ...ok, matchers: [] }],
+      ["matchers [{}]", { ...ok, matchers: [{}] }],
+      ["matchers non-object element", { ...ok, matchers: ["namespace"] }],
+      ["matcher name not a string", { ...ok, matchers: [{ name: 1, value: "x" }] }],
+      ["matcher value not a string", { ...ok, matchers: [{ name: "n", value: null }] }],
+      ["isEqual not a boolean", { ...ok, matchers: [{ name: "n", value: "v", isEqual: "yes" }] }],
+      ["id differs from requested", { ...ok, id: "sil-other" }],
+      ["createdBy not a string", { ...ok, createdBy: 7 }],
+      ["body is an array", []],
+      ["body is null", null],
+    ]
+    it.each(bad)("%s -> AlertmanagerLookupError unavailable", async (_l, body) => {
+      mockFetch.mockResolvedValueOnce(jsonResponse(body))
+      await expect(getSilenceOrThrow("sil-1")).rejects.toMatchObject({ name: "AlertmanagerLookupError", failure: "unavailable" })
+    })
+    it("accepts a legitimate expired silence (empty createdBy, isEqual absent, full gettableSilence)", async () => {
+      const legit = {
+        id: "sil-1", status: { state: "expired" }, updatedAt: "2026-10-15T00:00:00Z", startsAt: "a", endsAt: "b",
+        createdBy: "", comment: "",
+        matchers: [{ name: "a", value: "b", isRegex: true }, { name: "c", value: "", isRegex: false, isEqual: false }],
+      }
+      mockFetch.mockResolvedValueOnce(jsonResponse(legit))
+      await expect(getSilenceOrThrow("sil-1")).resolves.toMatchObject({ id: "sil-1" })
     })
   })
 })

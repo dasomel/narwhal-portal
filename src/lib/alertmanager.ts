@@ -103,10 +103,34 @@ export async function getSilenceOrThrow(silenceId: string): Promise<Alertmanager
     if (err instanceof AlertmanagerLookupError) throw err
     throw new AlertmanagerLookupError("unavailable", "Alertmanager is unreachable")
   }
-  if (typeof body?.id !== "string" || typeof body.createdBy !== "string" || !Array.isArray(body.matchers)) {
+  if (!isValidSilence(body, silenceId)) {
     throw new AlertmanagerLookupError("unavailable", "Alertmanager returned a malformed silence")
   }
   return body
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
+
+/**
+ * Validates every field the caller dereferences or compares (id, createdBy, matchers[].name/value)
+ * and binds the response to the requested id; fields the v2 gettableSilence may omit
+ * (isEqual, comment, status…) are not required. Empty matchers is never a real silence.
+ */
+function isValidSilence(body: unknown, silenceId: string): body is AlertmanagerSilence {
+  if (!isRecord(body) || body.id !== silenceId || typeof body.createdBy !== "string") return false
+  const { matchers } = body
+  return (
+    Array.isArray(matchers) &&
+    matchers.length > 0 &&
+    matchers.every(
+      (m) =>
+        isRecord(m) &&
+        typeof m.name === "string" &&
+        typeof m.value === "string" &&
+        (m.isRegex === undefined || typeof m.isRegex === "boolean") &&
+        (m.isEqual === undefined || typeof m.isEqual === "boolean"),
+    )
+  )
 }
 
 export async function deleteSilence(silenceId: string): Promise<boolean> {
