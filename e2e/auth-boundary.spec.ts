@@ -28,7 +28,7 @@ for (const { label, role, namespaceStatus, routesStatus } of [
     // this isolates permission coverage, leaving first-visit login races separate.
     expect((await page.request.get("/api/auth/csrf")).status()).toBe(200)
     await page.goto("/login?callbackUrl=%2Fapi%2Fauth%2Fsession")
-    await page.getByRole("button", { name: `${label}으로 로그인` }).click()
+    await page.getByRole("button", { name: `${label}으로 로그인`, exact: true }).click()
     await expect(page).toHaveURL(/\/api\/auth\/session$/)
 
     const session = await page.request.get("/api/auth/session")
