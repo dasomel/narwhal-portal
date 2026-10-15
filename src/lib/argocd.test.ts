@@ -184,6 +184,27 @@ describe("assertAppAccessible provider failure is not NotFound (#47)", () => {
     expect(err.message).toMatch(/malformed/i)
   })
 
+  it("fresh Application with status {} (pre-first-reconcile) is accessible", async () => {
+    respond({ metadata: { name: "fresh" }, spec: { project: "platform", destination: { namespace: "platform-system" } }, status: {} }, 200)
+    await expect(assertAppAccessible("fresh", admin)).resolves.toMatchObject({ metadata: { name: "fresh" } })
+  })
+
+  it("fresh Application with no status at all is accessible", async () => {
+    respond({ metadata: { name: "fresh" }, spec: { project: "platform", destination: { namespace: "platform-system" } } }, 200)
+    await expect(assertAppAccessible("fresh", admin)).resolves.toMatchObject({ metadata: { name: "fresh" } })
+  })
+
+  it.each([
+    ["metadata.name", { metadata: {}, spec: { project: "p" } }],
+    ["spec", { metadata: { name: "x" } }],
+  ])("200 body lacking %s is a provider error, not an app", async (_label, body) => {
+    respond(body, 200)
+    const err = await assertAppAccessible("x", admin).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(ArgoNotFoundError)
+    expect(err.message).toMatch(/malformed/i)
+  })
+
   it("200 with a valid Application still resolves (normal path)", async () => {
     respond(makeApp("platform", "platform-system"), 200)
     await expect(assertAppAccessible("svc", admin)).resolves.toMatchObject({ spec: { project: "platform" } })

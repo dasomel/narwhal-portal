@@ -169,14 +169,16 @@ async function getArgoAppOrThrow(name: string): Promise<ArgoApp | null> {
   if (res.status === 403) throw new ArgoForbiddenError("ArgoCD denied access to the application")
   if (!res.ok) throw new Error(`ArgoCD application lookup failed: ${res.status}`)
   const app = await readJsonWithPolicy<ArgoApp>(res)
-  if (!app?.metadata?.name || !app.spec || !app.status?.sync) {
+  // status is deliberately not required: a brand-new Application has none until the first reconcile;
+  // spec.project/destination are enforced (fail closed) where assertAppAccessible reads them.
+  if (typeof app?.metadata?.name !== "string" || !app.metadata.name || typeof app.spec !== "object" || app.spec === null) {
     throw new Error("ArgoCD application lookup returned a malformed Application")
   }
   await cacheSet(cacheKey, app, 10)
   return app
 }
 
-export type ScoreTier ="gold" | "silver" | "bronze" | "none"
+export type ScoreTier = "gold" | "silver" | "bronze" | "none"
 
 export interface CatalogService {
   name: string
