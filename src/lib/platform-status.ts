@@ -1,7 +1,7 @@
 import { cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
-import { getArgoApps } from "./argocd"
-import { getAlerts } from "./alertmanager"
+import { getArgoAppsOrThrow } from "./argocd"
+import { getAlertsOrThrow } from "./alertmanager"
 import { getNodeReadiness, getControlPlaneHealth, type ControlPlanePodHealth } from "./k8s-client"
 import type { PlatformStatus, StatusComponent, StatusIncident, ComponentStatus } from "@/types/api"
 
@@ -109,7 +109,12 @@ function matchIncidentComponent(
   return null
 }
 
-function buildSummary(overall: ComponentStatus, components: StatusComponent[], incidents: StatusIncident[]): string {
+function buildSummary(
+  overall: ComponentStatus,
+  components: StatusComponent[],
+  incidents: StatusIncident[],
+  unavailable: string[],
+): string {
   if (overall === "healthy") return "All systems operational"
   const unhealthy = components.filter((c) => c.status === "degraded" || c.status === "down")
   const names = unhealthy.map((c) => c.id).join(", ")
@@ -117,7 +122,26 @@ function buildSummary(overall: ComponentStatus, components: StatusComponent[], i
     return `Critical outage: ${names || "control-plane"} down`
   }
   const incidentNote = incidents.length > 0 ? `, ${incidents.length} active incident(s)` : ""
-  return `${unhealthy.length} component(s) degraded: ${names}${incidentNote}`
+  const unavailableNote = unavailable.length > 0 ? `, status incomplete: ${unavailable.join(", ")} unreachable` : ""
+  return `${unhealthy.length} component(s) degraded: ${names}${incidentNote}${unavailableNote}`
+}
+
+const COMPONENT_STATUSES: readonly string[] = ["healthy", "degraded", "down", "unknown"]
+
+/** Cache entries are untrusted input (#53): a malformed or tampered entry must be a miss, never a served "healthy". */
+function isPlatformStatus(value: unknown): value is PlatformStatus {
+  if (typeof value !== "object" || value === null) return false
+  const v = value as Partial<PlatformStatus>
+  return (
+    typeof v.overall === "string" &&
+    COMPONENT_STATUSES.includes(v.overall) &&
+    typeof v.summary === "string" &&
+    typeof v.generatedAt === "string" &&
+    Array.isArray(v.components) &&
+    Array.isArray(v.incidents) &&
+    typeof v.nodes?.total === "number" &&
+    typeof v.nodes?.ready === "number"
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -125,14 +149,20 @@ function buildSummary(overall: ComponentStatus, components: StatusComponent[], i
 // ---------------------------------------------------------------------------
 
 export async function getPlatformStatus(): Promise<PlatformStatus> {
-  const cached = await cacheGet<PlatformStatus>(cacheKeys.platformStatus())
-  if (cached) return cached
+  const cached = await cacheGet<unknown>(cacheKeys.platformStatus())
+  if (isPlatformStatus(cached)) return cached
 
+  // D1 (#53): getArgoApps/getAlerts swallow failure into [] (their READ contract,
+  // portal#54 D1), so a `fulfilled` result from them proves nothing — an
+  // unreachable ArgoCD/Alertmanager looked like "no apps / no incidents" and was
+  // reported (and cached) as All systems operational. The OrThrow variants make
+  // failure observable here. Cost: a status request during an outage re-queries
+  // the providers (their own timeouts bound it) because that result is not cached.
   const [nodesResult, controlPlaneResult, argoResult, alertsResult] = await Promise.allSettled([
     getNodeReadiness(),
     getControlPlaneHealth(),
-    getArgoApps(),
-    getAlerts(),
+    getArgoAppsOrThrow(),
+    getAlertsOrThrow(),
   ])
 
   const nodes = nodesResult.status === "fulfilled" ? nodesResult.value : { total: 0, ready: 0 }
@@ -160,6 +190,35 @@ export async function getPlatformStatus(): Promise<PlatformStatus> {
     })
   }
 
+  // Providers whose read FAILED (not "returned nothing"). Reported as `unknown`
+  // components so the UI shows what we could not observe, and forced to at
+  // least degraded below.
+  const unavailable: string[] = []
+  if (argoResult.status === "rejected") {
+    unavailable.push("argocd")
+    components.push({
+      id: "argocd",
+      name: "ArgoCD",
+      category: "gitops",
+      status: "unknown",
+      detail: "provider unreachable",
+      source: "argocd",
+      impacts: DEPENDENCY_MAP.argocd ?? [],
+    })
+  }
+  if (alertsResult.status === "rejected") {
+    unavailable.push("alertmanager")
+    components.push({
+      id: "alertmanager",
+      name: "Alertmanager",
+      category: "observability",
+      status: "unknown",
+      detail: "provider unreachable",
+      source: "alertmanager",
+      impacts: [],
+    })
+  }
+
   const componentIds = components.map((c) => c.id)
   const incidents: StatusIncident[] = alerts.map((a, idx) => ({
     id: `alert-${a.labels.alertname ?? "unknown"}-${idx}`,
@@ -173,25 +232,29 @@ export async function getPlatformStatus(): Promise<PlatformStatus> {
   const anyCriticalDown = components.some((c) => CRITICAL_CATEGORIES.has(c.category) && c.status === "down")
   const anyUnhealthy = components.some((c) => c.status === "degraded" || c.status === "down")
   // "unknown" on a critical component (e.g. apiserver/etcd selector matched no
-  // pods, or ArgoCD couldn't report) means we CANNOT confirm the platform's
-  // core is healthy — surface that as degraded rather than a falsely-green
-  // overall. Non-critical unknowns stay tolerated.
+  // pods) means we CANNOT confirm the platform's core is healthy — surface that
+  // as degraded rather than a falsely-green overall. Non-critical unknowns stay
+  // tolerated, except an unreachable provider (`unavailable`), which is never healthy.
   const anyCriticalUnknown = components.some((c) => CRITICAL_CATEGORIES.has(c.category) && c.status === "unknown")
 
   let overall: ComponentStatus
   if (anyCriticalDown) overall = "down"
-  else if (anyUnhealthy || anyCriticalUnknown || incidents.length > 0) overall = "degraded"
+  else if (anyUnhealthy || anyCriticalUnknown || incidents.length > 0 || unavailable.length > 0) overall = "degraded"
   else overall = "healthy"
 
   const result: PlatformStatus = {
     overall,
-    summary: buildSummary(overall, components, incidents),
+    summary: buildSummary(overall, components, incidents, unavailable),
     nodes,
     components,
     incidents,
     generatedAt: new Date().toISOString(),
   }
 
-  await cacheSet(cacheKeys.platformStatus(), result, cacheTtl("platformStatus"))
+  // cachesPartial is false for this namespace (cache-keys.ts): an answer built
+  // with a provider missing must not be served again for the TTL as if complete.
+  if (unavailable.length === 0) {
+    await cacheSet(cacheKeys.platformStatus(), result, cacheTtl("platformStatus"))
+  }
   return result
 }
