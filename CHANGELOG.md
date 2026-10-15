@@ -26,10 +26,12 @@ cosign signing step failed), so this section covers everything since 1.0.17.
   process start). With `VALKEY_URL` or `VALKEY_PASSWORD` set, `/api/health/ready` then returns
   503 (`Critical cache dependency unavailable`), so a rollout never becomes Ready (unless
   `AUTH_MOCK=true`). If neither variable is set, the probe skips Valkey and returns 200 and the
-  cache is silently disabled: the cache helpers (`cacheGet`, `cacheGetWithMeta`, `cacheSet`,
-  `cacheDel`) catch the secure-config error and return null. Code that calls `getValkey()` /
+  cache is silently disabled: the cache helpers catch the secure-config error (`cacheGet` and
+  `cacheGetWithMeta` return null; `cacheSet` and `cacheDel` are no-ops). Code that calls `getValkey()` /
   `getLiveValkey()` directly sees the throw; live-event persistence and idempotency claims catch
-  it and degrade to their in-memory paths. **The narwhal
+  it and degrade to process-local in-memory paths: idempotency claims are not shared across
+  replicas (duplicate ingests are no longer deduplicated between replicas), live events are
+  neither persisted nor published to other replicas, and both are lost on restart. **The narwhal
   GitOps chart at the time of writing still injects `VALKEY_INSECURE_PRODUCTION=true` and a
   plaintext `redis://` URL against a Valkey without TLS or ACL, so this portal version cannot be
   deployed with it until narwhal provides Valkey TLS + ACL and matching bindings.** Images up to
@@ -67,7 +69,8 @@ cosign signing step failed), so this section covers everything since 1.0.17.
 - **The live event stream is default-deny (3c4c36a)**: a namespace-less event is shown to
   non-admin users only if it declares `visibility: "cluster"`; otherwise it is hidden. The
   title/description namespace-regex fallback is removed. Producers must set `resource.namespace`
-  or `visibility: "cluster"`.
+  or `visibility: "cluster"`. Viewers and guests also still lose `node` events and events whose
+  description contains "secret".
 - **`/api/secrets` fails visibly and returns no key names (0c715f5)**: a metadata read failure
   now returns 502 `{error, degraded: true}` instead of `[]`, and the response no longer carries
   secret key names. The inventory now reads only KV v2 `secret/metadata/<path>` and no longer
@@ -192,7 +195,8 @@ cosign signing step failed), so this section covers everything since 1.0.17.
   (#164).
 - **Outage recovery for live events (#183, 1b8f5ca)**: a numeric pre-outage `Last-Event-ID`
   cursor now replays from the process-local ring, idempotency claims made during a Valkey outage
-  survive Valkey recovery, and a 410 relist ingests the page it already fetched.
+  survive Valkey recovery within the same process, and a 410 relist ingests the page it already
+  fetched (only the most recent event, not a full backlog).
 
 ### Security
 - **Authenticated Valkey TLS in production** (#205; see Upgrade notes).

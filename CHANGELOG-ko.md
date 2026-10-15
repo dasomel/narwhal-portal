@@ -24,10 +24,12 @@
   실패는 지연 발생(프로세스 시작 시가 아니라 첫 Valkey 사용 시)임. `VALKEY_URL` 또는
   `VALKEY_PASSWORD`가 설정된 경우 `/api/health/ready`가 503(`Critical cache dependency unavailable`)을
   반환하므로 롤아웃은 Ready가 되지 못함(`AUTH_MOCK=true`가 아닌 경우). 두 변수가 모두 없으면 프로브가
-  Valkey를 건너뛰고 200을 반환하며 캐시는 조용히 비활성화됨: 캐시 헬퍼(`cacheGet`,
-  `cacheGetWithMeta`, `cacheSet`, `cacheDel`)가 보안 설정 오류를 잡아 null을 반환함.
+  Valkey를 건너뛰고 200을 반환하며 캐시는 조용히 비활성화됨: 캐시 헬퍼가 보안 설정 오류를 잡음(`cacheGet`과
+  `cacheGetWithMeta`는 null을 반환하고, `cacheSet`과 `cacheDel`은 아무 동작도 하지 않음).
   `getValkey()` / `getLiveValkey()`를 직접 호출하는 코드는 예외를 그대로 받으며, 라이브 이벤트
-  영속화와 멱등성 claim은 이를 잡아 인메모리 경로로 저하됨. **작성 시점의 narwhal GitOps 차트는 여전히
+  영속화와 멱등성 claim은 이를 잡아 프로세스 로컬 인메모리 경로로 저하됨: 멱등성 claim이 레플리카 간에
+  공유되지 않고(레플리카 사이의 중복 수집이 더 이상 걸러지지 않음), 라이브 이벤트는 영속화되지도 다른
+  레플리카로 게시되지도 않으며, 둘 다 재시작 시 사라짐. **작성 시점의 narwhal GitOps 차트는 여전히
   `VALKEY_INSECURE_PRODUCTION=true`와 평문 `redis://` URL을 TLS·ACL이 없는 Valkey에 대해 주입하므로,
   narwhal이 Valkey TLS + ACL과 대응하는 바인딩을 제공하기 전까지 이 포털 버전은 해당 차트와 함께
   배포할 수 없음.** 1.0.19까지의 이미지는 이 변경 이전임.
@@ -61,7 +63,8 @@
   (65,536바이트, `MAX_INGEST_BODY_SIZE_BYTES`)를 넘는 본문은 413을 반환함.
 - **라이브 이벤트 스트림은 기본 거부임 (3c4c36a)**: 네임스페이스가 없는 이벤트는 `visibility: "cluster"`를
   선언한 경우에만 관리자가 아닌 사용자에게 표시되며, 그 외에는 숨겨짐. 제목/설명의 네임스페이스
-  정규식 대체 경로는 제거됨. 생산자는 `resource.namespace` 또는 `visibility: "cluster"`를 설정해야 함.
+  정규식 대체 경로는 제거됨. 생산자는 `resource.namespace` 또는 `visibility: "cluster"`를 설정해야 함. 뷰어와 게스트는
+  여전히 `node` 이벤트와 설명에 "secret"이 포함된 이벤트도 볼 수 없음.
 - **`/api/secrets`는 실패를 드러내고 키 이름을 반환하지 않음 (0c715f5)**: 메타데이터 읽기 실패 시 `[]`
   대신 502 `{error, degraded: true}`를 반환하며, 응답에 시크릿 키 이름이 더 이상 포함되지 않음.
   인벤토리는 이제 KV v2 `secret/metadata/<path>`만 읽고 `secret/data/<path>`는 읽지 않으므로, 이
@@ -170,8 +173,8 @@
 - **이미지 빌드**: Kaniko 경로는 `latest` 대신 digest 파일과 함께 SHA 이름의 소스 태그를 푸시하고
   (a874ac7), 독립 실행형 이미지는 `@swc/helpers`를 포함하며 CI에서 smoke boot 됨(#164).
 - **라이브 이벤트 장애 복구 (#183, 1b8f5ca)**: 장애 이전의 숫자형 `Last-Event-ID` 커서가 이제 프로세스
-  로컬 링에서 재생되고, Valkey 장애 중에 이뤄진 멱등성 claim이 Valkey 복구 후에도 유지되며, 410 재조회는
-  이미 가져온 페이지를 수집함.
+  로컬 링에서 재생되고, Valkey 장애 중에 이뤄진 멱등성 claim이 같은 프로세스 안에서 Valkey 복구 후에도 유지되며, 410 재조회는
+  이미 가져온 페이지를 수집함(전체 백로그가 아니라 가장 최근 이벤트 하나만).
 
 ### 보안
 - **프로덕션 인증된 Valkey TLS** (#205, 업그레이드 노트 참고).
