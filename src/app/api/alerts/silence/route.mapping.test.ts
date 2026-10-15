@@ -186,6 +186,18 @@ describe("POST and DELETE /api/alerts/silence write outcome mapping (#47, fetch-
     ["malformed 2xx trailing-newline id", () => json({ silenceID: "abc\n" }, 200), 502, "unknown"],
     ["malformed 2xx leading-tab id", () => json({ silenceID: "\tabc" }, 200), 502, "unknown"],
     ["malformed 2xx inner-space id", () => json({ silenceID: "a b" }, 200), 502, "unknown"],
+    ["malformed 2xx U+200B id", () => json({ silenceID: "a​b" }, 200), 502, "unknown"],
+    ["malformed 2xx U+200C id", () => json({ silenceID: "a‌b" }, 200), 502, "unknown"],
+    ["malformed 2xx U+2060 id", () => json({ silenceID: "a⁠b" }, 200), 502, "unknown"],
+    ["malformed 2xx U+0085 id", () => json({ silenceID: "a\u0085b" }, 200), 502, "unknown"],
+    ["malformed 2xx NUL id", () => json({ silenceID: "a\u0000b" }, 200), 502, "unknown"],
+    ["malformed 2xx DEL id", () => json({ silenceID: "a\u007Fb" }, 200), 502, "unknown"],
+    ["malformed 2xx lone-surrogate id", () => json({ silenceID: "a" + String.fromCharCode(0xd800) }, 200), 502, "unknown"],
+    ["malformed 2xx path id", () => json({ silenceID: "a/../b" }, 200), 502, "unknown"],
+    ["malformed 2xx ampersand id", () => json({ silenceID: "a&silenceID=x" }, 200), 502, "unknown"],
+    ["malformed 2xx percent id", () => json({ silenceID: "a%2Fb" }, 200), 502, "unknown"],
+    ["malformed 2xx query id", () => json({ silenceID: "a?x=1" }, 200), 502, "unknown"],
+    ["malformed 2xx 129-char id", () => json({ silenceID: "a".repeat(129) }, 200), 502, "unknown"],
   ]
 
   const deleteCases: Array<[string, () => Response | Promise<Response>, number, string | undefined]> = [

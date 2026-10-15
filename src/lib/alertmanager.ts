@@ -72,6 +72,10 @@ function assertSilenceWriteAccepted(res: Response): void {
   throw new AlertmanagerSilenceOutcomeUnknownError()
 }
 
+// The created id is reused as a store key, cache key, title and later `DELETE ?id=`: allowlist
+// what we will reuse (Alertmanager v2 sends UUIDs); \S or trim would be a blocklist in disguise.
+const SILENCE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/
+
 export async function createSilence(
   matchers: Array<{ name: string; value: string; isRegex: boolean }>,
   durationMinutes: number,
@@ -109,10 +113,10 @@ export async function createSilence(
   } catch {
     throw new AlertmanagerSilenceOutcomeUnknownError()
   }
-  // Never return a value other than the one the server sent: an id with any whitespace
-  // (empty, padded, inner) is untrustworthy, not something to trim (UUIDs have none).
+  // Never return a value other than the one the server sent; anything off the allowlist is
+  // untrustworthy, not something to trim (see SILENCE_ID_RE).
   const silenceId = isRecord(data) ? data.silenceID : undefined
-  if (typeof silenceId !== "string" || !/^\S+$/.test(silenceId)) throw new AlertmanagerSilenceOutcomeUnknownError()
+  if (typeof silenceId !== "string" || !SILENCE_ID_RE.test(silenceId)) throw new AlertmanagerSilenceOutcomeUnknownError()
   return silenceId
 }
 

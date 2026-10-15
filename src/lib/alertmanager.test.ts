@@ -83,6 +83,26 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
       }
     )
 
+    it.each([
+      ["U+200B", "a​b"], ["U+200C", "a‌b"], ["U+2060", "a⁠b"], ["U+0085", "a\u0085b"],
+      ["NUL", "a\u0000b"], ["DEL", "a\u007Fb"], ["lone surrogate", "a" + String.fromCharCode(0xd800) + "b"],
+      ["path", "a/../b"], ["query-ish &", "a&silenceID=x"], ["percent", "a%2Fb"], ["query-ish ?", "a?x=1"],
+      ["129 chars", "a".repeat(129)],
+    ])("throws outcome-unknown on a non-allowlisted silenceID (%s)", async (_label, silenceID) => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID }))
+      await expect(
+        createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([["sil-new-1"], ["silence-123"], ["a".repeat(128)]])("returns allowlisted silenceID %s verbatim", async (id) => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID: id }))
+      await expect(
+        createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      ).resolves.toBe(id)
+    })
+
     it("returns a UUID silenceID verbatim", async () => {
       const id = "3f9c1d2e-7a4b-4c1e-9d3a-0b5e6f7a8b9c"
       mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID: id }))
