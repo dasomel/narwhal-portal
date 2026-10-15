@@ -152,7 +152,31 @@ export async function getArgoApp(name: string): Promise<ArgoApp | null> {
   }
 }
 
-export type ScoreTier = "gold" | "silver" | "bronze" | "none"
+/**
+ * #47: strict counterpart of getArgoApp for WRITE preconditions. Returns null only
+ * for an explicit 404 (app does not exist); credential rejection, 403, other non-2xx,
+ * timeout/network failure and a body that is not an Application all throw, because
+ * they are unknown provider state, not "app is absent". getArgoApp keeps its
+ * non-throwing contract for read fan-outs (D1, #54 review).
+ */
+async function getArgoAppOrThrow(name: string): Promise<ArgoApp | null> {
+  const cacheKey = `argocd:app:${name}`
+  const cached = await cacheGet<ArgoApp>(cacheKey)
+  if (cached) return cached
+
+  const res = await argoFetch(`/api/v1/applications/${encodeURIComponent(name)}`)
+  if (res.status === 404) return null
+  if (res.status === 403) throw new ArgoForbiddenError("ArgoCD denied access to the application")
+  if (!res.ok) throw new Error(`ArgoCD application lookup failed: ${res.status}`)
+  const app = await readJsonWithPolicy<ArgoApp>(res)
+  if (!app?.metadata?.name || !app.spec || !app.status?.sync) {
+    throw new Error("ArgoCD application lookup returned a malformed Application")
+  }
+  await cacheSet(cacheKey, app, 10)
+  return app
+}
+
+export type ScoreTier ="gold" | "silver" | "bronze" | "none"
 
 export interface CatalogService {
   name: string
@@ -359,7 +383,7 @@ export function getAllowedProjects(actor: ArgoActor): Set<string> | null {
  * Throws ArgoForbiddenError or ArgoNotFoundError on failure.
  */
 export async function assertAppAccessible(name: string, actor: ArgoActor): Promise<ArgoApp> {
-  const app = await getArgoApp(name)
+  const app = await getArgoAppOrThrow(name)
   if (!app) throw new ArgoNotFoundError(`Application not found: ${name}`)
   const project = app.spec.project ?? "default"
   const allowed = getAllowedProjects(actor)
