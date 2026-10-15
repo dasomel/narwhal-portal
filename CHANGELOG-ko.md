@@ -9,7 +9,7 @@
 
 ## [Unreleased]
 
-프로덕션 보안 기준을 강화하고(인증된 Valkey TLS, 명시적 OpenBao 인증 모드, 의존성 설정 fail-fast,
+프로덕션 보안 기준을 강화하고(인증된 Valkey TLS, 명시적 OpenBao 인증 모드, 호출 시점 의존성 설정 검사,
 네임스페이스 범위 읽기) provider 장애가 조용히 정상으로 보이지 않도록 수정함. 쓰기 라우트는 이제
 거절·자격 증명·결과 미상을 구분하며, ArgoCD나 Alertmanager를 읽을 수 없을 때 플랫폼 상태가 더 이상
 정상으로 표시되지 않음. 1.0.18과 1.0.19 태그는 푸시되었으나 cosign 서명 단계 실패로 GitHub Release로
@@ -24,7 +24,10 @@
   실패는 지연 발생(프로세스 시작 시가 아니라 첫 Valkey 사용 시)임. `VALKEY_URL` 또는
   `VALKEY_PASSWORD`가 설정된 경우 `/api/health/ready`가 503(`Critical cache dependency unavailable`)을
   반환하므로 롤아웃은 Ready가 되지 못함(`AUTH_MOCK=true`가 아닌 경우). 두 변수가 모두 없으면 프로브가
-  Valkey를 건너뛰고 200을 반환하며, 첫 Valkey 사용 시 예외가 발생함. **작성 시점의 narwhal GitOps 차트는 여전히
+  Valkey를 건너뛰고 200을 반환하며 캐시는 조용히 비활성화됨: 캐시 헬퍼(`cacheGet`,
+  `cacheGetWithMeta`, `cacheSet`, `cacheDel`)가 보안 설정 오류를 잡아 null을 반환함.
+  `getValkey()` / `getLiveValkey()`를 직접 호출하는 코드는 예외를 그대로 받으며, 라이브 이벤트
+  영속화와 멱등성 claim은 이를 잡아 인메모리 경로로 저하됨. **작성 시점의 narwhal GitOps 차트는 여전히
   `VALKEY_INSECURE_PRODUCTION=true`와 평문 `redis://` URL을 TLS·ACL이 없는 Valkey에 대해 주입하므로,
   narwhal이 Valkey TLS + ACL과 대응하는 바인딩을 제공하기 전까지 이 포털 버전은 해당 차트와 함께
   배포할 수 없음.** 1.0.19까지의 이미지는 이 변경 이전임.
@@ -43,7 +46,8 @@
   `GITEA_URL`, `KEYCLOAK_INTERNAL_URL`은 더 이상 localhost나 클러스터 내부 기본값으로 대체되지
   않음(752273f, 451bec8). `getDependencyUrl()`(`src/lib/config.ts`)은 첫 사용 시
   `Missing required production configuration: <NAME>` 예외를 던지며(시작 시가 아님),
-  `/api/health/ready`는 이를 표시하지 않음(`validateRuntimeConfig`는 `missingOptional`로만 나열함).
+  `/api/health/ready`는 누락된 값을 표시하지 않음(`validateRuntimeConfig`는 `missingOptional`로만
+  나열하며, https가 아닌 `GITEA_URL`은 표시함).
   `SLO_CHAIN_START`도 이제 프로덕션의 federated logout에 필수이며 없으면 예외를 던짐(451bec8).
   `KEYCLOAK_ISSUER`와 `GITEA_URL`은 `https://`여야 하며(#110), `APISIX_API_KEY_READONLY`는 더 이상
   관리자용 `APISIX_API_KEY`로 대체되지 않음(#112).
@@ -53,16 +57,15 @@
   1a27584, 1e35aac).
 - **`/api/events/ingest`가 기존 이벤트 생산자에게 더 엄격해짐 (3344e78)**: `idempotency_key`와
   `source_event_id`가 모두 없는 요청은 400을 반환하고(v1.0.17 라우트에는 이 요구사항이 없었음),
-  `X-Producer-Id`(또는 `X-Ingest-Producer`) 헤더가 본문 `source`와 다르면 403을 반환하며, 64 KB
-  (`MAX_INGEST_BODY_SIZE_BYTES`)를 넘는 본문은 Payload Too Large로 거부됨.
-- **라이브 이벤트 스트림은 기본 거부임 (3c4c36a)**: `resource.namespace`와 `visibility`(`system`,
-  `cluster`, `namespace`, `team`)가 모두 없는 이벤트는 관리자가 아닌 사용자에게 숨겨지며, 제목/설명의
-  네임스페이스 정규식 대체 경로는 제거됨. `/api/events/ingest`로 전송하는 외부 생산자는 둘 중 하나를
-  설정해야 함.
+  `X-Producer-Id`(또는 `X-Ingest-Producer`) 헤더가 본문 `source`와 다르면 403을 반환하며, 64 KiB
+  (65,536바이트, `MAX_INGEST_BODY_SIZE_BYTES`)를 넘는 본문은 413을 반환함.
+- **라이브 이벤트 스트림은 기본 거부임 (3c4c36a)**: 네임스페이스가 없는 이벤트는 `visibility: "cluster"`를
+  선언한 경우에만 관리자가 아닌 사용자에게 표시되며, 그 외에는 숨겨짐. 제목/설명의 네임스페이스
+  정규식 대체 경로는 제거됨. 생산자는 `resource.namespace` 또는 `visibility: "cluster"`를 설정해야 함.
 - **`/api/secrets`는 실패를 드러내고 키 이름을 반환하지 않음 (0c715f5)**: 메타데이터 읽기 실패 시 `[]`
   대신 502 `{error, degraded: true}`를 반환하며, 응답에 시크릿 키 이름이 더 이상 포함되지 않음.
   인벤토리는 이제 KV v2 `secret/metadata/<path>`만 읽고 `secret/data/<path>`는 읽지 않으므로, 이
-  라우트에는 포털의 OpenBao 정책에 메타데이터 읽기가 필요하고 데이터 읽기는 필요하지 않음.
+  라우트에는 포털의 OpenBao 정책에 메타데이터 목록 조회와 읽기가 필요하고 데이터 읽기는 필요하지 않음.
 - **`/api/cluster`는 guest를 거부함 (de1edc7)**: 이제 `cluster-admin`, `developer`, `viewer`가
   필요하며 그 밖의 역할에는 403을 반환함. 이전에는 세션만 있으면 됐음.
 - **프로덕션에서 kubeconfig 다운로드에는 `K8S_API_SERVER`가 필요함 (506c279)**: 다운로드되는
@@ -144,6 +147,10 @@
 - **의존성**: Next.js 16.3.5와 React 19.3.0(#170), `@base-ui/react` 1.8.0(#212), `@grpc/grpc-js`
   1.14.5(#211), `upload-artifact`, `download-artifact`, `setup-node`, `harden-runner` GitHub Actions
   묶음 업데이트(#230, #233, #232, #231).
+- **Kaniko 빌드 증거 (#169, 5df84c5)**: `kaniko-build.sh`가 빌드 성공 후 `build-evidence/<tag>.json`을
+  기록하며, 이미지 digest 형식이 잘못되면 실패함.
+- **타입이 있는 Kubernetes 자격 증명 오류 (#176, d34cc54)**: 토큰 갱신 후에도 401이 남거나 403이면
+  `K8sCredentialError`가 발생함.
 
 ### 수정
 - **읽기 범위 누락 해소**: `/api/cost`(2ba8fc5)와 상세·추세 라우트(#123), `/api/governance/resources`
@@ -160,8 +167,11 @@
 - **만료된 목록 continue 토큰**: 상한이 있는 Kubernetes 목록은 410에서 한 번 재시작함(#141).
 - **Kubeconfig 서버**: 다운로드한 kubeconfig는 클러스터 내부가 아닌 외부 API 서버 주소를 사용함
   (506c279).
-- **이미지 빌드**: Kaniko 경로는 `latest` 대신 digest 파일과 함께 불변 소스 SHA 태그를 푸시하고
+- **이미지 빌드**: Kaniko 경로는 `latest` 대신 digest 파일과 함께 SHA 이름의 소스 태그를 푸시하고
   (a874ac7), 독립 실행형 이미지는 `@swc/helpers`를 포함하며 CI에서 smoke boot 됨(#164).
+- **라이브 이벤트 장애 복구 (#183, 1b8f5ca)**: 장애 이전의 숫자형 `Last-Event-ID` 커서가 이제 프로세스
+  로컬 링에서 재생되고, Valkey 장애 중에 이뤄진 멱등성 claim이 Valkey 복구 후에도 유지되며, 410 재조회는
+  이미 가져온 페이지를 수집함.
 
 ### 보안
 - **프로덕션 인증된 Valkey TLS** (#205, 업그레이드 노트 참고).

@@ -10,7 +10,7 @@ English | [한국어](CHANGELOG-ko.md)
 ## [Unreleased]
 
 Hardens the portal's production posture (authenticated Valkey TLS, explicit OpenBao auth mode,
-fail-fast dependency configuration, namespace-scoped reads) and makes provider failures visible
+call-time dependency configuration checks, namespace-scoped reads) and makes provider failures visible
 instead of silently healthy: write routes now distinguish rejected, credential and
 outcome-unknown results, and platform status no longer reports green when ArgoCD or Alertmanager
 cannot be read. Tags 1.0.18 and 1.0.19 were pushed but never published as GitHub Releases (the
@@ -25,8 +25,11 @@ cosign signing step failed), so this section covers everything since 1.0.17.
   See `docs/security-clean-install.md` section 6. The failure is lazy (first Valkey use, not
   process start). With `VALKEY_URL` or `VALKEY_PASSWORD` set, `/api/health/ready` then returns
   503 (`Critical cache dependency unavailable`), so a rollout never becomes Ready (unless
-  `AUTH_MOCK=true`). If neither variable is set, the probe skips Valkey and returns 200, and the
-  first Valkey use throws. **The narwhal
+  `AUTH_MOCK=true`). If neither variable is set, the probe skips Valkey and returns 200 and the
+  cache is silently disabled: the cache helpers (`cacheGet`, `cacheGetWithMeta`, `cacheSet`,
+  `cacheDel`) catch the secure-config error and return null. Code that calls `getValkey()` /
+  `getLiveValkey()` directly sees the throw; live-event persistence and idempotency claims catch
+  it and degrade to their in-memory paths. **The narwhal
   GitOps chart at the time of writing still injects `VALKEY_INSECURE_PRODUCTION=true` and a
   plaintext `redis://` URL against a Valkey without TLS or ACL, so this portal version cannot be
   deployed with it until narwhal provides Valkey TLS + ACL and matching bindings.** Images up to
@@ -48,8 +51,8 @@ cosign signing step failed), so this section covers everything since 1.0.17.
   `APISIX_ADMIN_URL`, `OPENBAO_ADDR`, `GITEA_URL` and `KEYCLOAK_INTERNAL_URL` no longer fall back
   to localhost or in-cluster defaults (752273f, 451bec8). `getDependencyUrl()`
   (`src/lib/config.ts`) throws `Missing required production configuration: <NAME>` on first use,
-  not at startup, and `/api/health/ready` does not flag them (`validateRuntimeConfig` lists them
-  only as `missingOptional`). `SLO_CHAIN_START` is now also required in production for federated
+  not at startup, and `/api/health/ready` does not flag missing values (`validateRuntimeConfig` lists
+  them only as `missingOptional`; it does flag a non-https `GITEA_URL`). `SLO_CHAIN_START` is now also required in production for federated
   logout, which throws without it (451bec8). `KEYCLOAK_ISSUER` and `GITEA_URL` must be `https://`
   (#110); `APISIX_API_KEY_READONLY` no longer falls back to the admin `APISIX_API_KEY` (#112).
 - **Kubernetes token source (since 1.0.17)**: the portal reads a projected, short-lived
@@ -57,19 +60,19 @@ cosign signing step failed), so this section covers everything since 1.0.17.
   which is dev-only; setting `K8S_TOKEN_AUDIENCE` enables the client-side `aud` check and an
   unset value logs a warning in production (eeb5ef6, 1a27584, 1e35aac).
 - **`/api/events/ingest` is stricter for existing event producers (3344e78)**: a request
-  without `idempotency_key` or `source_event_id` returns 400 (the v1.0.17 route had no such
+  without both `idempotency_key` and `source_event_id` returns 400 (the v1.0.17 route had no such
   requirement); a request whose `X-Producer-Id` (or `X-Ingest-Producer`) header differs from the
-  body `source` returns 403; and bodies over 64 KB (`MAX_INGEST_BODY_SIZE_BYTES`) are rejected as
-  Payload Too Large.
-- **The live event stream is default-deny (3c4c36a)**: an event with neither `resource.namespace`
-  nor `visibility` (`system`, `cluster`, `namespace` or `team`) is hidden from non-admin users,
-  and the title/description namespace-regex fallback is removed. External producers posting to
-  `/api/events/ingest` must set one of them.
+  body `source` returns 403; and bodies over 64 KiB (65,536 bytes, `MAX_INGEST_BODY_SIZE_BYTES`) return
+  413.
+- **The live event stream is default-deny (3c4c36a)**: a namespace-less event is shown to
+  non-admin users only if it declares `visibility: "cluster"`; otherwise it is hidden. The
+  title/description namespace-regex fallback is removed. Producers must set `resource.namespace`
+  or `visibility: "cluster"`.
 - **`/api/secrets` fails visibly and returns no key names (0c715f5)**: a metadata read failure
   now returns 502 `{error, degraded: true}` instead of `[]`, and the response no longer carries
   secret key names. The inventory now reads only KV v2 `secret/metadata/<path>` and no longer
-  reads `secret/data/<path>`, so the portal's OpenBao policy needs metadata read but not data
-  read for this route.
+  reads `secret/data/<path>`, so the portal's OpenBao policy needs metadata list and read but not
+  data read for this route.
 - **`/api/cluster` rejects guests (de1edc7)**: it now requires `cluster-admin`, `developer` or
   `viewer` and returns 403 for other roles; it previously only required a session.
 - **Kubeconfig download needs `K8S_API_SERVER` in production (506c279)**: downloaded kubeconfigs
@@ -163,6 +166,10 @@ cosign signing step failed), so this section covers everything since 1.0.17.
 - **Dependencies**: Next.js 16.3.5 with React 19.3.0 (#170), `@base-ui/react` 1.8.0 (#212),
   `@grpc/grpc-js` 1.14.5 (#211), and grouped GitHub Actions bumps for `upload-artifact`,
   `download-artifact`, `setup-node` and `harden-runner` (#230, #233, #232, #231).
+- **Kaniko build evidence (#169, 5df84c5)**: `kaniko-build.sh` writes `build-evidence/<tag>.json`
+  after a successful build and fails on a malformed image digest.
+- **Typed Kubernetes credential errors (#176, d34cc54)**: `K8sCredentialError` is raised when a
+  401 survives the token refresh, or on a 403.
 
 ### Fixed
 - **Read-scope gaps closed**: `/api/cost` (2ba8fc5) and its detail and trend routes (#123),
@@ -180,9 +187,12 @@ cosign signing step failed), so this section covers everything since 1.0.17.
 - **Expired list continue token**: a bounded Kubernetes list restarts once on 410 (#141).
 - **Kubeconfig server**: downloaded kubeconfigs use the external API server address, not the
   in-cluster one (506c279).
-- **Image builds**: the Kaniko path pushes an immutable source-SHA tag with a digest file instead
+- **Image builds**: the Kaniko path pushes a SHA-named source tag with a digest file instead
   of `latest` (a874ac7), and the standalone image traces `@swc/helpers` and is smoke-booted in CI
   (#164).
+- **Outage recovery for live events (#183, 1b8f5ca)**: a numeric pre-outage `Last-Event-ID`
+  cursor now replays from the process-local ring, idempotency claims made during a Valkey outage
+  survive Valkey recovery, and a 410 relist ingests the page it already fetched.
 
 ### Security
 - **Authenticated Valkey TLS in production** (#205; see Upgrade notes).
