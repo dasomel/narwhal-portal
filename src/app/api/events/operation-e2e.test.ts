@@ -148,14 +148,21 @@ describe("E2E Operation Context Lifecycle & Stream Retrieval (portal#11)", () =>
     const res = await catalogRollbackPOST(req, params("my-service"))
     expect(res.status).toBe(500)
     const body = await res.json()
-    expect(body.error).toBe("K8s cluster unreachable")
+    // #47: the route returns a fixed message; the raw upstream text must not leak to the client
+    expect(body.error).toBe("ArgoCD request failed")
+    expect(JSON.stringify(body)).not.toContain("K8s cluster unreachable")
 
     const recent = await getRecentEvents(20)
     const failedEvent = recent.find((e) => e.event_type === "operation.failed" && e.correlation_id === correlationId)
 
     expect(failedEvent).toBeDefined()
     expect(failedEvent!.severity).toBe("error")
-    expect(failedEvent!.description).toContain("K8s cluster unreachable")
+    // the event is stored + streamed to namespace-scoped viewers: fixed text only, no upstream message
+    expect(failedEvent!.description).not.toContain("K8s cluster unreachable")
+    expect(failedEvent!.description).not.toMatch(/https?:\/\//)
+    expect(failedEvent!.description).toBe("rollback step failed: ArgoCD request failed")
+    expect(failedEvent!.title).toBe("Catalog rollback failed: my-service")
+    expect(failedEvent!.operation_id).toBeTruthy()
     expect(failedEvent!.actor?.id).toBe("admin@example.com")
   })
 })

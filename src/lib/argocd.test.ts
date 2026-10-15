@@ -31,6 +31,7 @@ import {
   getArgoToken,
   syncArgoApp,
   rollbackArgoApp,
+  ArgoRollbackOutcomeUnknownError,
   type ArgoActor,
   type ArgoApp,
 } from "./argocd"
@@ -197,6 +198,7 @@ describe("assertAppAccessible provider failure is not NotFound (#47)", () => {
   it.each([
     ["metadata.name", { metadata: {}, spec: { project: "p" } }],
     ["spec", { metadata: { name: "x" } }],
+    ["spec (array)", { metadata: { name: "x" }, spec: [] }],
   ])("200 body lacking %s is a provider error, not an app", async (_label, body) => {
     respond(body, 200)
     const err = await assertAppAccessible("x", admin).catch((e) => e)
@@ -367,6 +369,29 @@ describe("argocd credential handling", () => {
   it("does not report a 403 RBAC denial on rollback as a credential error", async () => {
     process.env.ARGOCD_TOKEN = "some-token"
     mockFetch.mockResolvedValueOnce({ ok: false, status: 403 })
-    await expect(rollbackArgoApp("app-1", 1)).resolves.toBe(false)
+    const err = await rollbackArgoApp("app-1", 1).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ArgoForbiddenError)
+    expect(err).not.toBeInstanceOf(ArgoCDCredentialError)
+  })
+
+  it.each([
+    ["spec missing", { metadata: { name: "app-1" } }],
+    ["a different Application", { metadata: { name: "other" }, spec: {} }],
+    ["spec not an object", { metadata: { name: "app-1" }, spec: "x" }],
+    ["spec an array", { metadata: { name: "app-1" }, spec: [] }],
+    ["metadata an array", { metadata: [], spec: {} }],
+    ["array body", []],
+    ["null body", null],
+    ["empty object", {}],
+  ])("treats a 2xx rollback body with %s as outcome unknown", async (_l, body) => {
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 200 }))
+    await expect(rollbackArgoApp("app-1", 1)).rejects.toBeInstanceOf(ArgoRollbackOutcomeUnknownError)
+  })
+
+  it("accepts a 2xx rollback body for the same app without status", async () => {
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ metadata: { name: "app-1" }, spec: {} }), { status: 200 }))
+    await expect(rollbackArgoApp("app-1", 1)).resolves.toBe(true)
   })
 })

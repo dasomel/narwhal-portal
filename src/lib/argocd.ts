@@ -159,6 +159,9 @@ export async function getArgoApp(name: string): Promise<ArgoApp | null> {
  * they are unknown provider state, not "app is absent". getArgoApp keeps its
  * non-throwing contract for read fan-outs (D1, #54 review).
  */
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v)
+
 async function getArgoAppOrThrow(name: string): Promise<ArgoApp | null> {
   const cacheKey = `argocd:app:${name}`
   const cached = await cacheGet<ArgoApp>(cacheKey)
@@ -171,7 +174,7 @@ async function getArgoAppOrThrow(name: string): Promise<ArgoApp | null> {
   const app = await readJsonWithPolicy<ArgoApp>(res)
   // status is deliberately not required: a brand-new Application has none until the first reconcile;
   // spec.project/destination are enforced (fail closed) where assertAppAccessible reads them.
-  if (typeof app?.metadata?.name !== "string" || !app.metadata.name || typeof app.spec !== "object" || app.spec === null) {
+  if (!isPlainObject(app) || !isPlainObject(app.metadata) || typeof app.metadata.name !== "string" || !app.metadata.name || !isPlainObject(app.spec)) {
     throw new Error("ArgoCD application lookup returned a malformed Application")
   }
   await cacheSet(cacheKey, app, 10)
@@ -296,13 +299,40 @@ export async function syncArgoApp(name: string): Promise<SyncResult> {
   }
 }
 
+/** #47: ArgoCD answered the rollback POST with a 4xx (other than 401/403): it did NOT accept it. */
+export class ArgoRollbackRejectedError extends Error {
+  constructor(readonly status: number) {
+    super(`ArgoCD rejected the rollback (HTTP ${status})`)
+    this.name = "ArgoRollbackRejectedError"
+  }
+}
+
+/**
+ * #47: the POST was sent but its result is unknown (timeout, network error, 5xx, 408 or an
+ * unreadable 2xx body) -- ArgoCD may already have applied the rollback. Callers must verify
+ * via app status and must not blindly retry. Message is fixed: the http-client error text
+ * carries the ArgoCD host, which must not reach logs/responses.
+ */
+export class ArgoRollbackOutcomeUnknownError extends Error {
+  constructor() {
+    super("ArgoCD rollback outcome unknown; verify the application status before retrying")
+    this.name = "ArgoRollbackOutcomeUnknownError"
+  }
+}
+
+/**
+ * Resolves true only when ArgoCD accepted the rollback with a 2xx body that is the requested Application (accepted,
+ * not yet verified converged). Everything else throws a classified error: 401 ->
+ * ArgoCDCredentialError, 403 -> ArgoForbiddenError, other 4xx -> ArgoRollbackRejectedError,
+ * unknown outcome -> ArgoRollbackOutcomeUnknownError. Never returns false, so a provider
+ * failure cannot be read as "ArgoCD said no". POST is never retried.
+ */
 export async function rollbackArgoApp(name: string, id: number): Promise<boolean> {
   const token = getArgoToken()
+  let res: Response
   try {
-    // Previously had no timeout at all — inherits the shared client's default
-    // (10s, matching syncArgoApp) rather than being able to hang indefinitely.
-    // POST, so never retried.
-    const res = await fetchWithPolicy(
+    // Inherits the shared client's 10s timeout (matching syncArgoApp); POST, so never retried.
+    res = await fetchWithPolicy(
       `${argocdUrl()}/api/v1/applications/${encodeURIComponent(name)}/rollback`,
       {
         method: "POST",
@@ -311,16 +341,29 @@ export async function rollbackArgoApp(name: string, id: number): Promise<boolean
       },
       { timeoutMs: 10000, retry: false }
     )
-    if (res.status === 401) {
-      throw new ArgoCDCredentialError(
-        `ArgoCD rollback rejected (HTTP ${res.status}): check ARGOCD_TOKEN`
-      )
-    }
-    return res.ok
-  } catch (err) {
-    if (err instanceof ArgoCDCredentialError) throw err
-    return false
+  } catch {
+    throw new ArgoRollbackOutcomeUnknownError()
   }
+  if (res.status === 401) {
+    throw new ArgoCDCredentialError(
+      `ArgoCD rollback rejected (HTTP ${res.status}): check ARGOCD_TOKEN`
+    )
+  }
+  if (res.status === 403) throw new ArgoForbiddenError("ArgoCD denied the rollback")
+  if (res.status >= 400 && res.status < 500 && res.status !== 408) {
+    throw new ArgoRollbackRejectedError(res.status)
+  }
+  if (!res.ok) throw new ArgoRollbackOutcomeUnknownError()
+  try {
+    const app = await readJsonWithPolicy<ArgoApp>(res)
+    // Must be THIS app's object with a spec; status is not required (a never-synced app has none).
+    if (!isPlainObject(app) || !isPlainObject(app.metadata) || app.metadata.name !== name || !isPlainObject(app.spec)) {
+      throw new Error("malformed")
+    }
+  } catch {
+    throw new ArgoRollbackOutcomeUnknownError()
+  }
+  return true
 }
 
 // ---------------------------------------------------------------------------
