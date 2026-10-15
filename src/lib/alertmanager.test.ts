@@ -61,6 +61,17 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
       ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
     })
 
+    it.each([["spaces", "   "], ["tab/newline", "\t\n"]])(
+      "throws outcome-unknown on a whitespace-only silenceID (%s)",
+      async (_label, silenceID) => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID }))
+        await expect(
+          createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+        ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
+        expect(mockFetch).toHaveBeenCalledTimes(1)
+      }
+    )
+
     // portal#48: POST is a mutation — retry: false explicitly, so a retryable
     // 502/503/504 must not be retried the way a GET would be.
     it("does not retry a retryable 502", async () => {
@@ -97,10 +108,9 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
   })
 
   describe("deleteSilence", () => {
-    it("returns true on success", async () => {
+    it("resolves on success", async () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }))
-      const ok = await deleteSilence("silence-123")
-      expect(ok).toBe(true)
+      await expect(deleteSilence("silence-123")).resolves.toBeUndefined()
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("/api/v2/silence/silence-123"),
         expect.objectContaining({ method: "DELETE" })

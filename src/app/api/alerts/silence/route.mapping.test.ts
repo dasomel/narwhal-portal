@@ -181,6 +181,7 @@ describe("POST and DELETE /api/alerts/silence write outcome mapping (#47, fetch-
     ["malformed 2xx without id", () => json({}, 200), 502, "unknown"],
     ["malformed 2xx array body", () => json([{ silenceID: "x" }], 200), 502, "unknown"],
     ["malformed 2xx non-string id", () => json({ silenceID: 7 }, 200), 502, "unknown"],
+    ["malformed 2xx whitespace-only id", () => json({ silenceID: "   " }, 200), 502, "unknown"],
   ]
 
   const deleteCases: Array<[string, () => Response | Promise<Response>, number, string | undefined]> = [

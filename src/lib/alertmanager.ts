@@ -109,10 +109,10 @@ export async function createSilence(
   } catch {
     throw new AlertmanagerSilenceOutcomeUnknownError()
   }
-  if (!isRecord(data) || typeof data.silenceID !== "string" || !data.silenceID) {
-    throw new AlertmanagerSilenceOutcomeUnknownError()
-  }
-  return data.silenceID
+  // Validate the value that gets used: a whitespace-only id is not proof of a created silence.
+  const silenceId = isRecord(data) && typeof data.silenceID === "string" ? data.silenceID.trim() : ""
+  if (!silenceId) throw new AlertmanagerSilenceOutcomeUnknownError()
+  return silenceId
 }
 
 export async function getSilence(silenceId: string): Promise<AlertmanagerSilence | null> {
@@ -190,7 +190,7 @@ function isValidSilence(body: unknown, silenceId: string): body is AlertmanagerS
   )
 }
 
-export async function deleteSilence(silenceId: string): Promise<boolean> {
+export async function deleteSilence(silenceId: string): Promise<void> {
   let res: Response
   try {
     // DELETE mutates alertmanager's silence state — retry: false explicitly.
@@ -204,7 +204,6 @@ export async function deleteSilence(silenceId: string): Promise<boolean> {
   }
   if (res.status === 404) throw new AlertmanagerSilenceNotFoundError()
   assertSilenceWriteAccepted(res)
-  return true
 }
 
 /**
