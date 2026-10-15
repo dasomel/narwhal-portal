@@ -9,6 +9,189 @@ English | [한국어](CHANGELOG-ko.md)
 
 ## [Unreleased]
 
+Hardens the portal's production posture (authenticated Valkey TLS, explicit OpenBao auth mode,
+fail-fast dependency configuration, namespace-scoped reads) and makes provider failures visible
+instead of silently healthy: write routes now distinguish rejected, credential and
+outcome-unknown results, and platform status no longer reports green when ArgoCD or Alertmanager
+cannot be read. Tags 1.0.18 and 1.0.19 were pushed but never published as GitHub Releases (the
+cosign signing step failed), so this section covers everything since 1.0.17.
+
+### Upgrade notes
+- **Production now requires authenticated Valkey TLS (#205, 63603d6, after 1.0.19)**: in
+  production `getValkey()` / `getLiveValkey()` (`src/lib/valkey.ts`) throw unless all of
+  `VALKEY_URL=rediss://…` (TLS scheme), `VALKEY_TLS=true`, `VALKEY_USERNAME` (a dedicated ACL
+  user, `portal` in the docs) and `VALKEY_PASSWORD` are set. `VALKEY_INSECURE_PRODUCTION` is no
+  longer supported: if it is defined at all (even `false`) the client refuses to initialize.
+  See `docs/security-clean-install.md` section 6. The failure is lazy (first Valkey use, not
+  process start); with `VALKEY_URL` or `VALKEY_PASSWORD` set, `/api/health/ready` then returns
+  503 (`Critical cache dependency unavailable`), so a rollout never becomes Ready. **The narwhal
+  GitOps chart at the time of writing still injects `VALKEY_INSECURE_PRODUCTION=true` and a
+  plaintext `redis://` URL against a Valkey without TLS or ACL, so this portal version cannot be
+  deployed with it until narwhal provides Valkey TLS + ACL and matching bindings.** Images up to
+  1.0.19 predate this change.
+- **OpenBao static-token mode must be explicit in production (#237, 5319ada)**: in production,
+  if `OPENBAO_TOKEN` is the credential in use, `OPENBAO_AUTH_METHOD` must be exactly `token`;
+  otherwise the first OpenBao request throws `Static credentials require explicit
+  OPENBAO_AUTH_METHOD=token in production`. The check is lazy (first OpenBao token request, not
+  startup) and only reached when the auth method resolves to `token`, i.e. `OPENBAO_AUTH_METHOD`
+  is unset and no Kubernetes service-account JWT is mounted. Deployments on Kubernetes auth
+  (`OPENBAO_AUTH_METHOD=kubernetes`, or a mounted JWT with the variable unset) are unaffected. In
+  production any other non-empty `OPENBAO_AUTH_METHOD` value (for example a typo) now throws
+  `OPENBAO_AUTH_METHOD must be kubernetes or token`.
+- **OpenBao address must be HTTPS on every request (#236, 513a71a)**: `OPENBAO_ADDR` is now
+  validated before each outbound request and the Kubernetes login, not once per process, and a
+  non-HTTPS address in production is rejected every time.
+- **Production fails fast on missing dependency configuration (since 1.0.17)**: `ARGOCD_URL`,
+  `ALERTMANAGER_URL`, `PROMETHEUS_URL`, `TEMPO_URL`, `LOKI_URL`, `APISIX_ADMIN_URL`,
+  `OPENBAO_ADDR`, `GITEA_URL` and `KEYCLOAK_INTERNAL_URL` no longer fall back to localhost or
+  in-cluster defaults (752273f, 451bec8); `KEYCLOAK_ISSUER` and `GITEA_URL` must be `https://`
+  (#110); `APISIX_API_KEY_READONLY` no longer falls back to the admin `APISIX_API_KEY` (#112).
+- **Kubernetes token source (since 1.0.17)**: the portal reads a projected, short-lived
+  service-account token (`K8S_SA_TOKEN_FILE` to override the path) instead of `K8S_SA_TOKEN`,
+  which is dev-only; setting `K8S_TOKEN_AUDIENCE` enables the client-side `aud` check and an
+  unset value logs a warning in production (eeb5ef6, 1a27584, 1e35aac).
+- **Namespace visibility follows the `narwhal.io/team` label (b094fb7)**: the label is the
+  source of ownership; the namespace patterns in `config/role-filter.json` still resolve as a
+  migration path for unlabelled namespaces. `POST /api/namespaces` no longer creates a namespace:
+  it commits a tenant manifest to the GitOps repo and opens a pull request (058426e).
+- **API consumers**: `/api/governance/audit` is a deprecated alias of the new
+  `/api/governance/events` (#161); `/api/health/status` now requires `cluster-admin`
+  (a286598); federated logout is POST-only (ab69c4f); catalog rollback, silence create/delete and
+  the sync routes return new status codes and fixed error texts (see Changed).
+- **Release pipeline**: tag builds sign the image with cosign and fail without the
+  `COSIGN_PRIVATE_KEY` / `COSIGN_PASSWORD` repository secrets (3026d23,
+  `docs/cosign-signing-setup.md`); the GitHub Release is only created after a successful
+  publish (#120).
+
+### Added
+- **Aggregate dependency health for every user**: `GET /api/health/summary` returns only
+  `{state, observedAt}` to any authenticated role and drives a navigation indicator (#155); the
+  detailed, admin-only `/api/health/dependencies` exposes a unified dependency contract with
+  informer owner state and live-pipeline counters (#148, #158, #162).
+- **`/api/governance/events`**: returns `{items, truncated, evidenceKind, freshness}`; the old
+  audit-named route keeps its bare array and adds `X-Truncated`, `Deprecation` and `Link`
+  headers (#161).
+- **Namespace requests by pull request**: namespaces are requested as a GitOps PR carrying a
+  `narwhal.io/team`-labelled Namespace, a RoleBinding and a ResourceQuota (058426e).
+- **Canonical event envelope and live-stream resilience**: idempotent `/api/events/ingest` with
+  per-producer credentials, rate limiting (429 + `Retry-After`) and payload bounds (3344e78),
+  deterministic `Last-Event-ID` replay (#154), and a single-owner Kubernetes informer through a
+  Valkey lease (#158).
+- **Preflight routes**: `/api/dr/restore-preflight` (#215), `/api/storage/pvc-expansion-preflight`
+  (#221, #222, #223) and `/api/settings/role-mappings/preflight` for orphaned namespace patterns
+  (2d44836); the DR and PVC verdicts derive from server-observed facts, never from caller input.
+- **Cluster registry foundation**: `config/clusters.json`, a `cluster_id` scope dimension,
+  admin CRUD at `/api/settings/clusters` (681f845) and a `/api/domain/clusters` pilot (e36a68d).
+- **Shared outbound HTTP client**: timeout, bounded retry and correlation for every provider
+  client, including the Kubernetes apiserver (#143, #149, #151, #152).
+- **Operator UX**: a shared loading/error/empty/partial/stale `DataState` with retry and
+  freshness (#156, #159), cache capture time (#157), vulnerability-DB freshness (584b797), portal
+  version and commit in the navigation (#150), and a "More" menu for overflowing navigation
+  items (#167).
+- **User role groups on create**: `POST /api/settings/users` accepts an optional `groups` array
+  limited to the portal role allowlist (#132).
+- **Supply chain**: cosign image signing (3026d23), OSS attribution and a Dependency SBOM
+  (2e3ffc5), and a 7-day lockfile cooling gate for new dependencies (69a4be5).
+
+### Changed
+- **Catalog rollback classifies the outcome (#245, b0c304e)**: a 4xx from ArgoCD returns that
+  status with `outcome: "rejected"`; a missing or rejected ArgoCD token returns 503; a 403
+  returns 403; a timeout, network error, 5xx, 408 or unreadable 2xx returns 502 with
+  `outcome: "unknown"` and "verify the application status before retrying". The ArgoCD POST is
+  sent once and never auto-retried. A 2xx must carry the requested Application.
+- **Silence create and delete classify the outcome (#247, 486ac21)**: delete of an absent
+  silence returns 404; other 4xx return that status with `outcome: "rejected"`; 401 returns 503;
+  403 returns 403; timeout, network, 408, 5xx or a malformed 2xx return 502 with
+  `outcome: "unknown"`. A created `silenceID` is accepted only if it matches
+  `[A-Za-z0-9_-]{1,128}` and is used as returned (never trimmed).
+- **Silence DELETE ownership lookup (#244, 3b4d320)**: only an explicit Alertmanager 404 reads as
+  "not found"; 401 returns 503, 403 returns 403, and other failures or a malformed lookup
+  response return 502 without sending the DELETE.
+- **ArgoCD write precondition (#243, 7f7dc1c)**: a provider failure while checking the
+  application no longer reports `Application not found`; credential errors now reach the 503
+  mapping.
+- **Fixed error texts on sync routes (#246, 1b9984d)**: `argocd/sync` and `catalog/[name]/sync`
+  return `ArgoCD sync failed` (502) instead of the raw upstream error, and the
+  `operation.failed` event description is a fixed text; rollback events follow the same rule
+  (#245).
+- **`/api/status` reports `degraded` when ArgoCD or Alertmanager cannot be read (#242,
+  2d38cbb)**: the failed provider appears as an `unknown` component (summary suffix
+  `status incomplete: … unreachable`) and the result is not cached. Environments where ArgoCD or
+  Alertmanager are unconfigured or unreachable, such as local development, now show `degraded`
+  instead of `healthy`.
+- **Dependency health fails closed**: an aggregate over zero dependency statuses is
+  `unavailable`, not `ok` (#240), and a cached snapshot is trusted only after shape validation
+  (#241).
+- **Kubernetes list contract (#239, 70bc7ce)**: a 200 response without an `items` array is an
+  error, and `limit` / `maxPages` must be positive safe integers or the call is rejected before
+  any request. Cluster-wide inventory lists are bounded and report `truncated` (4c146b7).
+- **Outbound HTTP bodies and cancellation**: decoded response bodies over 8 MiB fail with a
+  `response-too-large` error unless the caller raises the limit (#225); retry backoff and native
+  `RequestInit` cancellation now follow the caller's abort (#228, #238).
+- **Live events**: recovery after Kubernetes watch expiry applies a bounded paginated snapshot
+  (#226), and the informer waits for each event to be accepted so submissions stay in flight one
+  at a time (#229).
+- **ArgoCD sync and rollback verify convergence**: a 2xx only means accepted; the routes re-read
+  the application and return `pending: true` until `operationState` converges (#121).
+- **Required CI checks**: `Portal critical regression gate` is an always-reported required check
+  (#227), and a SHA-bound `independent-review` commit status gates merges (#213).
+- **Dependencies**: Next.js 16.3.5 with React 19.3.0 (#170), `@base-ui/react` 1.8.0 (#212),
+  `@grpc/grpc-js` 1.14.5 (#211), and grouped GitHub Actions bumps for `upload-artifact`,
+  `download-artifact`, `setup-node` and `harden-runner` (#230, #233, #232, #231).
+
+### Fixed
+- **Read-scope gaps closed**: `/api/cost` (2ba8fc5) and its detail and trend routes (#123),
+  `/api/governance/resources` (#147), `/api/k8s/events` (#145), `/api/catalog`, `/api/events`,
+  `/api/k8s/pods` and `/api/k8s/resource` (1e48371) now filter by the caller's visible
+  namespaces before any cache or upstream read; cache keys carry a scope fingerprint.
+- **Silence create is scoped**: non-admin callers need an exact-match `namespace` matcher inside
+  their scope, catch-all regex matchers are rejected for every role, and an optional
+  `Idempotency-Key` is honored (5ce9516).
+- **ArgoCD writes check the destination namespace**, not only the project (d00eff1).
+- **Unknown is not healthy**: scorecards distinguish `unavailable` evidence from `fail` (#118),
+  DORA reports unknown deployment outcomes and a `null` change-failure rate instead of a false
+  zero (#117), cost fails closed on unconfigured pricing (e2ad866), and partial Keycloak group
+  fetches are no longer presented as complete (#113).
+- **Expired list continue token**: a bounded Kubernetes list restarts once on 410 (#141).
+- **Kubeconfig server**: downloaded kubeconfigs use the external API server address, not the
+  in-cluster one (506c279).
+- **Image builds**: the Kaniko path pushes an immutable source-SHA tag with a digest file instead
+  of `latest` (a874ac7), and the standalone image traces `@swc/helpers` and is smoke-booted in CI
+  (#164).
+
+### Security
+- **Authenticated Valkey TLS in production** (#205; see Upgrade notes).
+- **Logout hardening**: federated logout is POST-only with CSRF protection (ab69c4f), fails
+  closed on unverifiable requests (a6fc4ec), and the redirect-host allowlist is anchored so
+  `maliciouslocalhost` no longer passes (25381e1).
+- **Credential handling**: ArgoCD and Gitea tokens are read per call and fail closed on 401
+  (#134), APISIX has no silent admin fallback (#112), and Keycloak admin token acquisition is
+  standardized (ea96a9a).
+- **Error text no longer leaks upstream hosts or bodies** from sync and rollback responses and
+  from the `operation.failed` event stream (#245, #246).
+- **Privileged node tuning**: hardened Job execution boundary (3a209f7), a preflight dry-run
+  (#105) and exact invocation approval at runtime (#90).
+- **Supply chain**: build images pinned by digest and no Gitea password in URLs (#109), CI egress
+  blocked on install-time jobs (#106), and `kubelogin` pinned with checksum verification (#104).
+
+### Known issues
+- **UI rollback returns 400**: the catalog UI (`service-actions.tsx`) sends `{historyId}` but
+  `POST /api/catalog/[name]/rollback` requires `{id}`. This predates 1.0.17.
+- **No idempotency for rollback**: the route never claims an `Idempotency-Key`, so retrying with
+  the same key after an `outcome: "unknown"` response re-sends the ArgoCD POST.
+- **Silence DELETE ownership** compares only `createdBy`, not team scope, and there is a
+  lookup-to-delete race window (Alertmanager allows changing `createdBy` on the same id).
+- **`ArgoForbiddenError` text** includes the ArgoCD project or namespace in the 403 body.
+- **Groups and users PATCH** (`/api/settings/groups`, `/api/settings/users/[pk]`) return a bare
+  `{ok: true}` without reading the change back.
+- **Cluster-wide views for viewers**: `/api/governance/distribution` (any authenticated user) and
+  `/api/service-graph` (viewer and above) apply no scope filter.
+- **Cluster registry is a foundation only**: `/api/settings/clusters` persists to
+  `config/clusters.json`, and when that file is not writable the change stays in memory and is
+  lost on restart; the Kubernetes and ArgoCD clients do not yet resolve a cluster per request.
+- **Release notes link**: `release.yml` links `CHANGELOG_ko.md`, but the file is
+  `CHANGELOG-ko.md`.
+
 ## [1.0.17] - 2026-08-09
 
 Fixes platform tool health checks, node role detection, compliance reporting metrics, and node infrastructure audit queries, while introducing an automated release notes workflow for version tags.
