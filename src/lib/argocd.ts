@@ -406,8 +406,9 @@ export function getAllowedProjects(actor: ArgoActor): Set<string> | null {
   if (actor.role !== "developer") return new Set()
 
   const allowed = new Set<string>(DEVELOPER_PROJECTS)
-  if (actor.groups && actor.groups.length > 0) {
-    const scope = getUserScope(actor.groups)
+  const claims = [...(actor.groups ?? []), ...(actor.teams ?? [])]
+  if (claims.length > 0) {
+    const scope = getUserScope(claims)
     for (const p of scope.argocdProjects) allowed.add(p)
   }
   return allowed

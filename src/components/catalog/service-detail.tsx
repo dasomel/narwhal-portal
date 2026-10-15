@@ -14,6 +14,7 @@ import { PodLogsViewer } from "./pod-logs-viewer"
 import { ServiceQualityTab } from "./service-quality-tab"
 import { ServiceDependenciesTab } from "./service-dependencies-tab"
 import { ServiceCostTab } from "./service-cost-tab"
+import { ServiceActions } from "./service-actions"
 
 interface DetailResponse {
   app: ArgoApp
@@ -88,6 +89,9 @@ export function ServiceDetail() {
         <Badge variant="outline" className="text-xs">
           {app.status.sync.status}
         </Badge>
+        <div className="ml-auto">
+          <ServiceActions name={app.metadata.name} />
+        </div>
       </div>
 
       {/* Tabs */}
