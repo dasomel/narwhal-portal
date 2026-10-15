@@ -77,7 +77,9 @@ export async function POST(
       await failOperation(
         ctx,
         `ArgoCD sync failed: ${trimmed}`,
-        err instanceof Error ? err.message : String(err),
+        err instanceof ArgoCDCredentialError || err instanceof ArgoForbiddenError || err instanceof ArgoNotFoundError
+          ? err.message
+          : "sync step failed: ArgoCD request failed",
       )
       throw err
     }
@@ -124,8 +126,7 @@ export async function POST(
       console.error("[api/argocd/sync]", message)
       return NextResponse.json({ ok: false, error: message }, { status: 503 })
     }
-    const message = err instanceof Error ? err.message : "ArgoCD sync failed"
-    console.error("[api/argocd/sync]", message)
-    return NextResponse.json({ ok: false, error: message }, { status: 502 })
+    console.error("[api/argocd/sync]", err instanceof Error ? err.name : "unknown error")
+    return NextResponse.json({ ok: false, error: "ArgoCD sync failed" }, { status: 502 })
   }
 }

@@ -21,11 +21,13 @@ vi.mock("@/lib/valkey", () => ({
   }),
 }))
 vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
+vi.mock("@/lib/live-stream", () => ({ pushEvent: vi.fn().mockResolvedValue(undefined) }))
 
-const FAKE_HOST = "argocd-secret-host.invalid"
-const FAKE_TOKEN = "tok-DISTINCTIVE-9f3a1c"
+const FAKE_HOST = "argocd.internal.example"
+const FAKE_TOKEN = "tok-SECRET-123"
 
 const { requireRole } = await import("@/lib/auth")
+const { pushEvent } = await import("@/lib/live-stream")
 const { POST } = await import("./route")
 
 const adminSession: Session = {
@@ -60,7 +62,7 @@ function req() {
 async function call() {
   const res = await POST(req())
   const text = await res.text()
-  return { status: res.status, text }
+  return { status: res.status, text, body: JSON.parse(text) as Record<string, unknown> }
 }
 
 describe("POST /api/argocd/sync status mapping (#47, fetch-level)", () => {
@@ -69,6 +71,7 @@ describe("POST /api/argocd/sync status mapping (#47, fetch-level)", () => {
     vi.stubEnv("ARGOCD_TOKEN", FAKE_TOKEN)
     vi.stubGlobal("fetch", mockFetch)
     mockFetch.mockReset()
+    vi.mocked(pushEvent).mockClear()
     vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     vi.spyOn(console, "error").mockImplementation(() => {})
     vi.spyOn(console, "warn").mockImplementation(() => {})
@@ -79,15 +82,12 @@ describe("POST /api/argocd/sync status mapping (#47, fetch-level)", () => {
     vi.restoreAllMocks()
   })
 
-  // Known leak (follow-up, out of scope for #47): http-client's "Network error calling <url>"
-  // message reaches the 502 body, so the host check is skipped for that one case only.
-  // The token is never in any body.
   const cases: Array<[string, () => void, number, boolean]> = [
     ["ArgoCD 404 on lookup", () => argo(() => json({}, 404)), 404, true],
     ["ArgoCD 401 on lookup", () => argo(() => json({}, 401)), 503, true],
     ["ArgoCD 403 on lookup", () => argo(() => json({}, 403)), 403, true],
     ["ArgoCD 500 on lookup", () => argo(() => json({}, 500)), 502, true],
-    ["network error on lookup", () => argo(() => Promise.reject(new TypeError(`fetch failed ${FAKE_HOST}`))), 502, false],
+    ["network error on lookup", () => argo(() => Promise.reject(new TypeError(`fetch failed ${FAKE_HOST}`))), 502, true],
   ]
 
   it.each(cases)("%s -> %s without leaking host or token", async (_label, setup, expected, hostHidden) => {
@@ -98,6 +98,23 @@ describe("POST /api/argocd/sync status mapping (#47, fetch-level)", () => {
     expect(text).not.toContain(FAKE_TOKEN)
     // the write must never be attempted when the precondition lookup failed
     expect(mockFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false)
+  })
+
+  it("an untyped sync-step error records fixed text only in 502 body and operation event", async () => {
+    argo(
+      () => json(app, 200),
+      () => Promise.reject(new TypeError(`fetch failed http://${FAKE_HOST}:8080 ${FAKE_TOKEN}`)),
+    )
+    const { status, text, body } = await call()
+    expect(status).toBe(502)
+    expect(body.error).toBe("ArgoCD sync failed")
+    expect(text).not.toContain(FAKE_HOST)
+    expect(text).not.toContain(FAKE_TOKEN)
+    const failed = vi.mocked(pushEvent).mock.calls.map(([e]) => e).filter((e) => e.event_type === "operation.failed")
+    expect(failed).toHaveLength(1)
+    expect(failed[0].description).toBe("sync step failed: ArgoCD request failed")
+    expect(failed[0].description).not.toContain(FAKE_HOST)
+    expect(failed[0].description).not.toContain(FAKE_TOKEN)
   })
 
   it("fresh Application (status {}) passes the precondition and reaches the sync POST", async () => {
