@@ -21,9 +21,10 @@
   `VALKEY_TLS=true`, `VALKEY_USERNAME`(전용 ACL 사용자, 문서에서는 `portal`), `VALKEY_PASSWORD`가
   모두 설정되지 않으면 예외를 던짐. `VALKEY_INSECURE_PRODUCTION`은 더 이상 지원되지 않으며, 값이
   `false`여도 정의만 되어 있으면 클라이언트 초기화를 거부함. `docs/security-clean-install.md` 6절 참고.
-  실패는 지연 발생(프로세스 시작 시가 아니라 첫 Valkey 사용 시)이며, `VALKEY_URL` 또는
+  실패는 지연 발생(프로세스 시작 시가 아니라 첫 Valkey 사용 시)임. `VALKEY_URL` 또는
   `VALKEY_PASSWORD`가 설정된 경우 `/api/health/ready`가 503(`Critical cache dependency unavailable`)을
-  반환하므로 롤아웃은 Ready가 되지 못함. **작성 시점의 narwhal GitOps 차트는 여전히
+  반환하므로 롤아웃은 Ready가 되지 못함(`AUTH_MOCK=true`가 아닌 경우). 두 변수가 모두 없으면 프로브가
+  Valkey를 건너뛰고 200을 반환하며, 첫 Valkey 사용 시 예외가 발생함. **작성 시점의 narwhal GitOps 차트는 여전히
   `VALKEY_INSECURE_PRODUCTION=true`와 평문 `redis://` URL을 TLS·ACL이 없는 Valkey에 대해 주입하므로,
   narwhal이 Valkey TLS + ACL과 대응하는 바인딩을 제공하기 전까지 이 포털 버전은 해당 차트와 함께
   배포할 수 없음.** 1.0.19까지의 이미지는 이 변경 이전임.
@@ -37,15 +38,37 @@
   오타)은 이제 `OPENBAO_AUTH_METHOD must be kubernetes or token` 예외를 던짐.
 - **OpenBao 주소는 모든 요청에서 HTTPS여야 함 (#236, 513a71a)**: `OPENBAO_ADDR`는 프로세스당 한 번이
   아니라 매 외부 요청과 Kubernetes 로그인 전에 검증되며, 프로덕션에서 HTTPS가 아닌 주소는 매번 거부됨.
-- **프로덕션은 누락된 의존성 설정에서 즉시 실패함 (1.0.17 이후)**: `ARGOCD_URL`, `ALERTMANAGER_URL`,
-  `PROMETHEUS_URL`, `TEMPO_URL`, `LOKI_URL`, `APISIX_ADMIN_URL`, `OPENBAO_ADDR`, `GITEA_URL`,
-  `KEYCLOAK_INTERNAL_URL`은 더 이상 localhost나 클러스터 내부 기본값으로 대체되지 않음(752273f,
-  451bec8). `KEYCLOAK_ISSUER`와 `GITEA_URL`은 `https://`여야 하며(#110), `APISIX_API_KEY_READONLY`는
-  더 이상 관리자용 `APISIX_API_KEY`로 대체되지 않음(#112).
+- **의존성 URL은 프로덕션에서 더 이상 localhost로 대체되지 않음 (1.0.17 이후)**: `ARGOCD_URL`,
+  `ALERTMANAGER_URL`, `PROMETHEUS_URL`, `TEMPO_URL`, `LOKI_URL`, `APISIX_ADMIN_URL`, `OPENBAO_ADDR`,
+  `GITEA_URL`, `KEYCLOAK_INTERNAL_URL`은 더 이상 localhost나 클러스터 내부 기본값으로 대체되지
+  않음(752273f, 451bec8). `getDependencyUrl()`(`src/lib/config.ts`)은 첫 사용 시
+  `Missing required production configuration: <NAME>` 예외를 던지며(시작 시가 아님),
+  `/api/health/ready`는 이를 표시하지 않음(`validateRuntimeConfig`는 `missingOptional`로만 나열함).
+  `SLO_CHAIN_START`도 이제 프로덕션의 federated logout에 필수이며 없으면 예외를 던짐(451bec8).
+  `KEYCLOAK_ISSUER`와 `GITEA_URL`은 `https://`여야 하며(#110), `APISIX_API_KEY_READONLY`는 더 이상
+  관리자용 `APISIX_API_KEY`로 대체되지 않음(#112).
 - **Kubernetes 토큰 출처 (1.0.17 이후)**: 포털은 `K8S_SA_TOKEN` 대신 projected 단기 서비스 어카운트
   토큰을 읽음(경로 변경은 `K8S_SA_TOKEN_FILE`). `K8S_SA_TOKEN`은 개발 전용임. `K8S_TOKEN_AUDIENCE`를
   설정하면 클라이언트 측 `aud` 검사가 활성화되며, 프로덕션에서 미설정이면 경고를 기록함(eeb5ef6,
   1a27584, 1e35aac).
+- **`/api/events/ingest`가 기존 이벤트 생산자에게 더 엄격해짐 (3344e78)**: `idempotency_key`와
+  `source_event_id`가 모두 없는 요청은 400을 반환하고(v1.0.17 라우트에는 이 요구사항이 없었음),
+  `X-Producer-Id`(또는 `X-Ingest-Producer`) 헤더가 본문 `source`와 다르면 403을 반환하며, 64 KB
+  (`MAX_INGEST_BODY_SIZE_BYTES`)를 넘는 본문은 Payload Too Large로 거부됨.
+- **라이브 이벤트 스트림은 기본 거부임 (3c4c36a)**: `resource.namespace`와 `visibility`(`system`,
+  `cluster`, `namespace`, `team`)가 모두 없는 이벤트는 관리자가 아닌 사용자에게 숨겨지며, 제목/설명의
+  네임스페이스 정규식 대체 경로는 제거됨. `/api/events/ingest`로 전송하는 외부 생산자는 둘 중 하나를
+  설정해야 함.
+- **`/api/secrets`는 실패를 드러내고 키 이름을 반환하지 않음 (0c715f5)**: 메타데이터 읽기 실패 시 `[]`
+  대신 502 `{error, degraded: true}`를 반환하며, 응답에 시크릿 키 이름이 더 이상 포함되지 않음.
+  인벤토리는 이제 KV v2 `secret/metadata/<path>`만 읽고 `secret/data/<path>`는 읽지 않으므로, 이
+  라우트에는 포털의 OpenBao 정책에 메타데이터 읽기가 필요하고 데이터 읽기는 필요하지 않음.
+- **`/api/cluster`는 guest를 거부함 (de1edc7)**: 이제 `cluster-admin`, `developer`, `viewer`가
+  필요하며 그 밖의 역할에는 403을 반환함. 이전에는 세션만 있으면 됐음.
+- **프로덕션에서 kubeconfig 다운로드에는 `K8S_API_SERVER`가 필요함 (506c279)**: 다운로드되는
+  kubeconfig는 `getExternalK8sApiServer()`를 사용하며, 프로덕션에서 `K8S_API_SERVER`가 없으면 예외를
+  던짐. `KUBERNETES_SERVICE_HOST`만으로는 부족함. 이는 외부에서 도달할 수 없는 클러스터 내부 주소이기
+  때문임.
 - **네임스페이스 가시성은 `narwhal.io/team` 라벨을 따름 (b094fb7)**: 소유권의 기준은 라벨이며,
   `config/role-filter.json`의 네임스페이스 패턴은 라벨이 없는 네임스페이스를 위한 마이그레이션 경로로
   계속 해석됨. `POST /api/namespaces`는 더 이상 네임스페이스를 직접 만들지 않고, GitOps 저장소에 테넌트
@@ -169,6 +192,9 @@
 - **클러스터 레지스트리는 기반 단계일 뿐임**: `/api/settings/clusters`는 `config/clusters.json`에
   저장하며, 해당 파일에 쓸 수 없으면 변경이 메모리에만 남아 재시작 시 사라짐. Kubernetes와 ArgoCD
   클라이언트는 아직 요청별로 클러스터를 해석하지 않음.
+- **Kaniko 빌드 경로는 검증되지 않음 (a874ac7)**: Job 플레이스홀더 `__HARBOR_DESTINATION__`이
+  `__HARBOR_DESTINATION_PREFIX__`로 바뀌었고(태그는 `HARBOR_TAG`로 덧붙임), 커밋은 실제 클러스터 내
+  빌드와 푸시로 검증하지 않았다고 밝힘(미검증).
 - **릴리스 노트 링크**: `release.yml`은 `CHANGELOG_ko.md`를 링크하지만 실제 파일명은
   `CHANGELOG-ko.md`임.
 

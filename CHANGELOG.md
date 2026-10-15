@@ -23,8 +23,10 @@ cosign signing step failed), so this section covers everything since 1.0.17.
   user, `portal` in the docs) and `VALKEY_PASSWORD` are set. `VALKEY_INSECURE_PRODUCTION` is no
   longer supported: if it is defined at all (even `false`) the client refuses to initialize.
   See `docs/security-clean-install.md` section 6. The failure is lazy (first Valkey use, not
-  process start); with `VALKEY_URL` or `VALKEY_PASSWORD` set, `/api/health/ready` then returns
-  503 (`Critical cache dependency unavailable`), so a rollout never becomes Ready. **The narwhal
+  process start). With `VALKEY_URL` or `VALKEY_PASSWORD` set, `/api/health/ready` then returns
+  503 (`Critical cache dependency unavailable`), so a rollout never becomes Ready (unless
+  `AUTH_MOCK=true`). If neither variable is set, the probe skips Valkey and returns 200, and the
+  first Valkey use throws. **The narwhal
   GitOps chart at the time of writing still injects `VALKEY_INSECURE_PRODUCTION=true` and a
   plaintext `redis://` URL against a Valkey without TLS or ACL, so this portal version cannot be
   deployed with it until narwhal provides Valkey TLS + ACL and matching bindings.** Images up to
@@ -41,15 +43,38 @@ cosign signing step failed), so this section covers everything since 1.0.17.
 - **OpenBao address must be HTTPS on every request (#236, 513a71a)**: `OPENBAO_ADDR` is now
   validated before each outbound request and the Kubernetes login, not once per process, and a
   non-HTTPS address in production is rejected every time.
-- **Production fails fast on missing dependency configuration (since 1.0.17)**: `ARGOCD_URL`,
-  `ALERTMANAGER_URL`, `PROMETHEUS_URL`, `TEMPO_URL`, `LOKI_URL`, `APISIX_ADMIN_URL`,
-  `OPENBAO_ADDR`, `GITEA_URL` and `KEYCLOAK_INTERNAL_URL` no longer fall back to localhost or
-  in-cluster defaults (752273f, 451bec8); `KEYCLOAK_ISSUER` and `GITEA_URL` must be `https://`
+- **Dependency URLs no longer fall back to localhost in production (since 1.0.17)**:
+  `ARGOCD_URL`, `ALERTMANAGER_URL`, `PROMETHEUS_URL`, `TEMPO_URL`, `LOKI_URL`,
+  `APISIX_ADMIN_URL`, `OPENBAO_ADDR`, `GITEA_URL` and `KEYCLOAK_INTERNAL_URL` no longer fall back
+  to localhost or in-cluster defaults (752273f, 451bec8). `getDependencyUrl()`
+  (`src/lib/config.ts`) throws `Missing required production configuration: <NAME>` on first use,
+  not at startup, and `/api/health/ready` does not flag them (`validateRuntimeConfig` lists them
+  only as `missingOptional`). `SLO_CHAIN_START` is now also required in production for federated
+  logout, which throws without it (451bec8). `KEYCLOAK_ISSUER` and `GITEA_URL` must be `https://`
   (#110); `APISIX_API_KEY_READONLY` no longer falls back to the admin `APISIX_API_KEY` (#112).
 - **Kubernetes token source (since 1.0.17)**: the portal reads a projected, short-lived
   service-account token (`K8S_SA_TOKEN_FILE` to override the path) instead of `K8S_SA_TOKEN`,
   which is dev-only; setting `K8S_TOKEN_AUDIENCE` enables the client-side `aud` check and an
   unset value logs a warning in production (eeb5ef6, 1a27584, 1e35aac).
+- **`/api/events/ingest` is stricter for existing event producers (3344e78)**: a request
+  without `idempotency_key` or `source_event_id` returns 400 (the v1.0.17 route had no such
+  requirement); a request whose `X-Producer-Id` (or `X-Ingest-Producer`) header differs from the
+  body `source` returns 403; and bodies over 64 KB (`MAX_INGEST_BODY_SIZE_BYTES`) are rejected as
+  Payload Too Large.
+- **The live event stream is default-deny (3c4c36a)**: an event with neither `resource.namespace`
+  nor `visibility` (`system`, `cluster`, `namespace` or `team`) is hidden from non-admin users,
+  and the title/description namespace-regex fallback is removed. External producers posting to
+  `/api/events/ingest` must set one of them.
+- **`/api/secrets` fails visibly and returns no key names (0c715f5)**: a metadata read failure
+  now returns 502 `{error, degraded: true}` instead of `[]`, and the response no longer carries
+  secret key names. The inventory now reads only KV v2 `secret/metadata/<path>` and no longer
+  reads `secret/data/<path>`, so the portal's OpenBao policy needs metadata read but not data
+  read for this route.
+- **`/api/cluster` rejects guests (de1edc7)**: it now requires `cluster-admin`, `developer` or
+  `viewer` and returns 403 for other roles; it previously only required a session.
+- **Kubeconfig download needs `K8S_API_SERVER` in production (506c279)**: downloaded kubeconfigs
+  use `getExternalK8sApiServer()`, which throws without `K8S_API_SERVER` in production.
+  `KUBERNETES_SERVICE_HOST` alone is not enough, because it is the unreachable in-cluster address.
 - **Namespace visibility follows the `narwhal.io/team` label (b094fb7)**: the label is the
   source of ownership; the namespace patterns in `config/role-filter.json` still resolve as a
   migration path for unlabelled namespaces. `POST /api/namespaces` no longer creates a namespace:
@@ -189,6 +214,9 @@ cosign signing step failed), so this section covers everything since 1.0.17.
 - **Cluster registry is a foundation only**: `/api/settings/clusters` persists to
   `config/clusters.json`, and when that file is not writable the change stays in memory and is
   lost on restart; the Kubernetes and ArgoCD clients do not yet resolve a cluster per request.
+- **Kaniko build path is unverified (a874ac7)**: the Job placeholder `__HARBOR_DESTINATION__`
+  became `__HARBOR_DESTINATION_PREFIX__` (tag appended from `HARBOR_TAG`), and the commit states
+  it was not verified with a real in-cluster build and push (unverified).
 - **Release notes link**: `release.yml` links `CHANGELOG_ko.md`, but the file is
   `CHANGELOG-ko.md`.
 
