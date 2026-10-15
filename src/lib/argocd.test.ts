@@ -126,6 +126,91 @@ describe("assertAppAccessible", () => {
   })
 })
 
+// #47: a write precondition must not read a provider failure as "app does not
+// exist". Only an explicit 404 is NotFound; 401/403/5xx/timeout/malformed are
+// unknown provider state and must surface as their own error (sync/rollback
+// routes map them to 503/403/502), never as a 404 "Application not found".
+describe("assertAppAccessible provider failure is not NotFound (#47)", () => {
+  const admin: ArgoActor = { role: "cluster-admin" }
+  const mockFetch = vi.fn()
+  // fresh Response per call: the shared client retries GETs, and a body is single-use.
+  const respond = (body: unknown, status: number) =>
+    mockFetch.mockImplementation(async () => new Response(body === null ? null : JSON.stringify(body), { status }))
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", mockFetch)
+    mockFetch.mockReset()
+    mockedCacheGet.mockResolvedValue(undefined)
+    vi.mocked(cacheSet).mockResolvedValue(undefined as never)
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("404 stays NotFound", async () => {
+    respond(null, 404)
+    await expect(assertAppAccessible("gone", admin)).rejects.toThrow(ArgoNotFoundError)
+  })
+
+  it("401 surfaces ArgoCDCredentialError, not NotFound", async () => {
+    respond(null, 401)
+    await expect(assertAppAccessible("svc", admin)).rejects.toThrow(ArgoCDCredentialError)
+  })
+
+  it("403 surfaces ArgoForbiddenError, not NotFound", async () => {
+    respond(null, 403)
+    await expect(assertAppAccessible("svc", admin)).rejects.toThrow(ArgoForbiddenError)
+  })
+
+  it("500 surfaces a provider error, not NotFound", async () => {
+    respond(null, 500)
+    const err = await assertAppAccessible("svc", admin).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(ArgoNotFoundError)
+  })
+
+  it("network failure / timeout surfaces a provider error, not NotFound", async () => {
+    mockFetch.mockRejectedValue(new TypeError("fetch failed"))
+    const err = await assertAppAccessible("svc", admin).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(ArgoNotFoundError)
+  })
+
+  it("200 with a body that is not an Application is a provider error, not an app", async () => {
+    respond({}, 200)
+    const err = await assertAppAccessible("svc", admin).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(ArgoNotFoundError)
+    expect(err.message).toMatch(/malformed/i)
+  })
+
+  it("fresh Application with status {} (pre-first-reconcile) is accessible", async () => {
+    respond({ metadata: { name: "fresh" }, spec: { project: "platform", destination: { namespace: "platform-system" } }, status: {} }, 200)
+    await expect(assertAppAccessible("fresh", admin)).resolves.toMatchObject({ metadata: { name: "fresh" } })
+  })
+
+  it("fresh Application with no status at all is accessible", async () => {
+    respond({ metadata: { name: "fresh" }, spec: { project: "platform", destination: { namespace: "platform-system" } } }, 200)
+    await expect(assertAppAccessible("fresh", admin)).resolves.toMatchObject({ metadata: { name: "fresh" } })
+  })
+
+  it.each([
+    ["metadata.name", { metadata: {}, spec: { project: "p" } }],
+    ["spec", { metadata: { name: "x" } }],
+  ])("200 body lacking %s is a provider error, not an app", async (_label, body) => {
+    respond(body, 200)
+    const err = await assertAppAccessible("x", admin).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(ArgoNotFoundError)
+    expect(err.message).toMatch(/malformed/i)
+  })
+
+  it("200 with a valid Application still resolves (normal path)", async () => {
+    respond(makeApp("platform", "platform-system"), 200)
+    await expect(assertAppAccessible("svc", admin)).resolves.toMatchObject({ spec: { project: "platform" } })
+  })
+})
+
 describe("argocd credential handling", () => {
   const originalEnv = { ...process.env }
   const originalFetch = global.fetch

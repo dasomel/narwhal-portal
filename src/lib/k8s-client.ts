@@ -147,6 +147,14 @@ export const DEFAULT_LIST_MAX_PAGES = 20
 export async function listBounded<T>(path: string, opts: ListBoundedOptions = {}): Promise<BoundedList<T>> {
   const limit = opts.limit ?? DEFAULT_LIST_LIMIT
   const maxPages = opts.maxPages ?? DEFAULT_LIST_MAX_PAGES
+  // D9: Kubernetes limit=0 means unbounded; zero/NaN page budgets otherwise
+  // return a misleading complete empty list. Cost: reject invalid caller
+  // options before IO; valid explicitly bounded overrides remain supported.
+  for (const [name, value] of [["limit", limit], ["maxPages", maxPages]] as const) {
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new RangeError(`${name} must be a positive safe integer`)
+    }
+  }
 
   const fetchPages = async (): Promise<BoundedList<T>> => {
     const items: T[] = []
@@ -164,7 +172,12 @@ export async function listBounded<T>(path: string, opts: ListBoundedOptions = {}
       const sep = path.includes("?") ? "&" : "?"
       try {
         const data = await k8sFetch<K8sListResponse<T>>(`${path}${sep}${params.toString()}`)
-        items.push(...(data.items ?? []))
+        if (!data || !Array.isArray(data.items) || data.items.length > limit
+          || (data.metadata !== undefined && (data.metadata === null || typeof data.metadata !== "object" || Array.isArray(data.metadata)))
+          || (data.metadata?.continue !== undefined && typeof data.metadata.continue !== "string")) {
+          throw new Error("K8s API invalid list response")
+        }
+        items.push(...data.items)
         pages++
 
         continueToken = data.metadata?.continue
