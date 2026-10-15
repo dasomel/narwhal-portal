@@ -83,7 +83,7 @@ export interface FetchWithPolicyOptions {
   correlationId?: string | null
   /**
    * A caller-owned signal (e.g. the inbound Next.js Request's own AbortSignal)
-   * to honor alongside this call's own timeout. Aborting it fails the call
+   * to honor alongside RequestInit.signal and this call's own timeout. Aborting it fails the call
    * immediately with `kind: "aborted"` and is never retried, regardless of
    * method — the caller asked to stop, not "stop unless it's safe to try again."
    */
@@ -138,8 +138,23 @@ function redactUrl(url: string): string {
   }
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function delay(ms: number, signal: AbortSignal | undefined, url: string): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new HttpClientError("aborted", url))
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }
+    const timer = setTimeout(finish, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      reject(new HttpClientError("aborted", url))
+    }
+    // D5: Retry sleep is part of caller-owned work too. Cost: one temporary
+    // abort listener per retry; removed on either outcome, no delayed retry.
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
 }
 
 // Full-jitter backoff (AWS Architecture Blog, "Exponential Backoff and Jitter"):
@@ -217,6 +232,8 @@ function combineSignals(signals: Array<AbortSignal | undefined>): CombinedSignal
   if (active.length <= 1) {
     return { signal: active[0] ?? new AbortController().signal, cleanup: () => {} }
   }
+  const alreadyAborted = active.find((signal) => signal.aborted)
+  if (alreadyAborted) return { signal: alreadyAborted, cleanup: () => {} }
   if (typeof AbortSignal.any === "function") {
     return { signal: AbortSignal.any(active), cleanup: () => {} }
   }
@@ -398,6 +415,9 @@ export async function fetchWithPolicy(
   }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // D8: RequestInit.signal is part of fetch's native contract. Combine both
+    // caller sources rather than silently overriding either; cleanup per try.
+    const caller = combineSignals([options.signal, init.signal ?? undefined])
     const attemptStartedAt = Date.now()
     const timeoutController = new AbortController()
     let timedOut = false
@@ -405,9 +425,10 @@ export async function fetchWithPolicy(
       timedOut = true
       timeoutController.abort()
     }, timeoutMs)
-    const { signal, cleanup } = combineSignals([timeoutController.signal, options.signal])
+    const { signal, cleanup } = combineSignals([timeoutController.signal, caller.signal])
 
     try {
+      if (caller.signal.aborted) throw new HttpClientError("aborted", url)
       const response = await fetch(url, { ...requestInit, signal })
 
       if (canRetry && attempt < maxAttempts && RETRYABLE_STATUS.has(response.status)) {
@@ -420,7 +441,7 @@ export async function fetchWithPolicy(
             ? (retryAfterMs(response, retryConfig.maxDelayMs) ??
               computeBackoffMs(attempt, retryConfig.baseDelayMs, retryConfig.maxDelayMs))
             : computeBackoffMs(attempt, retryConfig.baseDelayMs, retryConfig.maxDelayMs)
-        await delay(waitMs)
+        await delay(waitMs, caller.signal, url)
         continue
       }
 
@@ -436,15 +457,16 @@ export async function fetchWithPolicy(
       // signal is what fired, that's true regardless of whether our timeout
       // also happened to elapse around the same time, and it is never
       // retried — the caller asked to stop, full stop.
-      const kind: HttpClientErrorKind = options.signal?.aborted ? "aborted" : timedOut ? "timeout" : "network"
+      const kind: HttpClientErrorKind = caller.signal.aborted ? "aborted" : timedOut ? "timeout" : "network"
       if (canRetry && attempt < maxAttempts && kind === "network") {
-        await delay(computeBackoffMs(attempt, retryConfig.baseDelayMs, retryConfig.maxDelayMs))
+        await delay(computeBackoffMs(attempt, retryConfig.baseDelayMs, retryConfig.maxDelayMs), caller.signal, url)
         continue
       }
       throw new HttpClientError(kind, url, err)
     } finally {
       clearTimeout(timer)
       cleanup()
+      caller.cleanup()
     }
   }
 

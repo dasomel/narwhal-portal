@@ -272,6 +272,48 @@ describe("getDependencyHealthSnapshot: coalescing + success-only caching", () =>
     expect(mockPing).toHaveBeenCalledTimes(1)
   })
 
+  const at = "2026-10-15T00:00:00.000Z"
+  const validCached = () => ({
+    observedAt: at,
+    dependencies: ["prometheus", "kubernetes", "argocd", "gitea", "keycloak", "valkey"].map((dependency) => ({
+      dependency,
+      state: "ok",
+      observedAt: at,
+    })),
+  })
+
+  it("serves a well-formed cached snapshot without re-probing", async () => {
+    fakeCacheStore.set("health:dependencies", validCached())
+    vi.stubGlobal("fetch", vi.fn())
+
+    const snapshot = await getDependencyHealthSnapshot()
+
+    expect(snapshot).toEqual(validCached())
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["empty list", { observedAt: at, dependencies: [] }],
+    ["non-array dependencies", { observedAt: at, dependencies: "ok" }],
+    ["non-object entry", { observedAt: at, dependencies: [...validCached().dependencies, null] }],
+    ["unknown state", { observedAt: at, dependencies: validCached().dependencies.map((d) => ({ ...d, state: "healthy" })) }],
+    ["unknown dependency name", { observedAt: at, dependencies: validCached().dependencies.map((d) => ({ ...d, dependency: "mystery" })) }],
+    ["missing state field", { observedAt: at, dependencies: validCached().dependencies.map(({ state, ...rest }) => (void state, rest)) }],
+    ["missing core dependency", { observedAt: at, dependencies: validCached().dependencies.filter((d) => d.dependency !== "kubernetes") }],
+    ["missing observedAt", { dependencies: validCached().dependencies }],
+    ["non-object snapshot", "ok"],
+  ])("treats a tampered cached snapshot (%s) as a miss, re-probes and never serves it", async (_name, tampered) => {
+    fakeCacheStore.set("health:dependencies", tampered)
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")))
+
+    const snapshot = await getDependencyHealthSnapshot()
+
+    expect(fetch).toHaveBeenCalled()
+    expect(snapshot.dependencies).toHaveLength(6)
+    expect(snapshot.dependencies.find((d) => d.dependency === "argocd")?.state).toBe("unavailable")
+    expect(mockCacheSet).not.toHaveBeenCalled()
+  })
+
   it("does not cache a snapshot where any dependency is unavailable, and re-probes on the next call", async () => {
     vi.stubGlobal(
       "fetch",
@@ -354,6 +396,17 @@ describe("getDependencyHealthSummary: bounded aggregate caching", () => {
     expect(summaryEntry).toEqual({ state: "degraded", observedAt: expect.any(String) })
     expect(Object.keys(summaryEntry as object).sort()).toEqual(["observedAt", "state"])
     expect(mockCacheSet).toHaveBeenCalledWith("health:summary", summaryEntry, 20)
+  })
+
+  it("never reports ok from a cached snapshot that carries no dependency evidence", async () => {
+    // tampered/truncated cache entry: well-formed envelope, zero dependencies
+    fakeCacheStore.set("health:dependencies", { observedAt: new Date().toISOString(), dependencies: [] })
+    vi.stubGlobal("fetch", vi.fn())
+
+    const summary = await getDependencyHealthSummary()
+
+    expect(summary.state).toBe("unavailable")
+    expect(fakeCacheStore.get("health:summary")).toMatchObject({ state: "unavailable" })
   })
 
   it("coalesces concurrent summary cache misses", async () => {

@@ -349,6 +349,49 @@ describe("openbao Kubernetes auth token provider", () => {
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
+  it("rejects implicit production static fallback even when a legacy token exists", async () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    delete process.env.OPENBAO_AUTH_METHOD
+    process.env.OPENBAO_TOKEN = "legacy-static-token"
+    await expect(getOpenBaoToken()).rejects.toThrow(/explicit OPENBAO_AUTH_METHOD/)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it("rejects an unknown production auth method instead of treating it as static mode", async () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    process.env.OPENBAO_AUTH_METHOD = "kubernets"
+    process.env.OPENBAO_TOKEN = "legacy-static-token"
+    await expect(getOpenBaoToken()).rejects.toThrow(/OPENBAO_AUTH_METHOD must/)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it("rejects an invalid production method even while a client token remains cached", async () => {
+    process.env.OPENBAO_AUTH_METHOD = "kubernetes"
+    mockedReadFileSync.mockReturnValue("jwt-from-file")
+    mockFetch.mockResolvedValue(jsonResponse({ auth: { client_token: "cached-valid-token", lease_duration: 3600 } }))
+    await getOpenBaoToken()
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    process.env.OPENBAO_AUTH_METHOD = "kubernets"
+    await expect(getOpenBaoToken()).rejects.toThrow(/OPENBAO_AUTH_METHOD must/)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not use a legacy token when configured Kubernetes auth has no JWT", async () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    process.env.OPENBAO_AUTH_METHOD = "kubernetes"
+    process.env.OPENBAO_TOKEN = "legacy-static-token"
+    await expect(getOpenBaoToken()).rejects.toThrow(/Kubernetes auth JWT not found/)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it("preserves the cluster's explicitly configured production legacy-token exception", async () => {
+    ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
+    process.env.OPENBAO_AUTH_METHOD = "token"
+    process.env.OPENBAO_TOKEN = "explicit-legacy-token"
+    await expect(getOpenBaoToken()).resolves.toBe("explicit-legacy-token")
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
   it("throws in production when neither Kubernetes auth nor OPENBAO_TOKEN is available", async () => {
     ;(process.env as Record<string, string | undefined>).NODE_ENV = "production"
     delete process.env.OPENBAO_AUTH_METHOD
