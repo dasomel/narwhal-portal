@@ -70,4 +70,25 @@ describe("POST /api/catalog/[name]/sync outcome mapping (#47, fetch-level)", () 
     expect(failed[0].description).not.toContain(FAKE_HOST)
     expect(failed[0].description).not.toContain(FAKE_TOKEN)
   })
+
+  it("an ArgoCD 5xx on the sync POST whose body carries a token never reaches the 502 body or the event", async () => {
+    mockFetch.mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Response(`upstream blew up http://${FAKE_HOST}:8080 ${FAKE_TOKEN}`, { status: 500 })
+        : new Response(JSON.stringify(app), { status: 200 })
+    )
+    const res = await POST(
+      new Request("http://localhost/api/catalog/checkout-api/sync", { method: "POST" }),
+      { params: Promise.resolve({ name: "checkout-api" }) },
+    )
+    const text = await res.text()
+    expect(res.status).toBe(502)
+    expect(JSON.parse(text).error).toBe("ArgoCD sync failed")
+    expect(text).not.toContain(FAKE_HOST)
+    expect(text).not.toContain(FAKE_TOKEN)
+    const failed = vi.mocked(pushEvent).mock.calls.map(([e]) => e).filter((e) => e.event_type === "operation.failed")
+    expect(failed).toHaveLength(1)
+    expect(failed[0].description).toBe("sync step failed: ArgoCD request failed")
+    expect(JSON.stringify(failed[0])).not.toContain(FAKE_TOKEN)
+  })
 })

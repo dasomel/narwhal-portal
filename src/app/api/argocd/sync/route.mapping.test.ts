@@ -117,6 +117,22 @@ describe("POST /api/argocd/sync status mapping (#47, fetch-level)", () => {
     expect(failed[0].description).not.toContain(FAKE_TOKEN)
   })
 
+  it("an ArgoCD 5xx on the sync POST whose body carries a token never reaches the 502 body or the event", async () => {
+    argo(
+      () => json(app, 200),
+      () => new Response(`upstream blew up http://${FAKE_HOST}:8080 ${FAKE_TOKEN}`, { status: 500 }),
+    )
+    const { status, text, body } = await call()
+    expect(status).toBe(502)
+    expect(body.error).toBe("ArgoCD sync failed")
+    expect(text).not.toContain(FAKE_HOST)
+    expect(text).not.toContain(FAKE_TOKEN)
+    const failed = vi.mocked(pushEvent).mock.calls.map(([e]) => e).filter((e) => e.event_type === "operation.failed")
+    expect(failed).toHaveLength(1)
+    expect(failed[0].description).toBe("sync step failed: ArgoCD request failed")
+    expect(JSON.stringify(failed[0])).not.toContain(FAKE_TOKEN)
+  })
+
   it("fresh Application (status {}) passes the precondition and reaches the sync POST", async () => {
     argo(
       () => json(app, 200),
