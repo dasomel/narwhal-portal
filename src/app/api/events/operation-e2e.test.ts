@@ -157,7 +157,12 @@ describe("E2E Operation Context Lifecycle & Stream Retrieval (portal#11)", () =>
 
     expect(failedEvent).toBeDefined()
     expect(failedEvent!.severity).toBe("error")
-    expect(failedEvent!.description).toContain("K8s cluster unreachable")
+    // the event is stored + streamed to namespace-scoped viewers: fixed text only, no upstream message
+    expect(failedEvent!.description).not.toContain("K8s cluster unreachable")
+    expect(failedEvent!.description).not.toMatch(/https?:\/\//)
+    expect(failedEvent!.description).toBe("rollback step failed: ArgoCD request failed")
+    expect(failedEvent!.title).toBe("Catalog rollback failed: my-service")
+    expect(failedEvent!.operation_id).toBeTruthy()
     expect(failedEvent!.actor?.id).toBe("admin@example.com")
   })
 })

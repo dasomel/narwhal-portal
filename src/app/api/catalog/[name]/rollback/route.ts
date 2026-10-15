@@ -71,12 +71,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
       await failOperation(
         ctx,
         `Catalog rollback failed: ${name}`,
-        // fixed text for classified provider errors; raw messages may carry the ArgoCD host
+        // The event is stored and streamed to namespace-scoped viewers. Classified provider errors
+        // carry fixed text (credential/forbidden messages have no host); an untyped error's raw
+        // message may carry the ArgoCD host/URL, so it gets a fixed description (server log only).
         err instanceof ArgoRollbackOutcomeUnknownError
           ? "rollback outcome unknown (may have been applied)"
           : err instanceof ArgoRollbackRejectedError
             ? `ArgoCD rejected the rollback (HTTP ${err.status})`
-            : err instanceof Error ? err.message : String(err),
+            : err instanceof ArgoCDCredentialError || err instanceof ArgoForbiddenError
+              ? err.message
+              : "rollback step failed: ArgoCD request failed",
       )
       throw err
     }

@@ -19,12 +19,22 @@ vi.mock("@/lib/valkey", () => ({
   }),
 }))
 vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
+// operation events are stored and streamed to clients (portal#11), so they are a sink of the raw error too
+// real implementation by default; one test injects an untyped error at the rollback step
+vi.mock("@/lib/argocd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/argocd")>()
+  return { ...actual, rollbackArgoApp: vi.fn(actual.rollbackArgoApp) }
+})
+vi.mock("@/lib/live-stream", () => ({ pushEvent: vi.fn().mockResolvedValue(undefined) }))
 
 const FAKE_HOST = "argocd-secret-host.invalid"
 const FAKE_TOKEN = "tok-DISTINCTIVE-9f3a1c"
 
 const { requireRole } = await import("@/lib/auth")
 const { invalidateFor } = await import("@/lib/cache-invalidation")
+const { pushEvent } = await import("@/lib/live-stream")
+const argocd = await import("@/lib/argocd")
+const actualArgo = await vi.importActual<typeof import("@/lib/argocd")>("@/lib/argocd")
 const { POST } = await import("./route")
 
 const adminSession: Session = {
@@ -70,6 +80,8 @@ describe("POST /api/catalog/[name]/rollback outcome mapping (#47, fetch-level)",
     vi.stubGlobal("fetch", mockFetch)
     mockFetch.mockReset()
     vi.mocked(invalidateFor).mockClear()
+    vi.mocked(pushEvent).mockClear()
+    vi.mocked(argocd.rollbackArgoApp).mockImplementation(actualArgo.rollbackArgoApp)
     vi.mocked(requireRole).mockResolvedValue({ session: adminSession } as never)
     vi.spyOn(console, "error").mockImplementation(() => {})
     vi.spyOn(console, "warn").mockImplementation(() => {})
@@ -110,6 +122,9 @@ describe("POST /api/catalog/[name]/rollback outcome mapping (#47, fetch-level)",
     expect(body.success).not.toBe(true)
     expect(text).not.toContain(FAKE_HOST)
     expect(text).not.toContain(FAKE_TOKEN)
+    // the operation event (stored + streamed) must not carry the host/token either
+    expect(JSON.stringify(vi.mocked(pushEvent).mock.calls)).not.toContain(FAKE_HOST)
+    expect(JSON.stringify(vi.mocked(pushEvent).mock.calls)).not.toContain(FAKE_TOKEN)
     // a mutation is attempted exactly once -- never auto-retried on timeout/5xx
     expect(posts()).toHaveLength(1)
     expect(invalidateFor).not.toHaveBeenCalled()
@@ -139,5 +154,32 @@ describe("POST /api/catalog/[name]/rollback outcome mapping (#47, fetch-level)",
     expect(text).not.toContain(FAKE_HOST)
     expect(text).not.toContain(FAKE_TOKEN)
     expect(posts()).toHaveLength(0)
+  })
+
+  it("an untyped rollback-step error is recorded in the operation event with fixed text only", async () => {
+    argo(() => json(app, 200))
+    // the rollback step throws an untyped error carrying the host + token (e.g. a client-library message)
+    vi.mocked(argocd.rollbackArgoApp).mockRejectedValueOnce(
+      new Error(`Network error calling http://${FAKE_HOST}:8080/x ${FAKE_TOKEN}`),
+    )
+    const { text } = await call()
+    expect(text).not.toContain(FAKE_HOST)
+    const failed = vi.mocked(pushEvent).mock.calls.map(([e]) => e).filter((e) => e.event_type === "operation.failed")
+    expect(failed).toHaveLength(1)
+    expect(failed[0].severity).toBe("error")
+    expect(failed[0].operation_id).toBeTruthy()
+    expect(failed[0].description).not.toContain(FAKE_HOST)
+    expect(failed[0].description).not.toContain(FAKE_TOKEN)
+    expect(failed[0].description).not.toContain("Network error")
+    expect(failed[0].description).toBe("rollback step failed: ArgoCD request failed")
+  })
+
+  it("a precondition network error leaves no host/token in any emitted event", async () => {
+    mockFetch.mockImplementation(async () => {
+      throw new TypeError(`fetch failed http://${FAKE_HOST}:8080 ${FAKE_TOKEN}`)
+    })
+    await call()
+    expect(JSON.stringify(vi.mocked(pushEvent).mock.calls)).not.toContain(FAKE_HOST)
+    expect(JSON.stringify(vi.mocked(pushEvent).mock.calls)).not.toContain(FAKE_TOKEN)
   })
 })
