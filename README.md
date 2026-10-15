@@ -6,8 +6,9 @@ English | [한국어](README-ko.md)
 > The full history (415 commits) was imported with `git-filter-repo` (decision record: ADR-0001 in narwhal).
 > Open issues were transferred to narwhal (#356-#382, label `area:portal`; mapping table in the comment on
 > [narwhal#356](https://github.com/dasomel/narwhal/issues/356)). Old issue and PR numbers (`#N`) in this repository
-> keep their meaning here. Releases restart from the first `portal/vX.Y.Z` tag in narwhal; the published image name
-> stays `ghcr.io/dasomel/narwhal-portal`. The text below describes the repository as it was when archived, including
+> keep their meaning here. The historical `v1.0.x` tags and GitHub Releases stay in this repository; new releases are cut in
+> narwhal with `portal/vX.Y.Z` tags after v1.0.19, and the published image name stays
+> `ghcr.io/dasomel/narwhal-portal`. The text below describes the repository as it was when archived, including
 > references to a sibling `../narwhal` checkout that no longer applies.
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)

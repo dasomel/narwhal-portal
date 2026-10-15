@@ -6,8 +6,8 @@
 > 전체 이력(415커밋)을 `git-filter-repo`로 옮겼습니다(결정 기록: narwhal의 ADR-0001). 열린 이슈는 narwhal로
 > 이전했습니다(#356-#382, 라벨 `area:portal`, 번호 매핑표는
 > [narwhal#356](https://github.com/dasomel/narwhal/issues/356)의 코멘트). 이 저장소의 옛 이슈·PR 번호(`#N`)는
-> 여기서의 의미를 그대로 유지합니다. 릴리스는 narwhal의 첫 `portal/vX.Y.Z` 태그부터 다시 시작하며, 배포 이미지
-> 이름은 `ghcr.io/dasomel/narwhal-portal`로 유지됩니다. 아래 본문은 아카이브 시점의 저장소 설명이며, 형제 체크아웃
+> 여기서의 의미를 그대로 유지합니다. 과거 `v1.0.x` 태그와 GitHub 릴리스는 이 저장소에 남고, 새 릴리스는 narwhal에서 v1.0.19 이후의
+> `portal/vX.Y.Z` 태그로 발행하며 배포 이미지 이름은 `ghcr.io/dasomel/narwhal-portal`로 유지됩니다. 아래 본문은 아카이브 시점의 저장소 설명이며, 형제 체크아웃
 > `../narwhal`에 대한 언급은 더 이상 해당하지 않습니다.
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
