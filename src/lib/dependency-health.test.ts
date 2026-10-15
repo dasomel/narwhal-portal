@@ -356,6 +356,17 @@ describe("getDependencyHealthSummary: bounded aggregate caching", () => {
     expect(mockCacheSet).toHaveBeenCalledWith("health:summary", summaryEntry, 20)
   })
 
+  it("never reports ok from a cached snapshot that carries no dependency evidence", async () => {
+    // tampered/truncated cache entry: well-formed envelope, zero dependencies
+    fakeCacheStore.set("health:dependencies", { observedAt: new Date().toISOString(), dependencies: [] })
+    vi.stubGlobal("fetch", vi.fn())
+
+    const summary = await getDependencyHealthSummary()
+
+    expect(summary.state).toBe("unavailable")
+    expect(fakeCacheStore.get("health:summary")).toMatchObject({ state: "unavailable" })
+  })
+
   it("coalesces concurrent summary cache misses", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => {
       await new Promise((resolve) => setTimeout(resolve, 5))
