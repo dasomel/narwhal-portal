@@ -62,7 +62,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
       await failOperation(
         ctx,
         `Catalog sync failed: ${name}`,
-        err instanceof Error ? err.message : String(err),
+        err instanceof ArgoCDCredentialError || err instanceof ArgoForbiddenError || err instanceof ArgoNotFoundError
+          ? err.message
+          : "sync step failed: ArgoCD request failed",
       )
       throw err
     }
@@ -114,7 +116,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
       console.error("[api/catalog/sync]", message)
       return NextResponse.json({ error: message }, { status: 503 })
     }
-    const message = err instanceof Error ? err.message : "Sync failed"
-    return NextResponse.json({ error: message }, { status: 502 })
+    console.error("[api/catalog/sync]", err instanceof Error ? err.name : "unknown error")
+    return NextResponse.json({ error: "ArgoCD sync failed" }, { status: 502 })
   }
 }
