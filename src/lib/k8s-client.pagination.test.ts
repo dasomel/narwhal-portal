@@ -61,6 +61,28 @@ describe("listBounded (portal#52)", () => {
     global.fetch = originalFetch
   })
 
+  it.each([0, -1, NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1])("rejects invalid limit %s before an unbounded provider call", async (limit) => {
+    await expect(listBounded("/api/v1/widgets", { limit })).rejects.toThrow(/limit.*positive safe integer/)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it.each([0, -1, NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1])("rejects invalid maxPages %s instead of complete empty state", async (maxPages) => {
+    await expect(listBounded("/api/v1/widgets", { maxPages })).rejects.toThrow(/maxPages.*positive safe integer/)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it.each([null, {}, { kind: "Status" }, { items: {} }, { items: [], metadata: false }, { items: [], metadata: null }, { items: [], metadata: [] }, { items: [], metadata: { continue: 0 } }, { items: [], metadata: { continue: {} } }])("rejects malformed 200 collection %j instead of healthy empty", async (body) => {
+    mockFetch.mockResolvedValueOnce(Response.json(body))
+    await expect(listBounded("/api/v1/widgets")).rejects.toThrow(/invalid list response/)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects a provider page that ignores the requested limit", async () => {
+    mockFetch.mockResolvedValueOnce(pageResponse(["a", "b", "c"]))
+    await expect(listBounded("/api/v1/widgets", { limit: 2 })).rejects.toThrow(/invalid list response/)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
   it("follows metadata.continue across pages until the list is exhausted", async () => {
     mockFetch
       .mockResolvedValueOnce(pageResponse(["a", "b"], "tok-1"))
