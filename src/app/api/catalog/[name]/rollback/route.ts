@@ -5,6 +5,8 @@ import {
   ArgoCDCredentialError,
   ArgoForbiddenError,
   ArgoNotFoundError,
+  ArgoRollbackOutcomeUnknownError,
+  ArgoRollbackRejectedError,
   getArgoAppFresh,
   getOperationOutcome,
   rollbackArgoApp,
@@ -69,7 +71,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
       await failOperation(
         ctx,
         `Catalog rollback failed: ${name}`,
-        err instanceof Error ? err.message : String(err),
+        // fixed text for classified provider errors; raw messages may carry the ArgoCD host
+        err instanceof ArgoRollbackOutcomeUnknownError
+          ? "rollback outcome unknown (may have been applied)"
+          : err instanceof ArgoRollbackRejectedError
+            ? `ArgoCD rejected the rollback (HTTP ${err.status})`
+            : err instanceof Error ? err.message : String(err),
       )
       throw err
     }
@@ -122,6 +129,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
     }
     if (err instanceof ArgoForbiddenError) {
       return NextResponse.json({ error: err.message }, { status: 403 })
+    }
+    // #47: ArgoCD answered 4xx -> NOT accepted; surface its status class (400/404/409...).
+    if (err instanceof ArgoRollbackRejectedError) {
+      return NextResponse.json({ success: false, outcome: "rejected", error: err.message }, { status: err.status })
+    }
+    // #47: POST sent, result unknown -> the rollback MAY have been applied. 502 + outcome:"unknown"
+    // (not 500 "Rollback failed", not 200 pending: nothing was acknowledged). Clients verify via
+    // application status instead of blindly retrying.
+    if (err instanceof ArgoRollbackOutcomeUnknownError) {
+      return NextResponse.json({ success: false, outcome: "unknown", error: err.message }, { status: 502 })
     }
     // D1 (#54 review): the inner try/catch around rollbackArgoApp already recorded
     // failOperation before rethrowing; this only maps the error to a response.

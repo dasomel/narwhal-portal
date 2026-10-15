@@ -367,6 +367,8 @@ describe("argocd credential handling", () => {
   it("does not report a 403 RBAC denial on rollback as a credential error", async () => {
     process.env.ARGOCD_TOKEN = "some-token"
     mockFetch.mockResolvedValueOnce({ ok: false, status: 403 })
-    await expect(rollbackArgoApp("app-1", 1)).resolves.toBe(false)
+    const err = await rollbackArgoApp("app-1", 1).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ArgoForbiddenError)
+    expect(err).not.toBeInstanceOf(ArgoCDCredentialError)
   })
 })
