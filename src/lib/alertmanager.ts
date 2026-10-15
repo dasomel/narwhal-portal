@@ -69,6 +69,70 @@ export async function getSilence(silenceId: string): Promise<AlertmanagerSilence
   }
 }
 
+export type AlertmanagerLookupFailure = "credential" | "forbidden" | "unavailable"
+
+/**
+ * Typed failure of the write-precondition lookup. Messages are fixed strings: they
+ * never carry the Alertmanager URL/host (HttpClientError messages do), so a route
+ * can return them directly (#47).
+ */
+export class AlertmanagerLookupError extends Error {
+  constructor(readonly failure: AlertmanagerLookupFailure, message: string) {
+    super(message)
+    this.name = "AlertmanagerLookupError"
+  }
+}
+
+/**
+ * Write-precondition variant of getSilence (#47): null ONLY for an explicit 404
+ * (silence does not exist). 401, 403, other non-2xx, timeout/network failure and a
+ * body that is not a silence all throw AlertmanagerLookupError, because they are
+ * unknown provider state, not "absent". getSilence keeps its swallow contract for
+ * other callers.
+ */
+export async function getSilenceOrThrow(silenceId: string): Promise<AlertmanagerSilence | null> {
+  let body: AlertmanagerSilence
+  try {
+    const res = await fetchWithPolicy(`${alertmanagerUrl()}/api/v2/silence/${encodeURIComponent(silenceId)}`)
+    if (res.status === 404) return null
+    if (res.status === 401) throw new AlertmanagerLookupError("credential", "Alertmanager rejected the portal credentials")
+    if (res.status === 403) throw new AlertmanagerLookupError("forbidden", "Alertmanager denied access to the silence")
+    if (!res.ok) throw new AlertmanagerLookupError("unavailable", `Alertmanager silence lookup failed: ${res.status}`)
+    body = await readJsonWithPolicy<AlertmanagerSilence>(res)
+  } catch (err) {
+    if (err instanceof AlertmanagerLookupError) throw err
+    throw new AlertmanagerLookupError("unavailable", "Alertmanager is unreachable")
+  }
+  if (!isValidSilence(body, silenceId)) {
+    throw new AlertmanagerLookupError("unavailable", "Alertmanager returned a malformed silence")
+  }
+  return body
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
+
+/**
+ * Validates every field the caller dereferences or compares (id, createdBy, matchers[].name/value)
+ * and binds the response to the requested id; fields the v2 gettableSilence may omit
+ * (isEqual, comment, status…) are not required. Empty matchers is never a real silence.
+ */
+function isValidSilence(body: unknown, silenceId: string): body is AlertmanagerSilence {
+  if (!isRecord(body) || body.id !== silenceId || typeof body.createdBy !== "string") return false
+  const { matchers } = body
+  return (
+    Array.isArray(matchers) &&
+    matchers.length > 0 &&
+    matchers.every(
+      (m) =>
+        isRecord(m) &&
+        typeof m.name === "string" &&
+        typeof m.value === "string" &&
+        (m.isRegex === undefined || typeof m.isRegex === "boolean") &&
+        (m.isEqual === undefined || typeof m.isEqual === "boolean"),
+    )
+  )
+}
+
 export async function deleteSilence(silenceId: string): Promise<boolean> {
   try {
     // DELETE mutates alertmanager's silence state — retry: false explicitly,
