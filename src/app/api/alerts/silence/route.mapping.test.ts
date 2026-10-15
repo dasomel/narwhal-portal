@@ -20,14 +20,25 @@ vi.mock("@/lib/valkey", () => ({
   }),
 }))
 vi.mock("@/lib/cache-invalidation", () => ({ invalidateFor: vi.fn().mockResolvedValue(undefined) }))
+vi.mock("@/lib/live-stream", () => ({ pushEvent: vi.fn().mockResolvedValue(undefined) }))
 
-const FAKE_HOST = "alertmanager-secret-host.invalid"
+const FAKE_HOST = "alertmanager.internal.example"
+const FAKE_TOKEN = "tok-SECRET-123"
 
 const { requireRole } = await import("@/lib/auth")
-const { DELETE } = await import("./route")
+const { invalidateFor } = await import("@/lib/cache-invalidation")
+const { pushEvent } = await import("@/lib/live-stream")
+const { DELETE, POST } = await import("./route")
 
 const developer: Session = {
   user: { email: "dev@example.com", name: "Dev", role: "developer" },
+  groups: [],
+  teams: [],
+  expires: "2026-12-31T23:59:59Z",
+}
+
+const admin: Session = {
+  user: { email: "admin@example.com", name: "Admin", role: "cluster-admin" },
   groups: [],
   teams: [],
   expires: "2026-12-31T23:59:59Z",
@@ -123,3 +134,136 @@ describe("DELETE /api/alerts/silence ownership lookup mapping (#47, fetch-level)
     expect(mockFetch.mock.calls.some(isDelete)).toBe(true)
   })
 })
+
+describe("POST and DELETE /api/alerts/silence write outcome mapping (#47, fetch-level)", () => {
+  beforeEach(() => {
+    vi.stubEnv("ALERTMANAGER_URL", `http://${FAKE_HOST}:9093`)
+    vi.stubGlobal("fetch", mockFetch)
+    mockFetch.mockReset()
+    vi.mocked(requireRole).mockResolvedValue({ session: admin } as never)
+    vi.mocked(invalidateFor).mockClear()
+    vi.mocked(pushEvent).mockClear()
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  async function callPost() {
+    const res = await POST(
+      new Request("http://localhost/api/alerts/silence", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ alertname: "HighCPU", comment: "maintenance" }),
+      }),
+    )
+    const text = await res.text()
+    return { status: res.status, text, body: JSON.parse(text) as Record<string, unknown> }
+  }
+
+  async function callDelete() {
+    const res = await DELETE(new Request("http://localhost/api/alerts/silence?id=sil-1", { method: "DELETE" }))
+    const text = await res.text()
+    return { status: res.status, text, body: JSON.parse(text) as Record<string, unknown> }
+  }
+
+  const postCases: Array<[string, () => Response | Promise<Response>, number, string | undefined]> = [
+    ["400 bad request", () => json({ error: `no ${FAKE_HOST}` }, 400), 400, "rejected"],
+    ["422 unprocessable", () => json({ error: `no ${FAKE_HOST}` }, 422), 422, "rejected"],
+    ["401 credential rejected", () => json({}, 401), 503, undefined],
+    ["403 forbidden", () => json({}, 403), 403, undefined],
+    ["500 server error", () => json({}, 500), 502, "unknown"],
+    ["timeout", () => Promise.reject(new DOMException(`timed out ${FAKE_HOST}`, "TimeoutError")), 502, "unknown"],
+    ["network error", () => Promise.reject(new TypeError(`fetch failed http://${FAKE_HOST}:9093 ${FAKE_TOKEN}`)), 502, "unknown"],
+    ["malformed 2xx without id", () => json({}, 200), 502, "unknown"],
+    ["malformed 2xx array body", () => json([{ silenceID: "x" }], 200), 502, "unknown"],
+    ["malformed 2xx non-string id", () => json({ silenceID: 7 }, 200), 502, "unknown"],
+    ["malformed 2xx whitespace-only id", () => json({ silenceID: "   " }, 200), 502, "unknown"],
+    ["malformed 2xx padded id", () => json({ silenceID: " abc " }, 200), 502, "unknown"],
+    ["malformed 2xx trailing-newline id", () => json({ silenceID: "abc\n" }, 200), 502, "unknown"],
+    ["malformed 2xx leading-tab id", () => json({ silenceID: "\tabc" }, 200), 502, "unknown"],
+    ["malformed 2xx inner-space id", () => json({ silenceID: "a b" }, 200), 502, "unknown"],
+    ["malformed 2xx U+200B id", () => json({ silenceID: "a​b" }, 200), 502, "unknown"],
+    ["malformed 2xx U+200C id", () => json({ silenceID: "a‌b" }, 200), 502, "unknown"],
+    ["malformed 2xx U+2060 id", () => json({ silenceID: "a⁠b" }, 200), 502, "unknown"],
+    ["malformed 2xx U+0085 id", () => json({ silenceID: "a\u0085b" }, 200), 502, "unknown"],
+    ["malformed 2xx NUL id", () => json({ silenceID: "a\u0000b" }, 200), 502, "unknown"],
+    ["malformed 2xx DEL id", () => json({ silenceID: "a\u007Fb" }, 200), 502, "unknown"],
+    ["malformed 2xx lone-surrogate id", () => json({ silenceID: "a" + String.fromCharCode(0xd800) }, 200), 502, "unknown"],
+    ["malformed 2xx path id", () => json({ silenceID: "a/../b" }, 200), 502, "unknown"],
+    ["malformed 2xx ampersand id", () => json({ silenceID: "a&silenceID=x" }, 200), 502, "unknown"],
+    ["malformed 2xx percent id", () => json({ silenceID: "a%2Fb" }, 200), 502, "unknown"],
+    ["malformed 2xx query id", () => json({ silenceID: "a?x=1" }, 200), 502, "unknown"],
+    ["malformed 2xx 129-char id", () => json({ silenceID: "a".repeat(129) }, 200), 502, "unknown"],
+  ]
+
+  const deleteCases: Array<[string, () => Response | Promise<Response>, number, string | undefined]> = [
+    ["404 silence absent", () => json({ message: `no ${FAKE_HOST}` }, 404), 404, undefined],
+    ["400 bad request", () => json({ error: `no ${FAKE_HOST}` }, 400), 400, "rejected"],
+    ["422 unprocessable", () => json({ error: `no ${FAKE_HOST}` }, 422), 422, "rejected"],
+    ["401 credential rejected", () => json({}, 401), 503, undefined],
+    ["403 forbidden", () => json({}, 403), 403, undefined],
+    ["500 server error", () => json({}, 500), 502, "unknown"],
+    ["timeout", () => Promise.reject(new DOMException(`timed out ${FAKE_HOST}`, "TimeoutError")), 502, "unknown"],
+    ["network error", () => Promise.reject(new TypeError(`fetch failed http://${FAKE_HOST}:9093 ${FAKE_TOKEN}`)), 502, "unknown"],
+  ]
+
+  it.each(postCases)("POST write: %s", async (_label, handler, expected, outcome) => {
+    mockFetch.mockImplementation(async () => handler())
+    const { status, text, body } = await callPost()
+    expect(status).toBe(expected)
+    if (outcome) expect(body.outcome).toBe(outcome)
+    if (outcome === "unknown") {
+      expect(body.error).toContain("may have been applied")
+      expect(body.error).toContain("verify before retrying")
+    }
+    expect(body.success).not.toBe(true)
+    expect(text).not.toContain(FAKE_HOST)
+    expect(text).not.toContain(FAKE_TOKEN)
+    expect(JSON.stringify(vi.mocked(pushEvent).mock.calls)).not.toContain(FAKE_HOST)
+    expect(JSON.stringify(vi.mocked(pushEvent).mock.calls)).not.toContain(FAKE_TOKEN)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(invalidateFor).not.toHaveBeenCalled()
+  })
+
+  it.each(deleteCases)("DELETE write: %s", async (_label, handler, expected, outcome) => {
+    mockFetch.mockImplementation(async () => handler())
+    const { status, text, body } = await callDelete()
+    expect(status).toBe(expected)
+    if (outcome) expect(body.outcome).toBe(outcome)
+    if (outcome === "unknown") {
+      expect(body.error).toContain("may have been applied")
+      expect(body.error).toContain("verify before retrying")
+    }
+    if (_label.includes("404")) expect(body.error).toBe("Silence not found / already expired")
+    expect(body.success).not.toBe(true)
+    expect(text).not.toContain(FAKE_HOST)
+    expect(text).not.toContain(FAKE_TOKEN)
+    expect(JSON.stringify(vi.mocked(pushEvent).mock.calls)).not.toContain(FAKE_HOST)
+    expect(JSON.stringify(vi.mocked(pushEvent).mock.calls)).not.toContain(FAKE_TOKEN)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(invalidateFor).not.toHaveBeenCalled()
+  })
+
+  it("POST write accepted returns existing success shape", async () => {
+    mockFetch.mockImplementation(async () => json({ silenceID: "sil-new-1" }, 200))
+    const { status, body } = await callPost()
+    expect(status).toBe(200)
+    expect(body).toEqual({ success: true, silenceId: "sil-new-1" })
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(invalidateFor).toHaveBeenCalledWith("alert.silence.changed", { silenceId: "sil-new-1" })
+  })
+
+  it("DELETE write accepted returns existing success shape", async () => {
+    mockFetch.mockImplementation(async () => new Response("", { status: 200 }))
+    const { status, body } = await callDelete()
+    expect(status).toBe(200)
+    expect(body).toEqual({ success: true })
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(invalidateFor).toHaveBeenCalledWith("alert.silence.changed", { silenceId: "sil-1" })
+  })
+})
+

@@ -6,7 +6,14 @@ vi.mock("./valkey", () => ({
 }))
 
 import { cacheGet, cacheSet } from "./valkey"
-import { createSilence, getSilence, getSilenceOrThrow, deleteSilence, getAlerts } from "./alertmanager"
+import {
+  createSilence,
+  getSilence,
+  getSilenceOrThrow,
+  deleteSilence,
+  getAlerts,
+  AlertmanagerSilenceOutcomeUnknownError,
+} from "./alertmanager"
 
 // portal#48: these functions now read their response via fetchWithPolicy's
 // readJsonWithPolicy, which reads response.body directly (not response.json())
@@ -46,12 +53,62 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
       )
     })
 
-    it("returns null (non-throwing) on a connection failure", async () => {
+    it("throws outcome-unknown on a connection failure (#47: no longer swallowed to null)", async () => {
       mockFetch.mockRejectedValueOnce(new Error("Connection refused"))
 
-      const id = await createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      await expect(
+        createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
+    })
 
-      expect(id).toBeNull()
+    it.each([["spaces", "   "], ["tab/newline", "\t\n"]])(
+      "throws outcome-unknown on a whitespace-only silenceID (%s)",
+      async (_label, silenceID) => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID }))
+        await expect(
+          createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+        ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
+        expect(mockFetch).toHaveBeenCalledTimes(1)
+      }
+    )
+
+    it.each([["padded", " abc "], ["trailing newline", "abc\n"], ["leading tab", "\tabc"], ["inner space", "a b"]])(
+      "throws outcome-unknown on a silenceID with whitespace instead of trimming it (%s)",
+      async (_label, silenceID) => {
+        mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID }))
+        await expect(
+          createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+        ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
+        expect(mockFetch).toHaveBeenCalledTimes(1)
+      }
+    )
+
+    it.each([
+      ["U+200B", "a​b"], ["U+200C", "a‌b"], ["U+2060", "a⁠b"], ["U+0085", "a\u0085b"],
+      ["NUL", "a\u0000b"], ["DEL", "a\u007Fb"], ["lone surrogate", "a" + String.fromCharCode(0xd800) + "b"],
+      ["path", "a/../b"], ["query-ish &", "a&silenceID=x"], ["percent", "a%2Fb"], ["query-ish ?", "a?x=1"],
+      ["129 chars", "a".repeat(129)],
+    ])("throws outcome-unknown on a non-allowlisted silenceID (%s)", async (_label, silenceID) => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID }))
+      await expect(
+        createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([["sil-new-1"], ["silence-123"], ["a".repeat(128)]])("returns allowlisted silenceID %s verbatim", async (id) => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID: id }))
+      await expect(
+        createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      ).resolves.toBe(id)
+    })
+
+    it("returns a UUID silenceID verbatim", async () => {
+      const id = "3f9c1d2e-7a4b-4c1e-9d3a-0b5e6f7a8b9c"
+      mockFetch.mockResolvedValueOnce(jsonResponse({ silenceID: id }))
+      await expect(
+        createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      ).resolves.toBe(id)
     })
 
     // portal#48: POST is a mutation — retry: false explicitly, so a retryable
@@ -59,9 +116,9 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
     it("does not retry a retryable 502", async () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 502 }))
 
-      const id = await createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
-
-      expect(id).toBeNull()
+      await expect(
+        createSilence([{ name: "alertname", value: "Foo", isRegex: false }], 30, "alice", "maintenance")
+      ).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
   })
@@ -90,10 +147,9 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
   })
 
   describe("deleteSilence", () => {
-    it("returns true on success", async () => {
+    it("resolves on success", async () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }))
-      const ok = await deleteSilence("silence-123")
-      expect(ok).toBe(true)
+      await expect(deleteSilence("silence-123")).resolves.toBeUndefined()
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("/api/v2/silence/silence-123"),
         expect.objectContaining({ method: "DELETE" })
@@ -105,8 +161,7 @@ describe("alertmanager client (portal#48 shared client migration)", () => {
     // idempotent-retry methods.
     it("does not retry a retryable 503", async () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 503 }))
-      const ok = await deleteSilence("silence-123")
-      expect(ok).toBe(false)
+      await expect(deleteSilence("silence-123")).rejects.toBeInstanceOf(AlertmanagerSilenceOutcomeUnknownError)
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
   })

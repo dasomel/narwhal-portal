@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
-import { AlertmanagerLookupError, createSilence, deleteSilence, getSilenceOrThrow } from "@/lib/alertmanager"
+import {
+  AlertmanagerCredentialError,
+  AlertmanagerForbiddenError,
+  AlertmanagerLookupError,
+  AlertmanagerSilenceNotFoundError,
+  AlertmanagerSilenceRejectedError,
+  createSilence,
+  deleteSilence,
+  getSilenceOrThrow,
+} from "@/lib/alertmanager"
 import { beginOperation, completeOperation, failOperation } from "@/lib/operation-context"
 import { claimIdempotencyKey, fulfillIdempotencyKey, getIdempotencyStore } from "@/lib/idempotency"
 import { checkSilenceScope, type SilenceMatcher } from "@/lib/alert-silence-scope"
@@ -22,6 +31,22 @@ const MAX_COMMENT_LEN = 500
 
 function validationError(message: string, field: string) {
   return NextResponse.json({ error: "ValidationError", message, field }, { status: 400 })
+}
+
+// Fixed texts only: neither the response nor the failOperation event (readable by
+// non-admins in scope) may carry err.message, host/URL/token or Alertmanager body text.
+function mapSilenceMutationError(err: unknown, op: "create" | "delete") {
+  const fail = (status: number, error: string, outcome?: "rejected" | "unknown") => ({
+    desc: error,
+    res: NextResponse.json(outcome ? { success: false, outcome, error } : { error }, { status }),
+  })
+  if (err instanceof AlertmanagerSilenceNotFoundError) return fail(404, "Silence not found / already expired")
+  if (err instanceof AlertmanagerForbiddenError) return fail(403, "Alertmanager denied access to the silence")
+  if (err instanceof AlertmanagerCredentialError) return fail(503, "Alertmanager rejected the portal credentials")
+  if (err instanceof AlertmanagerSilenceRejectedError) {
+    return fail(err.status, `Alertmanager rejected the silence ${op} (HTTP ${err.status})`, "rejected")
+  }
+  return fail(502, "Alertmanager silence outcome unknown; change may have been applied, verify before retrying", "unknown")
 }
 
 function validateMatchers(input: unknown): SilenceMatcher[] | null {
@@ -131,10 +156,13 @@ export async function POST(req: Request) {
     description: `Matchers: ${matcherSummary}`,
   })
 
-  const silenceId = await createSilence(matchers, duration, createdBy, comment)
-  if (!silenceId) {
-    await failOperation(ctx, "Alert silence create failed", "Alertmanager did not return a silence ID")
-    return NextResponse.json({ error: "Failed to create silence" }, { status: 500 })
+  let silenceId: string
+  try {
+    silenceId = await createSilence(matchers, duration, createdBy, comment)
+  } catch (err) {
+    const { desc, res } = mapSilenceMutationError(err, "create")
+    await failOperation(ctx, "Alert silence create failed", desc)
+    return res
   }
   await invalidateFor("alert.silence.changed", { silenceId })
 
@@ -201,10 +229,12 @@ export async function DELETE(req: Request) {
     title: `Alert silence delete started: ${silenceId}`,
   })
 
-  const ok = await deleteSilence(silenceId)
-  if (!ok) {
-    await failOperation(ctx, `Alert silence delete failed: ${silenceId}`)
-    return NextResponse.json({ error: "Failed to delete silence" }, { status: 500 })
+  try {
+    await deleteSilence(silenceId)
+  } catch (err) {
+    const { desc, res } = mapSilenceMutationError(err, "delete")
+    await failOperation(ctx, `Alert silence delete failed: ${silenceId}`, desc)
+    return res
   }
 
   await invalidateFor("alert.silence.changed", { silenceId })
