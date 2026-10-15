@@ -156,7 +156,7 @@ jobs:
           # the release can pin GitOps/deploy configs to it directly.
           printf '\n**Container image**: `%s@%s`\n' "${IMAGE}" "${IMAGE_DIGEST}" >> release_notes.md
 
-          printf '\n---\n\n한국어 릴리스 노트: [CHANGELOG_ko.md](https://github.com/%s/blob/%s/CHANGELOG_ko.md)\n' \
+          printf '\n---\n\n한국어 릴리스 노트: [CHANGELOG-ko.md](https://github.com/%s/blob/%s/CHANGELOG-ko.md)\n' \
             "${GITHUB_REPOSITORY}" "${TAG_NAME}" >> release_notes.md
 
           echo "--- release_notes.md ---"
