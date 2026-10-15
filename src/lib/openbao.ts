@@ -1,7 +1,7 @@
 import { readFileSync } from "fs"
 import { cacheGet, cacheSet } from "./valkey"
 import { cacheKeys, cacheTtl } from "./cache-keys"
-import { getDependencyUrl, isProduction } from "./config"
+import { assertHttpsInProduction, getDependencyUrl, isProduction } from "./config"
 import { fetchWithPolicy, readJsonWithPolicy } from "./http-client"
 
 /**
@@ -36,21 +36,6 @@ export interface SecretEntry {
  * surfacing the degraded state explicitly.
  */
 export class SecretMetadataError extends Error {}
-
-let httpsChecked = false
-function assertHttpsInProduction(addr: string): void {
-  if (httpsChecked) return
-  httpsChecked = true
-  if (!addr.startsWith("http://")) return
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      `[OpenBao] OPENBAO_ADDR must use HTTPS in production. Got: ${addr}`
-    )
-  }
-  console.warn(
-    `[OpenBao] OPENBAO_ADDR is using HTTP (${addr}) — HTTPS required in production`
-  )
-}
 
 // --- Kubernetes auth token provider (narwhal#156 / portal#54) ---
 //
@@ -102,7 +87,15 @@ function resolvedAuthMethod(): "kubernetes" | "token" {
 // empty token in dev so local flows without OpenBao configured still boot.
 function tokenFromEnv(): string {
   const envToken = process.env.OPENBAO_TOKEN
-  if (envToken) return envToken
+  if (envToken) {
+    // D7: Production legacy mode must be explicit, matching the cluster's
+    // ENABLE_LEGACY_OPENBAO_TOKEN contract. Cost: reject accidental fallback;
+    // operators can choose token mode intentionally until identity migration.
+    if (isProduction() && process.env.OPENBAO_AUTH_METHOD !== "token") {
+      throw new Error("[OpenBao] Static credentials require explicit OPENBAO_AUTH_METHOD=token in production; prefer Kubernetes auth")
+    }
+    return envToken
+  }
   if (isProduction()) {
     throw new Error(
       "[OpenBao] Missing required production configuration: no Kubernetes auth JWT found and OPENBAO_TOKEN is not set"
@@ -130,7 +123,7 @@ async function loginWithKubernetes(): Promise<CachedToken> {
   }
 
   const addr = openbaoAddr()
-  assertHttpsInProduction(addr)
+  assertHttpsInProduction("OPENBAO_ADDR", addr)
   const mount = k8sAuthMount()
 
   const res = await fetchWithPolicy(`${addr}/v1/auth/${mount}/login`, {
@@ -163,6 +156,10 @@ async function loginWithKubernetes(): Promise<CachedToken> {
  * `forceRefresh` to bypass the cache and re-login (used after a 403).
  */
 export async function getOpenBaoToken(forceRefresh = false): Promise<string> {
+  const configured = process.env.OPENBAO_AUTH_METHOD
+  if (configured && configured !== "kubernetes" && configured !== "token" && isProduction()) {
+    throw new Error("[OpenBao] OPENBAO_AUTH_METHOD must be kubernetes or token")
+  }
   // A valid cached Kubernetes-auth token wins before re-resolving the auth
   // method: with OPENBAO_AUTH_METHOD unset, resolution re-reads the JWT file,
   // and a transient unmount during volume rotation must not flip us to
@@ -186,7 +183,7 @@ export async function getOpenBaoToken(forceRefresh = false): Promise<string> {
 
 export async function baoFetch(path: string, init?: RequestInit): Promise<Response> {
   const addr = openbaoAddr()
-  assertHttpsInProduction(addr)
+  assertHttpsInProduction("OPENBAO_ADDR", addr)
 
   const token = await getOpenBaoToken()
   const res = await fetchWithPolicy(`${addr}${path}`, {

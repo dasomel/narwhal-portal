@@ -166,7 +166,10 @@ async function ingestK8sEvent(ev: K8sEvent): Promise<void> {
     )
     if (claimed) return
   }
-  void pushEvent(ingest).catch(() => {})
+  // D6: The live-store contract records failed persistence as degraded and
+  // resolves after memory fallback. Await that acceptance to bound producers
+  // to one pending submission; durable atomic claim/write remains #13/#40.
+  await pushEvent(ingest)
 }
 
 /** Resync a complete bounded paginated snapshot before advancing the watch.

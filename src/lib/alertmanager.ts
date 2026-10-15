@@ -85,20 +85,29 @@ export async function deleteSilence(silenceId: string): Promise<boolean> {
   }
 }
 
-export async function getAlerts(): Promise<Alert[]> {
+/**
+ * Throws on provider failure instead of returning []. Aggregators that turn an
+ * empty alert list into "no incidents" (platform-status) must use this so an
+ * unreachable Alertmanager is not reported as a healthy platform (#53).
+ */
+export async function getAlertsOrThrow(): Promise<Alert[]> {
   const cached = await cacheGet<Alert[]>(cacheKeys.alertmanagerActive())
   if (cached) return cached
 
+  const res = await fetchWithPolicy(
+    `${alertmanagerUrl()}/api/v2/alerts?active=true&silenced=false`,
+    {},
+    { timeoutMs: 5000 }
+  )
+  if (!res.ok) throw new Error(`Alertmanager failed: ${res.status}`)
+  const alerts: Alert[] = await readJsonWithPolicy<Alert[]>(res)
+  await cacheSet(cacheKeys.alertmanagerActive(), alerts, cacheTtl("alertmanagerActive"))
+  return alerts
+}
+
+export async function getAlerts(): Promise<Alert[]> {
   try {
-    const res = await fetchWithPolicy(
-      `${alertmanagerUrl()}/api/v2/alerts?active=true&silenced=false`,
-      {},
-      { timeoutMs: 5000 }
-    )
-    if (!res.ok) throw new Error(`Alertmanager failed: ${res.status}`)
-    const alerts: Alert[] = await readJsonWithPolicy<Alert[]>(res)
-    await cacheSet(cacheKeys.alertmanagerActive(), alerts, cacheTtl("alertmanagerActive"))
-    return alerts
+    return await getAlertsOrThrow()
   } catch (err) {
     console.warn("[alertmanager] Connection failed, returning empty:", (err as Error).message)
     return []
