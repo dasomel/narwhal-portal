@@ -296,6 +296,34 @@ export interface DependencyHealthSnapshot {
 
 const SNAPSHOT_CACHE_TTL_SECONDS = 10
 
+const KNOWN_DEPENDENCIES: ReadonlySet<string> = new Set<DependencyName>([
+  "prometheus", "kubernetes", "argocd", "gitea", "keycloak", "valkey", "openbao", "alertmanager", "loki",
+])
+const KNOWN_STATES: ReadonlySet<string> = new Set<DependencyState>([
+  "ok", "partial", "stale", "unavailable", "empty", "unauthorized",
+])
+
+function isValidStatus(entry: unknown): entry is DependencyStatus {
+  if (typeof entry !== "object" || entry === null) return false
+  const s = entry as Record<string, unknown>
+  return (
+    typeof s.dependency === "string" && KNOWN_DEPENDENCIES.has(s.dependency) &&
+    typeof s.state === "string" && KNOWN_STATES.has(s.state) &&
+    typeof s.observedAt === "string"
+  )
+}
+
+// A snapshot read back from the cache is only trusted when it is a non-empty list of well-formed
+// statuses that still covers every core dependency (a real run always probes all of them).
+function isValidSnapshot(value: unknown): value is DependencyHealthSnapshot {
+  if (typeof value !== "object" || value === null) return false
+  const { observedAt, dependencies } = value as Record<string, unknown>
+  if (typeof observedAt !== "string" || !Array.isArray(dependencies) || dependencies.length === 0) return false
+  if (!dependencies.every(isValidStatus)) return false
+  const present = new Set(dependencies.map((d) => d.dependency))
+  return [...CORE_DEPENDENCIES].every((name) => present.has(name))
+}
+
 // In-process request coalescing: while a snapshot run is in flight, every concurrent caller
 // awaits the SAME promise instead of triggering its own fan-out of 6 probes. Cleared as soon as
 // the run settles (success or failure) so the next call after that always re-probes rather than
@@ -361,8 +389,12 @@ async function runDependencyProbes(timeoutMs: number): Promise<DependencyHealthS
 export async function getDependencyHealthSnapshot(
   opts: { timeoutMs?: number } = {}
 ): Promise<DependencyHealthSnapshot> {
-  const cached = await cacheGet<DependencyHealthSnapshot>(cacheKeys.healthDependencies())
-  if (cached) return cached
+  // D3: the cache is untrusted input — a truncated/tampered entry (`dependencies: []`, a
+  // non-array, unknown state strings, a missing core dependency) must read as a miss and be
+  // re-probed, never served as-is. Cost: a malformed entry costs one extra probe run until the
+  // next valid write overwrites it; escape hatch: none needed, the miss path is the normal path.
+  const cached = await cacheGet<unknown>(cacheKeys.healthDependencies())
+  if (isValidSnapshot(cached)) return cached
 
   if (inFlightSnapshot) return inFlightSnapshot
 
@@ -373,7 +405,8 @@ export async function getDependencyHealthSnapshot(
   inFlightSnapshot = run
 
   const snapshot = await run
-  if (snapshot.dependencies.every((d) => d.state === "ok")) {
+  // `[].every()` is vacuously true — an empty list must never be written as a healthy snapshot.
+  if (snapshot.dependencies.length > 0 && snapshot.dependencies.every((d) => d.state === "ok")) {
     await cacheSet(cacheKeys.healthDependencies(), snapshot, SNAPSHOT_CACHE_TTL_SECONDS)
   }
   return snapshot
