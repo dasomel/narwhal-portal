@@ -395,3 +395,49 @@ describe("argocd credential handling", () => {
     await expect(rollbackArgoApp("app-1", 1)).resolves.toBe(true)
   })
 })
+
+// getAllowedProjects against the REAL role-filter (config/role-filter.json maps
+// platform-team -> argocdProjects ["platform"]); only the module-level
+// ARGOCD_DEVELOPER_PROJECTS const needs a fresh import to be set per test file.
+describe("getAllowedProjects (real team mappings)", () => {
+  async function load() {
+    vi.resetModules()
+    vi.stubEnv("ARGOCD_DEVELOPER_PROJECTS", "base-a, base-b")
+    return (await import("./argocd")).getAllowedProjects
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("developer with a mapped group AND a mapped team gets DEVELOPER_PROJECTS plus the team's projects", async () => {
+    const getAllowedProjects = await load()
+    const allowed = getAllowedProjects({ role: "developer", groups: ["developer"], teams: ["platform-team"] } as ArgoActor)
+    expect(allowed).toEqual(new Set(["base-a", "base-b", "platform"]))
+  })
+
+  it("developer with ONLY teams (no groups) still gets the team's projects", async () => {
+    const getAllowedProjects = await load()
+    const withUndefined = getAllowedProjects({ role: "developer", teams: ["platform-team"] } as ArgoActor)
+    const withEmpty = getAllowedProjects({ role: "developer", groups: [], teams: ["platform-team"] } as ArgoActor)
+    expect(withUndefined).toEqual(new Set(["base-a", "base-b", "platform"]))
+    expect(withEmpty).toEqual(new Set(["base-a", "base-b", "platform"]))
+  })
+
+  it("developer with an unmapped team gets exactly DEVELOPER_PROJECTS", async () => {
+    const getAllowedProjects = await load()
+    const allowed = getAllowedProjects({ role: "developer", groups: ["developer"], teams: ["no-such-team"] } as ArgoActor)
+    expect(allowed).toEqual(new Set(["base-a", "base-b"]))
+  })
+
+  it("non-developer role gets an empty set even with a mapped team", async () => {
+    const getAllowedProjects = await load()
+    const allowed = getAllowedProjects({ role: "viewer", groups: [], teams: ["platform-team"] } as ArgoActor)
+    expect(allowed).toEqual(new Set())
+  })
+
+  it("cluster-admin is unrestricted (null)", async () => {
+    const getAllowedProjects = await load()
+    expect(getAllowedProjects({ role: "cluster-admin", groups: [], teams: [] } as ArgoActor)).toBeNull()
+  })
+})
