@@ -318,7 +318,7 @@ export class ArgoRollbackOutcomeUnknownError extends Error {
 }
 
 /**
- * Resolves true only when ArgoCD accepted the rollback with a 2xx Application body (accepted,
+ * Resolves true only when ArgoCD accepted the rollback with a 2xx body that is the requested Application (accepted,
  * not yet verified converged). Everything else throws a classified error: 401 ->
  * ArgoCDCredentialError, 403 -> ArgoForbiddenError, other 4xx -> ArgoRollbackRejectedError,
  * unknown outcome -> ArgoRollbackOutcomeUnknownError. Never returns false, so a provider
@@ -353,7 +353,12 @@ export async function rollbackArgoApp(name: string, id: number): Promise<boolean
   if (!res.ok) throw new ArgoRollbackOutcomeUnknownError()
   try {
     const app = await readJsonWithPolicy<ArgoApp>(res)
-    if (typeof app?.metadata?.name !== "string" || !app.metadata.name) throw new Error("malformed")
+    // Must be THIS app's object with a spec; status is not required (a never-synced app has none).
+    if (
+      typeof app !== "object" || app === null || Array.isArray(app) ||
+      app.metadata?.name !== name ||
+      typeof app.spec !== "object" || app.spec === null
+    ) throw new Error("malformed")
   } catch {
     throw new ArgoRollbackOutcomeUnknownError()
   }

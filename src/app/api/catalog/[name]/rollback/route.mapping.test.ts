@@ -93,6 +93,11 @@ describe("POST /api/catalog/[name]/rollback outcome mapping (#47, fetch-level)",
     ["network error", () => Promise.reject(new TypeError(`fetch failed ${FAKE_HOST}`)), 502, "unknown"],
     ["malformed 200 body", () => new Response("<html>not json</html>", { status: 200 }), 502, "unknown"],
     ["200 body that is not an Application", () => json({ ok: true }, 200), 502, "unknown"],
+    ["200 Application without spec", () => json({ metadata: { name: "checkout-api" } }, 200), 502, "unknown"],
+    ["200 a different Application", () => json({ ...app, metadata: { name: "other-app" } }, 200), 502, "unknown"],
+    ["200 array body", () => json([], 200), 502, "unknown"],
+    ["200 null body", () => json(null, 200), 502, "unknown"],
+    ["200 empty body", () => new Response("", { status: 200 }), 502, "unknown"],
   ]
 
   it.each(cases)("%s -> %s", async (_label, rollback, expected, outcome) => {
@@ -121,5 +126,16 @@ describe("POST /api/catalog/[name]/rollback outcome mapping (#47, fetch-level)",
     expect(status).toBe(200)
     expect(body.success).toBe(true)
     expect(posts()).toHaveLength(1)
+  })
+
+  it("a precondition network error does not leak the ArgoCD host or token", async () => {
+    mockFetch.mockImplementation(async () => {
+      throw new TypeError(`fetch failed http://${FAKE_HOST}:8080 ${FAKE_TOKEN}`)
+    })
+    const { status, text } = await call()
+    expect(status).toBeGreaterThanOrEqual(500)
+    expect(text).not.toContain(FAKE_HOST)
+    expect(text).not.toContain(FAKE_TOKEN)
+    expect(posts()).toHaveLength(0)
   })
 })

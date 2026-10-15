@@ -147,7 +147,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ name: s
       console.error("[api/catalog/rollback]", message)
       return NextResponse.json({ error: message }, { status: 503 })
     }
-    const message = err instanceof Error ? err.message : "Rollback failed"
-    return NextResponse.json({ error: message }, { status: 500 })
+    // Untyped errors (e.g. the precondition lookup's network error) carry the ArgoCD host/URL in
+    // err.message: log server-side only, return a fixed message.
+    console.error("[api/catalog/rollback]", err instanceof Error ? err.name : "unknown error")
+    return NextResponse.json({ error: "ArgoCD request failed" }, { status: 500 })
   }
 }

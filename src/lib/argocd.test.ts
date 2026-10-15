@@ -31,6 +31,7 @@ import {
   getArgoToken,
   syncArgoApp,
   rollbackArgoApp,
+  ArgoRollbackOutcomeUnknownError,
   type ArgoActor,
   type ArgoApp,
 } from "./argocd"
@@ -370,5 +371,24 @@ describe("argocd credential handling", () => {
     const err = await rollbackArgoApp("app-1", 1).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(ArgoForbiddenError)
     expect(err).not.toBeInstanceOf(ArgoCDCredentialError)
+  })
+
+  it.each([
+    ["spec missing", { metadata: { name: "app-1" } }],
+    ["a different Application", { metadata: { name: "other" }, spec: {} }],
+    ["spec not an object", { metadata: { name: "app-1" }, spec: "x" }],
+    ["array body", []],
+    ["null body", null],
+    ["empty object", {}],
+  ])("treats a 2xx rollback body with %s as outcome unknown", async (_l, body) => {
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 200 }))
+    await expect(rollbackArgoApp("app-1", 1)).rejects.toBeInstanceOf(ArgoRollbackOutcomeUnknownError)
+  })
+
+  it("accepts a 2xx rollback body for the same app without status", async () => {
+    process.env.ARGOCD_TOKEN = "some-token"
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ metadata: { name: "app-1" }, spec: {} }), { status: 200 }))
+    await expect(rollbackArgoApp("app-1", 1)).resolves.toBe(true)
   })
 })

@@ -3,6 +3,7 @@ import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { useSession } from "next-auth/react"
 import { useT } from "@/lib/i18n-client"
+import { RollbackOutcomeError, rollbackErrorMessage } from "./rollback-outcome"
 import { Badge } from "@/components/ui/badge"
 import {
   AlertDialog,
@@ -54,12 +55,17 @@ export function ServiceActions({ name, history = [] }: ServiceActionsProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ historyId }),
-      }).then((r) => {
-        if (!r.ok) throw new Error(r.statusText)
+      }).then(async (r) => {
+        if (!r.ok) {
+          const msg = await rollbackErrorMessage(r)
+          throw msg ? new RollbackOutcomeError(msg) : new Error(r.statusText)
+        }
         return r.json()
       }),
     onSuccess: () => setFeedback({ ok: true, msg: t("svcAction.rollbackOk") }),
-    onError: () => setFeedback({ ok: false, msg: t("svcAction.error") }),
+    // #47: only server-classified unknown/rejected text is shown; everything else stays generic.
+    onError: (err) =>
+      setFeedback({ ok: false, msg: err instanceof RollbackOutcomeError ? err.message : t("svcAction.error") }),
   })
 
   function handleSync() {
